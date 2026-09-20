@@ -1,6 +1,9 @@
 [repository]
 name = "hyprflip"
 authors = ["Hyprflip contributors"]
+commit_pins = [
+    ["efb50993780079460b0cbed1363e2166a2de1d9f", "ca264690e3c247a792bd8f2265dc078bef8aca76"],
+]
 
 [hyprflip]
 description = "Two windows as the front and back of a rotating card"
