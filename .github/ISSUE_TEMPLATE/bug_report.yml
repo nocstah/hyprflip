@@ -1,0 +1,23 @@
+name: Bug report
+description: Report a problem with pairing, motion, installation or compatibility.
+body:
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: What happened?
+      description: Include what you expected and the steps needed to reproduce it.
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Hyprland version/commit, Hyprflip version, compiler, layout, display scale/rotation and other loaded plugins.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Relevant logs or backtrace
+      description: Remove private window content and credentials. Do not upload raw core dumps.
+      render: text

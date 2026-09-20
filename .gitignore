@@ -1,0 +1,16 @@
+/build/
+/test-results/
+__pycache__/
+*.py[cod]
+*.so
+*.o
+*.core
+core
+core.*
+.env
+.env.*
+/.agents/
+/.codex/
+/CRASH-*.md
+/PLAN.md
+/PRODUCT.md

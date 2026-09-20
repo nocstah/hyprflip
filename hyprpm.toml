@@ -1,0 +1,9 @@
+[repository]
+name = "hyprflip"
+authors = ["Hyprflip contributors"]
+
+[hyprflip]
+description = "Two windows as the front and back of a rotating card"
+authors = ["Hyprflip contributors"]
+output = "build/hyprflip.so"
+build = ["cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF", "cmake --build build -j2"]

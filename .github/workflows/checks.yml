@@ -1,0 +1,27 @@
+name: Core and packaging checks
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Test the independent animation core
+        run: |
+          g++ -std=c++20 -Wall -Wextra -Werror -Isrc tests/core_test.cpp -o /tmp/hyprflip-core-test
+          /tmp/hyprflip-core-test
+      - name: Test installer recovery
+        run: python3 -m unittest discover -s tests -p '*_test.py'
+      - name: Check Python syntax and plugin manifest
+        run: |
+          python3 -m compileall -q scripts tests
+          python3 -c 'import pathlib, tomllib; tomllib.loads(pathlib.Path("hyprpm.toml").read_text())'
