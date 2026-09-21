@@ -62,10 +62,40 @@ def cards():
     return sorted((tuple(tuple(face) for face in c['faces']),c['current'],bool(c.get('unfolded'))) for c in status()['containers'])
 
 
-def update(script=project/'scripts/update-containers.py', dry=False, fail=False):
+def update(script=project/'scripts/update-containers.py', dry=False, fail=False, drift=False):
     command=['python',str(script),'--library-root',str(installed),'--state-dir',str(state_dir)]
     if dry: command.append('--dry-run')
-    r=subprocess.run(command,env=env,capture_output=True,text=True,timeout=50)
+    update_env = env
+    if drift:
+        # Focus another card member immediately before a mutation reaches the
+        # compositor. This deterministically exercises the gap between separate
+        # focus/poll and mark/attach requests, without racing the test runner.
+        wrapper = root / 'focus-drift' / 'hyprctl'
+        wrapper.parent.mkdir(exist_ok=True)
+        wrapper.write_text('''#!/usr/bin/env python3
+import json, os, subprocess, sys
+from pathlib import Path
+real = os.environ['HYPRFLIP_REAL_CTL']
+args = sys.argv[1:]
+action = (args[:1] == ['hyprflip'] and len(args) > 1 and
+          args[1].split()[0] in ('mark', 'pair', 'attach', 'unfold'))
+action |= args[:1] == ['eval'] and any('hl.plugin.hyprflip.' + name + '(' in ' '.join(args[1:])
+                                      for name in ('mark', 'pair', 'attach', 'unfold'))
+if action:
+    state = json.loads(subprocess.check_output([real, 'hyprflip', 'status'], text=True))
+    if state['containers']:
+        target = state['containers'][0]['current']
+        subprocess.run([real, 'dispatch', 'hl.dsp.focus({window="address:' + target + '"})'],
+                       check=True, capture_output=True)
+        with Path(os.environ['HYPRFLIP_DRIFT_LOG']).open('a') as log:
+            log.write(json.dumps({'target': target, 'action': args}) + '\\n')
+os.execv(real, [real, *args])
+''')
+        wrapper.chmod(0o755)
+        update_env = env | {'PATH': str(wrapper.parent) + ':' + env['PATH'],
+                            'HYPRFLIP_REAL_CTL': shutil.which('hyprctl'),
+                            'HYPRFLIP_DRIFT_LOG': str(root / 'focus-drift.jsonl')}
+    r=subprocess.run(command,env=update_env,capture_output=True,text=True,timeout=50)
     assert (r.returncode != 0) == fail, (r.returncode,r.stdout,r.stderr)
     return r.stdout + r.stderr
 
@@ -125,7 +155,7 @@ if hl.plugin.hyprflip then hl.config({plugin={hyprflip={duration_ms=0,notificati
     focus(c)
     passed('a fullscreen covering window blocks the update before replacing libraries or changing focus')
 
-    update()
+    update(drift=True)
     assert cards()==before_cards
     assert [(x['front'],x['back'],x['current']) for x in status()['pairs']]==[(x['front'],x['back'],x['current']) for x in before_native]
     assert all(clients()[w]['workspace']==ws for w,ws in before_ws.items())
@@ -136,6 +166,8 @@ if hl.plugin.hyprflip then hl.config({plugin={hyprflip={duration_ms=0,notificati
     assert abs(after_ratio-before_ratio)<.025,(before_ratio,after_ratio)
     action('unfold'); assert next(x for x in status()['containers'] if a in x['faces'][0])['unfolded']
     passed('old provider upgrades with multiple cards, split proportion, native pair, app workspaces and focus preserved')
+    assert (root / 'focus-drift.jsonl').read_text().splitlines()
+    passed('focus changes between IPC commands cannot redirect card restoration to another app')
 
     # The updated provider must also survive future updates with six-pane cards.
     action('unfold')

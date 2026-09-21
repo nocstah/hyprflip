@@ -5,9 +5,12 @@
 Checkpoint `7f2de93` contains the preceding multi-app container, transition and
 Chill work. The next change adds named saved arrangements and hold-to-peek.
 
-- 52 Python tests cover the existing setup/editor/installer plus saved-card
+- 54 Python tests cover the existing setup/editor/installer plus saved-card
   cancellation, duplicate names, concurrent updates, corrupt files, atomic
   write failure, stale windows, changed focus, ambiguous matches and review.
+  They also reject invalid targeted actions before mutation and verify that
+  losing compositor IPC restores the previous library files without hiding
+  the original error behind focus-cleanup errors.
 - `tests/saved_restart.py` starts two separate disposable compositor processes.
   It saves a six-app card with different split axes and unequal proportions,
   restarts the compositor, opens fresh app processes, and restores the card
@@ -15,6 +18,11 @@ Chill work. The next change adds named saved arrangements and hold-to-peek.
   match. Further checks restore from Chill, inject a failure after partial
   grouping, recover floating geometry/workspaces/tags, and delete a saved
   definition without dissolving its running card.
+- Six container-upgrade checks preserve multiple cards, six-pane proportions,
+  native pairs, workspaces and focus, reject fullscreen interference, and
+  recover from a failed plugin load. Forced focus changes between IPC requests
+  now exercise both the updater and saved-card helper. Both select, verify and
+  act in one Lua callback, with mark and pair/attach kept together.
 - `tests/peek.py` passes 19 checks: every transition in both directions, early
   reversal, an actual synthetic key press/release with modifiers released first,
   typing, focus, unfold, workspace changes, config reload, a real GTK popup,
@@ -38,9 +46,11 @@ Use a fresh results directory for the restart test. It creates and stops its
 own nested compositors and never restarts the real desktop. Omitting `--engine`
 checks ordinary floating apps instead of Chill-tagged apps.
 
-Evidence from this run is in `/tmp/hf-saveproof/`,
+Evidence from this run is in `/tmp/hf-saverace/`,
 `/tmp/hf-peek/peek-results.json`, `/tmp/hf-peek/native/integration.json` and
-`/tmp/hyprflip-saved-unit.log`. The tested core SHA256 is
+`/tmp/hyprflip-focus-unit.log`. Upgrade evidence is in
+`/tmp/hyprflip-updater-fix-test.log` and `test-results/container-upgrade.json`.
+The tested core SHA256 is
 `7e0a6116f66acff17ca7236b548672e888aba685884022e99d5d31513b967caa`;
 the unchanged ABI 3 provider is
 `2fa46bc9dc6da8ca19aa986a540ea5c3b54d56e4bc11804df8b88fdeedc5cdb6`.
@@ -59,10 +69,21 @@ Virtual hotplug and output power checks are not evidence of a physical monitor
 reconnection or real system suspend/resume; those remain hardware checks before
 a wider release.
 
-Native menu verification and installation on the main desktop require it to be
-unlocked. The initial live UI attempts stopped before opening a menu because
-Omarchy's lock service reported a secure, active session lock. Temporary apps
-were closed and the original cards, workspaces and focus were restored.
+After the user unlocked the desktop, four native menu checks passed: saving a
+named three-app card, cancelling the restore review, restoring it, and deleting
+the saved definition without dissolving the running card. Screenshots of the
+edit menu, name entry and restore review were inspected. Temporary fixture apps
+were closed and the user's cards were preserved. Evidence is in
+`/tmp/hf-saved-ui-confirm/`; subsequent focus-guard changes leave the UI intact
+and passed the restart/workflow suite again.
+
+The live installation did **not** complete. An initial attempt rolled back after
+marking an already grouped window; the guarded-focus fix above addresses that
+race. The retry crashed while unloading the old core, before copying either new
+library. Analysis found a stale Hyprglass decoration deletion callback into a
+previously unloaded library. See [the crash analysis](docs/UNLOAD_CRASH_2026-09-21.md).
+The installed Hyprflip libraries and helper remain the previous versions. Do
+not treat the nested checks as evidence of a completed desktop installation.
 
 ## Tested environment
 

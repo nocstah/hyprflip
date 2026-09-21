@@ -107,6 +107,30 @@ class Hyprctl:
             time.sleep(.04)
         raise SetupError('The window could not receive focus. Close any fullscreen overlay and try again.')
 
+    def focused(self, *operations):
+        # Keep focus validation and the action together; a pointer/app focus
+        # event can otherwise arrive between separate hyprctl requests.
+        chunks = []
+        for address, action in operations:
+            if not re.fullmatch(r'0x[0-9a-fA-F]+', address):
+                raise SetupError('The selected window is no longer available.')
+            name, _, argument = action.partition(' ')
+            if not (name in ('mark', 'pair', 'release', 'unpair') and not argument or
+                    name == 'attach' and argument in ('horizontal', 'vertical') or
+                    name == 'preview' and argument in TRANSITIONS):
+                raise SetupError('The card action is unavailable.')
+            parameter = json.dumps(argument) if argument else ''
+            chunks.append(f'''do
+                local target = hl.get_window("address:{address}")
+                assert(target, "The selected app closed. Open the picker again.")
+                hl.dispatch(hl.dsp.focus({{window="address:{address}"}}))
+                local current = hl.get_active_window()
+                assert(current and current.address == target.address,
+                       "The selected app could not receive focus. Close any overlay and try again.")
+                assert(hl.plugin.hyprflip.{name}({parameter}))
+            end''')
+        self.call('eval', '\n'.join(chunks))
+
     def move(self, address, workspace):
         if not re.fullmatch(r'0x[0-9a-fA-F]+', address) or not 0 < workspace < 2**31:
             raise SetupError('The selected app or workspace is no longer available.')
@@ -455,8 +479,7 @@ class Setup:
         try:
             self.tile_selected(selected, tiled)
             self.import_windows(selected, workspace, moved)
-            self.ipc.focus(front); self.ipc.action('mark')
-            self.ipc.focus(back); self.ipc.action('pair')
+            self.ipc.focused((front, 'mark'), (back, 'pair'))
             created = next((c for c in self.ipc.status()['containers'] if c['faces'] == [[front], [back]]), None)
             if not created:
                 raise SetupError('The card could not be created. Open setup again.')
@@ -464,8 +487,7 @@ class Setup:
                 for face in arrangement['faces']:
                     first = face['windows'][0]
                     for companion in face['windows'][1:]:
-                        self.ipc.focus(companion); self.ipc.action('mark')
-                        self.ipc.focus(first); self.ipc.action('attach ' + face['axis'])
+                        self.ipc.focused((companion, 'mark'), (first, 'attach ' + face['axis']))
                     self.restore_ratios(face)
                     self.ipc.focus(face['windows'][face['focus']])
                 face = arrangement['faces'][arrangement['active']]
@@ -478,8 +500,7 @@ class Setup:
                 # explicit H/V shortcuts remain available for other arrangements.
                 axis = 'horizontal' if created['box'][2] >= created['box'][3] else 'vertical'
                 for companion in extra:
-                    self.ipc.focus(companion); self.ipc.action('mark')
-                    self.ipc.focus(back); self.ipc.action('attach ' + axis)
+                    self.ipc.focused((companion, 'mark'), (back, 'attach ' + axis))
             if not arrangement: self.ipc.focus(front)
         except Exception:
             # Remove only the card created here, never a pre-existing or edited
@@ -491,7 +512,7 @@ class Setup:
                          (not created and c['id'] not in previous_ids and
                           c['faces'] == [[front], [back]])), None)
             if card and all(a in selected for face in card['faces'] for a in face):
-                self.ipc.focus(card['current']); self.ipc.action('unpair')
+                self.ipc.focused((card['current'], 'unpair'))
             if current.get('marked') in selected:
                 self.ipc.action('cancel')
             try:
@@ -515,7 +536,7 @@ class Setup:
                 if abs(delta) > 1:
                     self.ipc.focus(pane)
                     x, y = (0, delta) if axis else (delta, 0)
-                    self.ipc.call('dispatch', f'hl.dsp.window.resize({{x={x},y={y},relative=true}})')
+                    self.ipc.call('dispatch', f'hl.dsp.window.resize({{window="address:{pane}",x={x},y={y},relative=true}})')
         time.sleep(.1)
         windows = self.ipc.windows()
         total = sum(windows[a]['size'][axis] for a in panes)
@@ -557,8 +578,7 @@ class Edit(Setup):
                 if answer != 'preview' or mode == 'instant' or plan.card['unfolded']:
                     raise SetupError('Choose a transition action from the menu.')
                 self.validate(plan)
-                self.ipc.focus(plan.anchor)
-                self.ipc.action('preview ' + mode)
+                self.ipc.focused((plan.anchor, 'preview ' + mode))
                 deadline = time.monotonic() + 8
                 while self.ipc.status().get('animating'):
                     if hasattr(self.menu, 'request'): self.menu.request.check()
@@ -662,12 +682,9 @@ class Edit(Setup):
         if plan.action == 'transition':
             self.ipc.save_transition(plan.transition)
             return
-        self.ipc.focus(plan.anchor)
         if plan.action != 'add':
             try:
-                if plan.removal:
-                    self.ipc.focus(plan.removal)
-                self.ipc.action(plan.action)
+                self.ipc.focused((plan.removal or plan.anchor, plan.action))
             finally:
                 if plan.removal and plan.removal != plan.anchor:
                     self.restore_focus(windows[plan.anchor])
@@ -681,10 +698,10 @@ class Edit(Setup):
         try:
             self.tile_selected({plan.candidate: plan.windows[plan.candidate]}, tiled)
             self.import_windows({plan.candidate: plan.windows[plan.candidate]}, workspace, moved)
-            self.ipc.focus(plan.candidate); self.ipc.action('mark')
             self.ipc.focus(plan.anchor)
             width, height = self.ipc.windows()[plan.anchor]['size']
-            self.ipc.action('attach ' + ('horizontal' if width >= height else 'vertical'))
+            self.ipc.focused((plan.candidate, 'mark'),
+                             (plan.anchor, 'attach ' + ('horizontal' if width >= height else 'vertical')))
         except Exception:
             recovery_error = None
             try:
@@ -703,7 +720,7 @@ class Edit(Setup):
                     try:
                         if (marked in self.eligible(current, self.ipc.status(), workspace) and marked in windows
                                 and all(current[marked][k] == windows[marked][k] for k in ('pid', 'class', 'workspace'))):
-                            self.ipc.focus(marked); self.ipc.action('mark')
+                            self.ipc.focused((marked, 'mark'))
                     finally:
                         if (plan.anchor in current and all(current[plan.anchor][k] == windows[plan.anchor][k]
                                                            for k in ('pid', 'class', 'workspace'))):

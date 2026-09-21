@@ -41,6 +41,26 @@ def focus(address):
     wait(lambda: json.loads(ctl('-j', 'activewindow')).get('address') == address)
 
 
+def focused(*operations):
+    # A separate focus command (even followed by a successful focus poll) leaves
+    # a gap for pointer events or application activation before mark/attach.
+    # Select, verify and act within one compositor event-loop callback. Keep a
+    # mark and the operation consuming it in the same callback as well.
+    chunks = []
+    for address, operation in operations:
+        selector = json.dumps('address:' + address)
+        chunks.append(f'''do
+            local target = hl.get_window({selector})
+            assert(target, "A card member closed during restoration")
+            hl.dispatch(hl.dsp.focus({{window={selector}}}))
+            local current = hl.get_active_window()
+            assert(current and current.address == target.address,
+                   "Could not focus the expected card member")
+            {operation}
+        end''')
+    ctl('eval', '\n'.join(chunks))
+
+
 def wait(predicate):
     deadline = time.monotonic() + 8
     while time.monotonic() < deadline:
@@ -94,7 +114,8 @@ def restore(snapshot, saved):
         if any(w not in now or any(now[w][key] != saved[w][key] for key in ('pid', 'class', 'workspace', 'floating')) for w in members):
             raise RuntimeError('A card member closed or changed during the update; recovery metadata was retained')
         front, back = card['faces'][0][0], card['faces'][1][0]
-        focus(front); ctl('hyprflip', 'mark'); focus(back); ctl('hyprflip', 'pair')
+        focused((front, 'assert(hl.plugin.hyprflip.mark())'),
+                (back, 'assert(hl.plugin.hyprflip.pair())'))
         for face in card['faces']:
             if len(face) >= 2:
                 first, second = face[:2]
@@ -102,8 +123,9 @@ def restore(snapshot, saved):
                 dy = abs(saved[first]['at'][1] - saved[second]['at'][1])
                 axis = 0 if dx > dy else 1
                 for companion in face[1:]:
-                    focus(companion); ctl('hyprflip', 'mark'); focus(first)
-                    ctl('hyprflip', 'attach', 'horizontal' if axis == 0 else 'vertical')
+                    direction = 'horizontal' if axis == 0 else 'vertical'
+                    focused((companion, 'assert(hl.plugin.hyprflip.mark())'),
+                            (first, f'assert(hl.plugin.hyprflip.attach("{direction}"))'))
                 # Restore the inner proportion even if the containing tile was
                 # reflowed when hy3 reloaded. No application content is saved.
                 total = sum(saved[w]['size'][axis] for w in face)
@@ -121,15 +143,12 @@ def restore(snapshot, saved):
                             continue
                         settled = False
                         x, y = (delta, 0) if axis == 0 else (0, delta)
-                        focus(pane)
-                        ctl('dispatch', f'hl.dsp.window.resize({{x={x},y={y},relative=true}})')
+                        focused((pane, f'hl.dispatch(hl.dsp.window.resize({{x={x},y={y},relative=true}}))'))
                     if settled:
                         break
             remembered = min(face, key=lambda w: saved[w]['focusHistoryID'] if saved[w]['focusHistoryID'] >= 0 else float('inf'))
             focus(remembered)
-        focus(card['current'])
-        if card.get('unfolded'):
-            ctl('hyprflip', 'unfold')
+        focused((card['current'], 'assert(hl.plugin.hyprflip.unfold())' if card.get('unfolded') else ''))
         restored = next((c for c in state()['containers'] if c['faces'] == card['faces']), None)
         if not restored or restored['current'] != card['current'] or bool(restored.get('unfolded')) != bool(card.get('unfolded')):
             raise RuntimeError('Could not restore a card; recovery metadata was retained')
@@ -195,20 +214,30 @@ try:
 except BaseException:
     print('Update failed; restoring the previous libraries and cards.', flush=True)
     try:
-        unload()
-        for path, data in originals.items(): atomic(path, data)
+        try:
+            unload()
+        finally:
+            # A dead compositor cannot answer unload, but the next session must
+            # still start with the previous files. Atomic replacement leaves any
+            # surviving process's mapped library untouched.
+            for path, data in originals.items(): atomic(path, data)
+            print('Previous library files restored on disk.', flush=True)
         load()
         restore(snapshot, saved)
     except Exception as error:
         print(f'Recovery needs attention: {error}. Metadata: {backup / "recovery.json"}', flush=True)
     raise
 finally:
-    for workspace in card_workspaces:
-        ctl('hyprflip', f'unreserve {reservation}-{workspace}', check=False)
-        ctl('eval', f'if chillmode and chillmode.hold_workspace then chillmode.hold_workspace({workspace},0) end', check=False)
-    # Reconstructing cards can visit several monitors. Restore each monitor's
-    # selected workspace, then the original application focus.
-    for monitor in monitors:
-        number = monitor['activeWorkspace']['id']
-        ctl('dispatch', f'hl.dsp.focus({{workspace="{number}"}})', check=False)
-    if active and active in clients(): focus(active)
+    try:
+        for workspace in card_workspaces:
+            ctl('hyprflip', f'unreserve {reservation}-{workspace}', check=False)
+            ctl('eval', f'if chillmode and chillmode.hold_workspace then chillmode.hold_workspace({workspace},0) end', check=False)
+        # Reconstructing cards can visit several monitors. Restore each monitor's
+        # selected workspace, then the original application focus.
+        for monitor in monitors:
+            number = monitor['activeWorkspace']['id']
+            ctl('dispatch', f'hl.dsp.focus({{workspace="{number}"}})', check=False)
+        if active and active in clients(): focus(active)
+    except Exception as error:
+        # Keep the original failure visible when IPC disappeared during update.
+        print(f'Could not restore desktop focus: {error}', flush=True)

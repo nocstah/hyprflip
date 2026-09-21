@@ -109,10 +109,25 @@ try:
         ipc.focus(b)
         flow = setup.Saved(ipc, Menu('0', 'restore', 'restore'))
         plan = flow.prepare_restore(); assert not ipc.status()['containers']
-        flow.apply(plan); time.sleep(.2)
+        real_call, drift = ipc.call, []
+        def distracted(*arguments):
+            action = (arguments[:1] == ('hyprflip',) and len(arguments) > 1 and
+                      arguments[1].split()[0] in ('mark', 'pair', 'attach'))
+            action |= arguments[:1] == ('eval',) and 'hl.plugin.hyprflip.' in ' '.join(arguments[1:])
+            if action and ipc.status()['containers']:
+                target = card()['current']
+                real_call('dispatch', f'hl.dsp.focus({{window="address:{target}"}})')
+                drift.append(target)
+            return real_call(*arguments)
+        ipc.call = distracted
+        try: flow.apply(plan)
+        finally: ipc.call = real_call
+        time.sleep(.2)
         assert_shape(before['recipe'])
         assert all(ipc.windows()[a]['workspace']['id'] == 30 for a in addresses)
         passed('after a real compositor restart, fresh app addresses restore both faces, axes, proportions and focus from another workspace')
+        assert drift
+        passed('focus changes between IPC commands cannot redirect saved-card attachments')
 
         ipc.action('unpair')
         for address in front: ipc.move(address, 31)
@@ -128,15 +143,16 @@ try:
         original_windows = deepcopy(ipc.windows())
         flow = setup.Saved(ipc, Menu('0', 'restore', 'restore', 'tile'))
         plan = flow.prepare_restore()
-        real_action = ipc.action
-        def rejected(action):
-            if action == 'attach vertical': raise setup.SetupError('Injected attachment failure')
-            return real_action(action)
-        ipc.action = rejected
+        real_focused = ipc.focused
+        def rejected(*operations):
+            if any(action == 'attach vertical' for _, action in operations):
+                raise setup.SetupError('Injected attachment failure')
+            return real_focused(*operations)
+        ipc.focused = rejected
         try: flow.apply(plan)
         except setup.SetupError as error: assert 'Injected attachment' in str(error), error
         else: raise AssertionError('Expected a failed restore')
-        finally: ipc.action = real_action
+        finally: ipc.focused = real_focused
         time.sleep(.25)
         assert not ipc.status()['containers']
         for address in addresses:

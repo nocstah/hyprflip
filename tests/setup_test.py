@@ -34,6 +34,9 @@ class IPC:
         raise AssertionError(args)
     def focus(self, address): self.mutations.append(('focus', address))
     def action(self, action): self.mutations.append(('action', action))
+    def focused(self, *operations):
+        for address, action in operations:
+            self.focus(address); self.action(action)
 
 
 class Picker:
@@ -46,6 +49,15 @@ class Picker:
 
 
 class SetupTest(unittest.TestCase):
+    def test_invalid_target_or_action_is_rejected_before_any_focused_mutation(self):
+        ipc = setup.Hyprctl()
+        with patch.object(ipc, 'call') as call:
+            for address, action in (('0xa"', 'mark'), ('0xb', 'attach sideways'),
+                                    ('0xb', 'unpair(); os.execute("bad")')):
+                with self.assertRaises(setup.SetupError):
+                    ipc.focused(('0xa', 'mark'), (address, action))
+            call.assert_not_called()
+
     def test_cancel_at_either_picker_does_not_touch_marks_focus_or_layout(self):
         for answers in ((None,), ('0xb', None)):
             ipc = IPC()
