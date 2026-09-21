@@ -224,11 +224,13 @@ std::optional<Controller::State> Controller::state(const Pair &p) const {
                 if (!found || !found->m_isMapped)
                     return std::nullopt;
                 result.faces[s].push_back(found);
+                result.ratios[s][i] = snapshot.ratios[s][i];
                 if (reinterpret_cast<uintptr_t>(found.get()) == snapshot.focused[s])
                     result.focused[s] = found;
             }
             if (!result.focused[s])
                 return std::nullopt;
+            result.vertical[s] = snapshot.vertical[s];
         }
         result.active = snapshot.active;
         result.unfolded = snapshot.unfolded;
@@ -892,6 +894,45 @@ Result Controller::editContainer(ContainerEdit operation, const std::string &tar
     return {ok, ok ? "ok" : "The apps need more room for that layout. Enlarge the card and try again."};
 }
 
+Result Controller::arrangeFace(const std::string &arguments) {
+    std::istringstream input(arguments);
+    std::string axis, token;
+    std::array<uintptr_t, CONTAINER_MAX_PANES> windows{};
+    std::array<double, CONTAINER_MAX_PANES> ratios{};
+    uint32_t count = 0;
+    if (!(input >> axis) || (axis != "horizontal" && axis != "vertical"))
+        return {false, "Use arrange <horizontal|vertical> <address:ratio> ..."};
+    while (input >> token) {
+        const auto colon = token.find(':');
+        if (count == CONTAINER_MAX_PANES || !token.starts_with("0x") || colon == std::string::npos || colon <= 2)
+            return {false, "Invalid pane order or proportions."};
+        const auto [addressEnd, addressError] = std::from_chars(token.data() + 2, token.data() + colon, windows[count], 16);
+        const auto [ratioEnd, ratioError] = std::from_chars(token.data() + colon + 1, token.data() + token.size(), ratios[count]);
+        if (addressError != std::errc{} || addressEnd != token.data() + colon || ratioError != std::errc{} ||
+            ratioEnd != token.data() + token.size() || !std::isfinite(ratios[count]) || ratios[count] <= 0)
+            return {false, "Invalid pane order or proportions."};
+        ++count;
+    }
+    if (!count || inputBusy())
+        return {false, "Finish the active grab or drag before restoring the face."};
+    auto p = find(Desktop::focusState()->window());
+    if (!p || !p->containerID)
+        return {false, "Focus an app in a Hyprflip container first."};
+    finish();
+    auto s = state(*p);
+    if (!s)
+        return {false, "This card changed. Open the card menu again."};
+    for (const auto &member : s->windows())
+        if (Fullscreen::controller()->isFullscreen(member.lock()))
+            return {false, "Leave fullscreen before restoring the card layout."};
+    auto api = provider(p->providerEpoch);
+    m_mutating = true;
+    const bool ok = api && api->arrange(p->containerID, s->active, axis == "vertical", count, windows.data(), ratios.data());
+    m_mutating = false;
+    reconcile();
+    return {ok, ok ? "ok" : "The face changed or its apps need more room. Enlarge the card and try again."};
+}
+
 void Controller::onFrame(PHLMONITOR monitor) {
     if (m_peek && !canReturnPeek()) m_peek.reset();
     if (!m_turn || monitor != m_turn->monitor)
@@ -1018,6 +1059,8 @@ Result Controller::action(const std::string &action) {
         return editContainer(ContainerEdit::Vertical);
     if (action == "layout balance")
         return editContainer(ContainerEdit::Balance);
+    if (action.starts_with("arrange "))
+        return arrangeFace(action.substr(8));
     if (action.starts_with("move ")) {
         const auto direction = action.substr(5);
         if (direction == "left" || direction == "right" || direction == "up" || direction == "down" ||
@@ -1102,11 +1145,23 @@ std::string Controller::status() {
             }
             json += ']';
         }
+        json += "],\"layouts\":[";
+        for (unsigned side = 0; side < 2; ++side) {
+            if (side) json += ',';
+            json += "{\"axis\":" + quote(s->vertical[side] ? "vertical" : "horizontal") +
+                    ",\"focused\":" + address(s->focused[side]) + ",\"ratios\":[";
+            for (unsigned i = 0; i < s->faces[side].size(); ++i) {
+                if (i) json += ',';
+                json += std::format("{}", s->ratios[side][i]);
+            }
+            json += "]}";
+        }
         json += "]}";
     }
     const bool available = provider();
     return json + "],\"workspace_protection\":true,\"container_provider\":" + (available ? "true" : "false") +
            ",\"layout_controls\":" + (available ? "true" : "false") +
+           ",\"repair_cards\":" + (available ? "true" : "false") +
            ",\"container_max_panes\":" + std::to_string(available ? CONTAINER_MAX_PANES : 0) + "}";
 }
 } // namespace Hyprflip

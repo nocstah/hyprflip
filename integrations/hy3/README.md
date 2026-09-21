@@ -11,13 +11,23 @@ table through `src/ContainerABI.hpp`, resolves live window identifiers, and neve
 caches the provider across events. A load epoch prevents IDs from being reused
 across different provider lifetimes.
 
-ABI 4 retains ABI 3's three-window face snapshots and adds an in-place edit
-operation for face direction, equal sizes and pane transfers. Its entry point
+ABI 5 retains ABI 4's face edits and adds exact split axes, normalized pane
+weights and remembered focus to snapshots, plus an atomic face arrangement
+operation for missing-pane recovery. Its entry point
 is versioned separately so an old core/provider combination cannot call an
 incompatible table. Status advertises `layout_controls` and `container_max_panes`; the
 picker defaults to two when talking to older builds. A third attachment retains
 the existing split axis and pane weights. This is a Hyprflip limit, not a hy3
 group limit.
+
+`arrange` accepts exactly the current members of one face, in the desired order,
+with positive finite proportions summing to one. It splices direct children
+within their existing parent, without unlocking or extracting surviving panes.
+Application size limits are checked before committing; failure restores the
+previous order, axis, exact weights and selection. The helper uses
+`hyprctl hyprflip 'arrange horizontal 0xADDRESS:0.6 0xADDRESS:0.4'` (or the Lua
+`arrange` function), focused on that face. Status advertises `repair_cards` and
+includes each container's `layouts` with `axis`, `ratios` and `focused` address.
 
 Edits preserve the two-face tree, validate application size limits and restore
 the previous membership, order, weights and selection on refusal. Transfers

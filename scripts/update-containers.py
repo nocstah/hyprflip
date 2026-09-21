@@ -116,12 +116,14 @@ def restore(snapshot, saved):
         front, back = card['faces'][0][0], card['faces'][1][0]
         focused((front, 'assert(hl.plugin.hyprflip.mark())'),
                 (back, 'assert(hl.plugin.hyprflip.pair())'))
-        for face in card['faces']:
+        for side, face in enumerate(card['faces']):
+            layout = card.get('layouts', [None, None])[side]
             if len(face) >= 2:
                 first, second = face[:2]
                 dx = abs(saved[first]['at'][0] - saved[second]['at'][0])
                 dy = abs(saved[first]['at'][1] - saved[second]['at'][1])
                 axis = 0 if dx > dy else 1
+                if layout: axis = int(layout['axis'] == 'vertical')
                 for companion in face[1:]:
                     direction = 'horizontal' if axis == 0 else 'vertical'
                     focused((companion, 'assert(hl.plugin.hyprflip.mark())'),
@@ -130,7 +132,12 @@ def restore(snapshot, saved):
                 # reflowed when hy3 reloaded. No application content is saved.
                 total = sum(saved[w]['size'][axis] for w in face)
                 ratios = {w: saved[w]['size'][axis] / total for w in face}
-                for _ in range(4):
+                if layout: ratios = dict(zip(face, layout['ratios']))
+                exact = state().get('repair_cards')
+                if exact:
+                    argument = ('vertical' if axis else 'horizontal') + ''.join(f' {w}:{ratios[w]:.12g}' for w in face)
+                    focused((first, f'assert(hl.plugin.hyprflip.arrange({json.dumps(argument)}))'))
+                for _ in range(0 if exact else 4):
                     settled = True
                     # Work from the first pane towards the last: each resize
                     # adjusts its next neighbor without disturbing earlier panes.
@@ -147,6 +154,7 @@ def restore(snapshot, saved):
                     if settled:
                         break
             remembered = min(face, key=lambda w: saved[w]['focusHistoryID'] if saved[w]['focusHistoryID'] >= 0 else float('inf'))
+            if layout: remembered = layout['focused']
             focus(remembered)
         focused((card['current'], 'assert(hl.plugin.hyprflip.unfold())' if card.get('unfolded') else ''))
         restored = next((c for c in state()['containers'] if c['faces'] == card['faces']), None)

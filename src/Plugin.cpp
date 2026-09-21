@@ -38,6 +38,7 @@ int workspace(lua_State *L) {
 int move(lua_State *L) { return invoke(L, (std::string("move ") + luaL_checkstring(L, 1)).c_str()); }
 int unfold(lua_State *L) { return invoke(L, "unfold"); }
 int layout(lua_State *L) { return invoke(L, (std::string("layout ") + luaL_checkstring(L, 1)).c_str()); }
+int arrange(lua_State *L) { return invoke(L, (std::string("arrange ") + luaL_checkstring(L, 1)).c_str()); }
 int otherSide(lua_State *L) {
     const std::string target = luaL_optstring(L, 1, "");
     return invoke(L, ("other_side" + (target.empty() ? "" : " " + target)).c_str());
@@ -106,6 +107,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE h) {
                                    {"move", move},
                                    {"unfold", unfold},
                                    {"layout", layout},
+                                   {"arrange", arrange},
                                    {"other_side", otherSide},
                                    {"in_container", inContainer},
                                    {"protects_workspace", protectsWorkspace},

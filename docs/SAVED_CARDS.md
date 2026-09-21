@@ -54,6 +54,38 @@ cards…** while a card is closed. Updates are explicit; editing a live layout d
 not silently change its saved definition. Ordinary **Save card…** still asks
 before replacing an existing name.
 
+## Reopen missing apps
+
+If an app closes while both sides of a saved card still have at least one app,
+focus the surviving card and choose **C → Reopen missing apps**. For example,
+close Telegram from Gmail ↔ WhatsApp + Telegram, then reopen it beside WhatsApp.
+The card stays in place; its identity, visible face, remembered focus on each
+side and unfolded state remain intact. No additional confirmation is needed.
+
+A uniquely matching saved setup is selected automatically. If several match,
+choose a name. Surviving apps must still be in their original face and order;
+indistinguishable browser windows with changed titles are not guessed. Save the
+complete arrangement before closing apps. The feature needs matching ABI 5
+core/provider builds; older providers keep their existing menu.
+
+The helper reuses eligible open apps, including floating apps on other
+workspaces, and launches only missing apps. It never takes an app from another
+card or native group. Apps return to their saved positions. Existing multi-app
+faces keep their current split direction and the relative sizes of surviving
+panes. Each missing pane gets its saved share of the face; the remaining space
+is divided proportionally among survivors. A side reduced to one app regains
+its saved split direction. Unaffected faces retain their layout.
+
+Cancellation, stale-window checks, workspace protection and launch timeouts
+are shared with ordinary opening. The card and layout are checked again before
+attachment. A failed repair removes only panes it added, restores the affected
+splits, and returns imported/floating apps when those windows remain available.
+Launched apps stay open after failure or cancellation.
+
+If closing an app empties an entire side, Hyprflip dissolves the card as before.
+Use **Super+Ctrl+Alt+L** to open the saved setup again in that case. Reopen does
+not restore browser tabs, documents, or application-internal session state.
+
 ## Opening behavior
 
 Saved arrangements remember both faces, their split directions and relative

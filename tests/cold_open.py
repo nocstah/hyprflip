@@ -16,6 +16,7 @@ p = argparse.ArgumentParser(description=__doc__)
 p.add_argument('session', type=Path)
 p.add_argument('--engine', type=Path)
 p.add_argument('--hyprglass', type=Path)
+p.add_argument('--repair', action='store_true', help='Also close/reopen each back app without rebuilding the live card')
 args = p.parse_args()
 root, project = args.session.parent / 'cold-open', Path(__file__).resolve().parent.parent
 root.mkdir(exist_ok=True)
@@ -157,6 +158,27 @@ h1{{margin:60px}}.corner{{position:fixed;width:40px;height:40px;background:#00cc
         time.sleep(.4)
         subprocess.run(['grim', '-o', output, str(root / f'back-{attempt}.png')], env=env, check=True, timeout=8)
         passed(f'all three closed apps reopen into the saved front/back arrangement, attempt {attempt + 1}')
+        if args.repair:
+            for missing in (1, 2):
+                current = addresses()
+                ipc.call('dispatch', f'hl.dsp.window.close({{window="address:{current[missing]}"}})')
+                wait(lambda: addresses()[missing] is None)
+                ipc.focus(current[0])
+                before = deepcopy(ipc.status()['containers'][0])
+                survivors = {w: ipc.windows()[w]['pid'] for face in before['faces'] for w in face}
+                flow = setup.Edit(ipc, Menu('repair')); plan = flow.prepare(current[0])
+                assert len(plan.launchers) == 1
+                flow.apply(plan)
+                a, b, c = addresses(); after = ipc.status()['containers'][0]
+                assert after['id'] == before['id'] and after['faces'] == [[a], [b,c]]
+                assert after['current'] == before['current'] and after['unfolded'] == before['unfolded']
+                assert all(ipc.windows()[w]['pid'] == pid for w,pid in survivors.items())
+                time.sleep(.4)
+                assert all(not ipc.windows()[w]['floating'] for w in (a,b,c))
+                passed(f'back app {missing} reopens in place with Chill/Glass, attempt {attempt + 1}')
+            if attempt == 2:
+                ipc.action('flip'); time.sleep(.4)
+                subprocess.run(['grim', '-o', output, str(root / 'repaired-back.png')], env=env, check=True, timeout=8)
         close_all(); time.sleep(1)
     completed = True
 finally:

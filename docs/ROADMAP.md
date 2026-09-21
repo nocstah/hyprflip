@@ -50,6 +50,11 @@ another kind of group or requiring users to manage a layout tree.
 - ABI 4 adds Beside, Stacked and Equal sizes to C, plus moving any pane to the
   other face. Both faces stay populated, with three apps maximum. Refused changes
   restore the original arrangement in place.
+- C → Reopen missing apps fills a partially intact saved card in place. It
+  preserves the current face, remembered focus, unfolded state and surviving
+  proportions, asks when several saved setups match, and restores saved pane
+  positions through ABI 5's guarded face arrangement operation. It shares the
+  existing launcher, cancellation and workspace-protection flow.
 - Hold Super+Ctrl+Alt+Space to peek. Release returns smoothly; input, focus,
   popups, workspace changes and lifecycle interruptions cancel the return.
 
@@ -66,13 +71,10 @@ another kind of group or requiring users to manage a layout tree.
 
 ## Earlier ideas, ordered by likely usefulness
 
-Saved setups, missing-app launching, layout controls and hold-to-peek are
+Saved setups, missing-pane recovery, layout controls and hold-to-peek are
 implemented. The next candidates are:
 
-1. **Restore a missing pane.** Reopen a closed app in its saved position while
-   preserving the surviving card and split sizes. Keep this explicit and avoid
-   guessing when several saved variants could apply.
-2. **Touchpad-controlled turns.** Consider after keyboard workflows are stable.
+1. **Touchpad-controlled turns.** Consider after keyboard workflows are stable.
    Gestures must coexist with workspace gestures and have predictable cancel
    and completion behavior. They add input-state complexity.
 

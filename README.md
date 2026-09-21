@@ -178,6 +178,11 @@ After adjusting a card, use **C → Manage card… → Update saved card** to re
 its current layout without retyping its name. **Rename…** and **Duplicate…**
 manage the saved setup without changing running apps.
 
+Closed an app from a saved card? Use **C → Reopen missing apps** to put it back
+in its original position. The surviving card keeps its visible side, focus,
+split direction and relative pane sizes. Existing matching apps can be brought
+from other workspaces. If several saved setups match, choose which one to use.
+
 Hold **Super+Ctrl+Alt+Space** to **peek** at the opposite face; release Space to
 return. Clicking or typing keeps the side you are using. See
 [saved cards and peek](docs/SAVED_CARDS.md) for matching, storage and input behavior.

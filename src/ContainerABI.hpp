@@ -5,7 +5,7 @@
 // Optional provider boundary. No Hyprland, hy3, STL containers or owning pointers
 // cross it. Window addresses are identifiers, resolved against live windows.
 namespace Hyprflip {
-inline constexpr uint32_t CONTAINER_ABI_VERSION = 4;
+inline constexpr uint32_t CONTAINER_ABI_VERSION = 5;
 inline constexpr uint32_t CONTAINER_MAX_PANES = 3;
 enum class ContainerEdit : uint32_t { Horizontal, Vertical, Balance, OtherSide };
 struct ContainerSnapshot {
@@ -14,6 +14,8 @@ struct ContainerSnapshot {
     uint32_t count[2]{};
     uintptr_t windows[2][CONTAINER_MAX_PANES]{};
     uintptr_t focused[2]{};
+    uint32_t vertical[2]{};
+    double ratios[2][CONTAINER_MAX_PANES]{};
     double x = 0, y = 0, width = 0, height = 0;
 };
 struct ContainerAPI {
@@ -30,8 +32,10 @@ struct ContainerAPI {
     bool (*move)(uint64_t id, uint32_t direction);
     bool (*unfold)(uint64_t id, bool enabled);
     bool (*edit)(uint64_t id, uintptr_t window, ContainerEdit operation);
+    bool (*arrange)(uint64_t id, uint32_t side, bool vertical, uint32_t count,
+                    const uintptr_t *windows, const double *ratios);
     void (*animating)(uint64_t id, bool enabled);
 };
 using ContainerEntry = const ContainerAPI *(*)();
-inline constexpr auto CONTAINER_SYMBOL = "hyprflip_hy3_bridge_v4";
+inline constexpr auto CONTAINER_SYMBOL = "hyprflip_hy3_bridge_v5";
 } // namespace Hyprflip

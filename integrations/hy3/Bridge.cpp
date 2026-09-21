@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cmath>
 #include <hyprland/src/desktop/state/FocusState.hpp>
 #include <hyprland/src/desktop/state/WindowState.hpp>
 #include <hyprland/src/state/WorkspaceState.hpp>
@@ -100,6 +101,14 @@ bool inspect(uint64_t id, ContainerSnapshot *out) {
         if (!focused.is_target())
             return false;
         result.focused[side] = address(focused.as_window());
+        result.vertical[side] = f->is_group() && f->as_group().layout == Hy3GroupLayout::SplitV;
+        double total = 0;
+        for (uint32_t i = 0; i < result.count[side]; ++i)
+            total += result.ratios[side][i] = node(result.windows[side][i])->size_ratio;
+        if (!std::isfinite(total) || total <= 0)
+            return false;
+        for (uint32_t i = 0; i < result.count[side]; ++i)
+            result.ratios[side][i] /= total;
     }
     const auto &box = r->visualBox;
     result.x = box.x;
@@ -326,6 +335,49 @@ bool edit(uint64_t id, uintptr_t child, ContainerEdit operation) {
     restoreSelection(id, before, true);
     return false;
 }
+bool arrange(uint64_t id, uint32_t side, bool vertical, uint32_t count,
+             const uintptr_t *windows, const double *ratios) {
+    ContainerSnapshot before;
+    if (side > 1 || !windows || !ratios || !inspect(id, &before) || count != before.count[side])
+        return false;
+    double total = 0;
+    for (uint32_t i = 0; i < count; ++i) {
+        if (!std::isfinite(ratios[i]) || ratios[i] <= 0 ||
+            std::count(before.windows[side], before.windows[side] + count, windows[i]) != 1 ||
+            std::count(windows, windows + count, windows[i]) != 1)
+            return false;
+        total += ratios[i];
+    }
+    if (!std::isfinite(total) || std::abs(total - 1.) > .001)
+        return false;
+    auto f = face(*root(id), side);
+    if (f->is_target())
+        return true;
+    auto &split = f->as_group();
+    const auto previousAxis = split.layout;
+    std::array<float, CONTAINER_MAX_PANES> weights;
+    for (uint32_t i = 0; i < count; ++i)
+        weights[i] = node(before.windows[side][i])->size_ratio;
+    // Reorder only these direct children. Never unlock the card, extract a
+    // surviving pane or invoke a structural move that could escape its face.
+    auto order = [&](const uintptr_t *addresses) {
+        for (uint32_t i = 0; i < count; ++i)
+            split.children.splice(split.children.end(), split.children, split.findChild(*node(addresses[i])));
+    };
+    order(windows);
+    split.setLayout(vertical ? Hy3GroupLayout::SplitV : Hy3GroupLayout::SplitH);
+    for (uint32_t i = 0; i < count; ++i)
+        node(windows[i])->size_ratio = ratios[i] * count / total;
+    update(split.Hy3Node::layout(), false);
+    if (fits(id))
+        return restoreSelection(id, before, true);
+    order(before.windows[side]);
+    split.setLayout(previousAxis);
+    for (uint32_t i = 0; i < count; ++i)
+        node(before.windows[side][i])->size_ratio = weights[i];
+    restoreSelection(id, before, true);
+    return false;
+}
 bool workspace(uint64_t id, uint32_t destination, bool follow) {
     ContainerSnapshot state;
     if (!destination || destination > INT32_MAX || !inspect(id, &state))
@@ -460,10 +512,11 @@ const ContainerAPI api{CONTAINER_ABI_VERSION,
                        move,
                        unfold,
                        edit,
+                       arrange,
                        animating};
 } // namespace
 
-extern "C" __attribute__((visibility("default"))) const Hyprflip::ContainerAPI *hyprflip_hy3_bridge_v4() {
+extern "C" __attribute__((visibility("default"))) const Hyprflip::ContainerAPI *hyprflip_hy3_bridge_v5() {
     return &api;
 }
 

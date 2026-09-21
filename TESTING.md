@@ -1,5 +1,62 @@
 # Validation
 
+## Reopen missing apps in an existing card (2026-09-21)
+
+C → Reopen missing apps now restores a partially intact saved card without
+dissolving or rebuilding it. ABI 5 adds exact face layout snapshots and a guarded
+arrangement operation; the existing launcher and cancellation flow are shared.
+
+- **99 Python tests and the C++ core test pass.** The 13 new repair tests cover
+  first/middle/last slots, multiple missing apps, original focus/unfold state,
+  current survivor proportions, remote floats, matching-definition and
+  same-class ambiguity, stale layouts, cancellation, timeout, import-time resize,
+  partial attachment rollback, marks and return of imported floating apps.
+- **Nine real repair workflows pass** in `tests/repair_workflows.py`, including
+  repairs on both three-pane faces, multiple missing panes, folded/unfolded
+  cards, unchanged surviving PIDs, remote reuse, invalid layout arguments,
+  real-tree rollback after injected failure, cancellation with a late app and
+  provider rollback when application minimum size rejects an arrangement.
+- **Nine Brave/Chill/Hyprglass checks pass** with `tests/cold_open.py --repair`:
+  three all-closed launches and six partial repairs, alternately closing the
+  browser and terminal on the back. The repaired browser surface was inspected
+  with all four edge markers visible.
+- All **six existing layout checks** pass. All **six upgrade checks** pass in a
+  fresh disposable compositor, including the installed ABI 4 → ABI 5 upgrade,
+  future six-pane updates, focus interference, fullscreen refusal and failed-load
+  rollback with Hyprglass kept loaded.
+- **Four installed native-menu workflows pass** using temporary windows and an
+  isolated saved library: direct missing-app launch, first-pane insertion with
+  original focus, Escape from the setup chooser, and one explicit choice between
+  matching saved variants. Editor and chooser captures were inspected together;
+  existing Omarchy controls and theme remain unchanged.
+
+Reproduce after `./scripts/build-containers`:
+
+```sh
+python tests/nested_session.py --directory /tmp/hf-repair
+# In another terminal:
+python tests/repair_workflows.py /tmp/hf-repair/session.json
+python tests/cold_open.py /tmp/hf-repair/session.json --repair \
+  --engine /path/to/integrated/chillmode.lua --hyprglass /path/to/hyprglass.so
+```
+
+Evidence: `/tmp/hf-repair/repair-results.json`, `/tmp/hf-repair/cold-open/`,
+`/tmp/hf-repair/layout-results.json`, `/tmp/hf-up-repair/`,
+`test-results/container-upgrade.json` and `/tmp/hf-repair-ui-check/`.
+The upgrade suite uses its own fresh nested session. Both disposable compositors
+were stopped, and the native check restored the original cards, workspaces and
+focus. Test apps never use or close the user's real browser/chat windows.
+
+The matching core/provider and helper are installed. Plugin backups are under
+`~/.local/state/hyprflip/container-update-20260921-184405/`, and helper/config
+backups under `~/.local/state/hyprflip/guided-setup-20260921-184458-347326/`.
+The helper installer initially found a transient shell IPC timeout after the
+plugin update; a subsequent ping and helper-only retry succeeded. The plugin
+update was not repeated. Eleven final checks confirm the installed bytes,
+existing card/app identities, focus, workspaces, saved definitions, unchanged
+Hyprglass handle/mapping, feature availability and clean configuration.
+Final installation evidence is in `/tmp/hf-repair-installed/`.
+
 ## Direct card launcher and saved-card management (2026-09-21)
 
 Selecting a saved card now opens or switches to it immediately. The native

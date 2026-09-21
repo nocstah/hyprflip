@@ -9,6 +9,7 @@ import fcntl
 import hashlib
 import html
 import json
+from itertools import combinations
 import math
 import os
 from pathlib import Path
@@ -122,6 +123,7 @@ class Hyprctl:
                     name == 'other_side' and re.fullmatch(r'0x[0-9a-fA-F]+', argument) or
                     name == 'attach' and argument in ('horizontal', 'vertical') or
                     name == 'layout' and argument in ('horizontal', 'vertical', 'balance') or
+                    name == 'arrange' and re.fullmatch(r'(horizontal|vertical)( 0x[0-9a-fA-F]+:[0-9.eE+-]+){1,3}', argument) or
                     name == 'preview' and argument in TRANSITIONS):
                 raise SetupError('The card action is unavailable.')
             parameter = json.dumps(argument) if argument else ''
@@ -598,7 +600,7 @@ class Edit(Setup):
                         raise SetupError('The preview did not finish. Open Edit card again.')
                     time.sleep(.04)
                 self.validate(plan)
-    def validate(self, plan):
+    def validate(self, plan, focus=True):
         windows, state = self.ipc.windows(), self.ipc.status()
         card = next((c for c in state.get('containers', []) if c['id'] == plan.card['id']), None)
         if (not state.get('container_provider') or state.get('animating') or not card
@@ -616,7 +618,7 @@ class Edit(Setup):
                     or current.get('floating') != original.get('floating')
                     or (current.get('floating') and address != plan.candidate)):
                 raise SetupError('An app closed, moved or joined another group. Open Edit card again.')
-        if (self.ipc.data('-j', 'activeworkspace')['id'] != workspace
+        if focus and (self.ipc.data('-j', 'activeworkspace')['id'] != workspace
                 or self.ipc.data('-j', 'activewindow').get('address') not in (None, plan.anchor)):
             raise SetupError('Focus changed. Return to the side you want and open Edit card again.')
         if any(w.get('fullscreen') and w['workspace']['id'] == workspace for w in windows.values()):
@@ -664,6 +666,8 @@ class Edit(Setup):
         choices.extend([Choice('save', 'Save card…', 'Reuse this arrangement after restarting'),
                         Choice('manage', 'Manage card…', 'Update saved card · Rename · Duplicate'),
                         Choice('saved', 'Open saved card…', 'Reuse open apps · Launch missing apps')])
+        if state.get('repair_cards'):
+            choices.insert(0, Choice('repair', 'Reopen missing apps', 'Restore closed apps from this card’s saved setup'))
         action = self.menu.choose(prompt, choices)
         if action not in {c.value for c in choices}:
             raise SetupError('That action is no longer available. Open Edit card again.')
@@ -685,6 +689,7 @@ class Edit(Setup):
                  for c in window_choices([windows[anchor]] + [windows[a] for a in face if a != anchor])])
             if removal not in face: raise SetupError('That app is no longer on this side. Open the card menu again.')
         candidate = None
+        if action == 'repair': return Saved(self.ipc, self.menu).prepare_repair(plan)
         if action == 'save': return Saved(self.ipc, self.menu).prepare_save(plan)
         if action == 'manage':
             result = Saved(self.ipc, self.menu).prepare_manage(plan)
@@ -982,7 +987,7 @@ class Saved(Setup):
     @staticmethod
     def capture(card, windows):
         faces = []
-        for members in card['faces']:
+        for side, members in enumerate(card['faces']):
             axis = 0
             if len(members) > 1:
                 first, second = (windows[a] for a in members[:2])
@@ -994,6 +999,8 @@ class Saved(Setup):
                              if windows[a].get('focusHistoryID', -1) >= 0 else float('inf'))
             faces.append({'apps': apps, 'axis': 'vertical' if axis else 'horizontal',
                           'ratios': [windows[a]['size'][axis] / total for a in members], 'focus': members.index(remembered)})
+            if layout := card.get('layouts', [None, None])[side]:
+                faces[-1].update(axis=layout['axis'], ratios=list(layout['ratios']), focus=members.index(layout['focused']))
         return {'faces': faces, 'active': card['active']}
 
     def prepare_save(self, edit):
@@ -1034,6 +1041,149 @@ class Saved(Setup):
                 matched.append(chosen)
             if len(matched) == 2: result.append(card)
         return result
+
+    @staticmethod
+    def surviving_slots(recipe, card, windows):
+        """An unambiguous, order-preserving subset on each of the same faces."""
+        chosen = []
+        for face, members in zip(recipe['faces'], card['faces']):
+            apps = face['apps']
+            if not members or len(members) > len(apps) or any(a not in windows for a in members): return None
+            matches = []
+            for slots in combinations(range(len(apps)), len(members)):
+                if all(Saved.same_app(apps[i], windows[a]) for i, a in zip(slots, members)):
+                    score = sum(apps[i]['title'] == clean(windows[a].get('title', ''), 512) for i, a in zip(slots, members))
+                    matches.append((score, slots))
+            if not matches: return None
+            best = max(score for score, _ in matches)
+            matches = [slots for score, slots in matches if score == best]
+            if len(matches) != 1: return None  # Never guess between indistinguishable slots.
+            side = [None] * len(apps)
+            for slot, address in zip(matches[0], members): side[slot] = address
+            chosen.extend(side)
+        return chosen if None in chosen else None
+
+    def prepare_repair(self, edit):
+        windows, state = Edit(self.ipc, self.menu).validate(edit)
+        if not state.get('repair_cards'):
+            raise SetupError('Update the container plugins before reopening missing apps.')
+        recipes = self.store.read()
+        matches = [(name, recipe, chosen) for name, recipe in sorted(recipes.items(), key=lambda item: item[0].casefold())
+                   if (chosen := self.surviving_slots(recipe, edit.card, windows))]
+        if not matches:
+            if any(self.open_cards(recipe, windows, {'containers': [edit.card]}) for recipe in recipes.values()):
+                raise SetupError('All apps from this card’s saved setup are already here.')
+            raise SetupError('No saved setup uniquely matches this card’s remaining apps. Save the complete card first; '
+                             'apps must still be on their original sides and distinguishable by app or title.')
+        index = '0' if len(matches) == 1 else self.menu.choose('Which saved setup should fill this card?', [
+            Choice(str(i), name, 'Reopen ' + ', '.join(app['label'] for app, address in
+                zip((a for f in recipe['faces'] for a in f['apps']), chosen) if not address))
+            for i, (name, recipe, chosen) in enumerate(matches)])
+        if index not in map(str, range(len(matches))): raise Cancelled()
+        name, recipe, chosen = matches[int(index)]
+        return self.prepare_open(name, recipe, windows[edit.anchor]['workspace']['id'], edit.anchor, edit=edit, chosen=chosen)
+
+    def validate_repair(self, plan):
+        windows, state = Edit(self.ipc, self.menu).validate(plan.edit, focus=False)
+        card = next(c for c in state['containers'] if c['id'] == plan.edit.card['id'])
+        if not state.get('repair_cards') or card.get('layouts') != plan.edit.card.get('layouts'):
+            raise SetupError('The card layout changed. Open Reopen missing apps again.')
+        return windows, state
+
+    def repair_reserved(self, plan, selected, arrangement):
+        windows, state = self.validate_repair(plan)
+        original = plan.edit
+        additions = {a: w for a, w in selected.items() if a not in original.windows}
+        eligible = self.eligible(windows, state)
+        for address, previous in additions.items():
+            if address not in eligible or any(windows[address][k] != previous[k] for k in ('pid', 'class', 'workspace', 'floating')):
+                raise SetupError('An app to reopen changed. Open the card menu again.')
+        before = self.capture(original.card, windows)
+        targets = deepcopy(arrangement['faces'])
+        for side, target in enumerate(targets):
+            members = original.card['faces'][side]
+            old = before['faces'][side]
+            missing = sum(r for a, r in zip(target['windows'], target['ratios']) if a not in members)
+            weights = dict(zip(members, old['ratios']))
+            target['ratios'] = [weights[a] * (1 - missing) if a in weights else r
+                                for a, r in zip(target['windows'], target['ratios'])]
+            if len(members) > 1: target['axis'] = old['axis']
+        expected = deepcopy(original.card['faces'])
+        marked, moved, tiled, attempted = state.get('marked'), [], [], []
+
+        def current():
+            return next((c for c in self.ipc.status().get('containers', []) if c['id'] == original.card['id']), None)
+
+        def guard():
+            card = current()
+            if (not card or card['faces'] != expected or card['unfolded'] != original.card['unfolded'] or
+                    self.ipc.data('-j', 'activeworkspace')['id'] != plan.workspace):
+                raise SetupError('The card changed while reopening apps. Open the card menu again.')
+            if not attempted and any(card.get(k) != original.card.get(k) for k in ('active', 'current', 'layouts')):
+                raise SetupError('The card layout changed. Open Reopen missing apps again.')
+            live = self.ipc.windows()
+            if any(a not in live or live[a]['pid'] != w['pid'] or live[a]['class'] != w['class'] or
+                   not live[a].get('mapped', True) or any(live[a].get(k) for k in ('floating','grouped','pinned','fullscreen')) or
+                   live[a]['workspace']['id'] != plan.workspace for a, w in selected.items()):
+                raise SetupError('An app changed while reopening apps.')
+
+        def arrange(side, members, layout):
+            argument = layout['axis'] + ''.join(f' {a}:{r:.12g}' for a, r in zip(members, layout['ratios']))
+            self.ipc.focused((members[0], 'arrange ' + argument))
+
+        def selection():
+            for side, face in enumerate(before['faces']):
+                self.ipc.focus(original.card['faces'][side][face['focus']])
+            self.ipc.focus(original.anchor)
+
+        try:
+            self.tile_selected(additions, tiled)
+            self.import_windows(additions, plan.workspace, moved)
+            for side, target in enumerate(targets):
+                for address in target['windows']:
+                    if address in original.windows: continue
+                    guard()
+                    attempted.append((side, address))
+                    self.ipc.focused((address, 'mark'), (original.card['faces'][side][0], 'attach ' + target['axis']))
+                    expected[side].append(address)
+                if any(a in additions for a in target['windows']):
+                    guard()
+                    arrange(side, target['windows'], target)
+                    expected[side] = list(target['windows'])
+            guard()
+            selection()
+        except Exception as error:
+            recovery = []
+            # Only undo our own attachments, and only while every original
+            # member still belongs to the same face of the same card.
+            try:
+                card = current()
+                intact = card and all(set(members) <= set(card['faces'][s]) for s, members in enumerate(original.card['faces']))
+                if intact and attempted:
+                    for side, address in reversed(attempted):
+                        card = current()
+                        if card and address in card['faces'][side]: self.ipc.focused((address, 'release'))
+                    card = current()
+                    if card and card['faces'] == original.card['faces']:
+                        for side in sorted({s for s, _ in attempted}): arrange(side, card['faces'][side], before['faces'][side])
+                        selection()
+                elif attempted:
+                    recovery.append('The original card changed; its remaining apps were left in place.')
+            except (SetupError, OSError, subprocess.TimeoutExpired) as failure: recovery.append(str(failure))
+            for restore, args in ((self.restore_imports, (moved, plan.workspace)), (self.restore_floats, (tiled,))):
+                try: restore(*args)
+                except (SetupError, OSError, subprocess.TimeoutExpired) as failure: recovery.append(str(failure))
+            if recovery: raise SetupError(str(error) + ' Recovery: ' + ' '.join(recovery)) from error
+            raise
+        finally:
+            if attempted:
+                active = self.ipc.data('-j', 'activewindow').get('address')
+                try:
+                    live, state = self.ipc.windows(), self.ipc.status()
+                    if marked and marked in self.eligible(live, state): self.ipc.focused((marked, 'mark'))
+                    else: self.ipc.action('cancel')
+                finally:
+                    if active and active in self.ipc.windows(): self.ipc.focus(active)
 
     def check_workspace(self, recipe, workspace):
         state = self.ipc.status()
@@ -1205,14 +1355,15 @@ class Saved(Setup):
         if selected not in {e.id for e in entries}: raise SetupError('That app launcher is no longer available.')
         return catalog.apps[selected]
 
-    def prepare_open(self, name, recipe, workspace, focus, review=False):
+    def prepare_open(self, name, recipe, workspace, focus, review=False, edit=None, chosen=None):
         self.check_workspace(recipe, workspace)
         windows, state = self.ipc.windows(), self.ipc.status()
         eligible = self.eligible(windows, state)
         catalog = DesktopApps(getattr(self.ipc, 'env', None))
         apps = [app for face in recipe['faces'] for app in face['apps']]
-        chosen, launchers = [], {}
+        chosen, launchers = list(chosen) if chosen is not None else [None] * len(apps), {}
         for index, app in enumerate(apps):
+            if chosen[index]: continue
             candidates = [w for a, w in eligible.items() if a not in chosen and self.same_app(app, w)]
             match = self.matches(app, candidates)
             if candidates and match is None:
@@ -1222,7 +1373,7 @@ class Saved(Setup):
                 if any(self.same_app(app, w) for a, w in windows.items() if a not in chosen):
                     raise SetupError(app['label'] + ' is already open but unavailable. Leave fullscreen or release it from its card, then try again.')
                 launchers[index] = catalog.infer(app) or self.choose_launcher(app, catalog)
-            chosen.append(match)
+            chosen[index] = match
         while review:
             detail = f'Workspace {workspace} · {len(chosen) - len(launchers)} open · {len(launchers)} to launch'
             choices = [Choice('open', 'Open card here', detail)]
@@ -1246,8 +1397,8 @@ class Saved(Setup):
         # Selecting Open here already requests this saved tiled arrangement.
         # Explicit review keeps the existing tiling offer for manual choices.
         if review: self.confirm_tiling(selected, 'Tile and open card')
-        return SavedPlan('open', name, recipe, windows=selected, workspace=workspace, focus=focus,
-                         launchers=launchers, chosen=chosen)
+        return SavedPlan('repair' if edit else 'open', name, recipe, windows=selected, workspace=workspace, focus=focus,
+                         launchers=launchers, chosen=chosen, edit=edit)
 
     def check_plan(self, plan, focus=True):
         if self.store.read().get(plan.name) != plan.recipe:
@@ -1265,8 +1416,10 @@ class Saved(Setup):
         with exclusive():
             check(); self.check_plan(plan); self.check_workspace(plan.recipe, plan.workspace)
             windows, state = self.ipc.windows(), self.ipc.status()
+            if plan.action == 'repair': windows, state = self.validate_repair(plan)
             eligible = self.eligible(windows, state)
             for address, original in selected.items():
+                if plan.edit and address in plan.edit.windows: continue
                 if address not in eligible or any(windows[address][k] != original[k] for k in ('pid', 'class', 'workspace', 'floating')):
                     raise SetupError('A selected app changed. Open Saved cards again.')
             for index in plan.launchers:
@@ -1288,6 +1441,7 @@ class Saved(Setup):
                 while True:
                     check()
                     if plan.launchers: progress.check()
+                    if plan.action == 'repair': self.validate_repair(plan)
                     # Observe focus before clients: an app can map and focus
                     # between IPC replies. The later client list can identify
                     # it instead of mistaking our own launch for navigation.
@@ -1330,7 +1484,9 @@ class Saved(Setup):
                         break
                     if time.monotonic() >= deadline:
                         missing = ', '.join(app['label'] for app, address in zip(apps, chosen) if not address)
-                        raise SetupError('Still waiting for ' + missing + '. Apps were left open. Choose Restore from open apps to select them yourself.')
+                        next_step = ('Open the card menu again to reuse them.' if plan.action == 'repair' else
+                                     'Choose Restore from open apps to select them yourself.')
+                        raise SetupError('Still waiting for ' + missing + '. Apps were left open. ' + next_step)
                     time.sleep(.12)
             with exclusive():
                 check(); self.check_plan(plan, focus=False)
@@ -1346,7 +1502,9 @@ class Saved(Setup):
                 if self.ipc.data('-j', 'activeworkspace')['id'] != plan.workspace:
                     self.ipc.call('dispatch', f'hl.dsp.focus({{workspace={plan.workspace}}})')
                 with self.reserve(selected, self.ipc.status(), plan.workspace):
-                    try: self.apply_reserved(selected, arrangement, plan.workspace)
+                    try:
+                        if plan.action == 'repair': self.repair_reserved(plan, selected, arrangement)
+                        else: self.apply_reserved(selected, arrangement, plan.workspace)
                     except Exception:
                         original_focus = self.ipc.windows().get(plan.focus)
                         if original_focus and self.ipc.data('-j', 'activewindow').get('address') != plan.focus:
@@ -1362,8 +1520,8 @@ class Saved(Setup):
                 if remembered != plan.recipe:
                     try: self.store.update(plan.name, remembered, plan.recipe)
                     except (SetupError, OSError):
-                        return f'Opened “{plan.name}”. Launcher choices could not be saved; save the card again to remember them.'
-        return f'Opened “{plan.name}”.'
+                        return ('Reopened missing apps' if plan.action == 'repair' else 'Opened') + f' for “{plan.name}”. Launcher choices could not be saved; save the card again to remember them.'
+        return f'Reopened missing apps in “{plan.name}”.' if plan.action == 'repair' else f'Opened “{plan.name}”.'
 
     def apply(self, plan):
         if plan.action in ('save', 'update'):
@@ -1391,7 +1549,7 @@ class Saved(Setup):
         if plan.action == 'delete':
             self.store.update(plan.name, None, plan.previous)
             return f'Deleted saved card “{plan.name}”.'
-        if plan.action == 'open': return self.apply_open(plan)
+        if plan.action in ('open', 'repair'): return self.apply_open(plan)
         if plan.action == 'goto':
             self.check_plan(plan)
             windows, state = self.ipc.windows(), self.ipc.status()
@@ -1444,7 +1602,7 @@ def main():
                 selected = flow.prepare(args.edit or front)
             # Launch waits must not hold the request lock: opening C again can
             # supersede them. apply_open locks only launch and commit sections.
-            opening = isinstance(selected, SavedPlan) and selected.action == 'open'
+            opening = isinstance(selected, SavedPlan) and selected.action in ('open', 'repair')
             with nullcontext() if opening else request.exclusive():
                 request.check()
                 message = flow.apply(selected)
