@@ -2,7 +2,7 @@
 name = "hyprflip"
 authors = ["Hyprflip contributors"]
 commit_pins = [
-    ["efb50993780079460b0cbed1363e2166a2de1d9f", "ca264690e3c247a792bd8f2265dc078bef8aca76"],
+    ["efb50993780079460b0cbed1363e2166a2de1d9f", "4dc2f9b92d29231cee07c6a731caf9adf52ffa16"],
 ]
 
 [hyprflip]

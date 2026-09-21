@@ -19,7 +19,7 @@ jobs:
         run: |
           g++ -std=c++20 -Wall -Wextra -Werror -Isrc tests/core_test.cpp -o /tmp/hyprflip-core-test
           /tmp/hyprflip-core-test
-      - name: Test installer recovery
+      - name: Test card helpers and installer recovery
         run: python3 -m unittest discover -s tests -p '*_test.py'
       - name: Check Python syntax and plugin manifest
         run: |

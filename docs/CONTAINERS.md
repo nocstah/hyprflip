@@ -1,8 +1,12 @@
 # Container experiment
 
-Status: opt-in development experiment for Hyprland 0.56.2. The stable native
+Status: opt-in development experiment for Hyprland 0.56.2. The native
 two-window backend remains available. The regular installer does not enable this
 provider or change workspace layouts.
+
+For a first installation, follow the [installation guide](INSTALL.md#experimental-multi-app-cards),
+including provider activation and optional Omarchy menus. This document covers
+container behavior, direct commands and compositor acceptance checks.
 
 ## Goal
 
@@ -152,8 +156,9 @@ python scripts/install-setup.py
 
 This adds a small Python helper and
 [`examples/containers-setup.lua`](../examples/containers-setup.lua), loaded after
-the other Hyprflip bindings. It backs up the affected files and replaces only
-**Super+Ctrl+Alt+O**; no compositor library is replaced or unloaded.
+the other Hyprflip bindings. It backs up affected files and installs
+**Super+Ctrl+Alt+O/C/L/Space** for guided creation, editing, saved-card launching
+and hold-to-peek. No compositor library is replaced or unloaded.
 
 - On an existing card, **O** still unfolds or folds immediately.
 - On an ungrouped tiled window, **O** opens Omarchy's searchable menu. The focused
@@ -272,7 +277,7 @@ Application size limits still apply. Enlarge the card if a third app cannot fit.
 H/V choose the direction when adding a second app; a third retains it.
 
 To update an existing guided setup installation, run
-`python scripts/install-setup.py`. It checks both shortcuts for conflicts, backs
+`python scripts/install-setup.py`. It checks O/C/L/Space for shortcut conflicts, backs
 up the helper and Lua files, and reloads configuration. It does not replace or
 unload compositor libraries.
 
@@ -360,7 +365,8 @@ into visible splits; the experimental updater reconstructs them explicitly.
 - The compositor does not restore sessions at login or add individual-pane
   capture semantics. The optional Omarchy helper handles saved cards and explicit
   missing-app launching separately.
-- This is a development experiment, not a replacement for the installed plugin.
+- This is an optional development experiment. The native installation keeps
+  its existing layout unless you explicitly enable the provider and its rules.
 
 ## Implementation sequence
 

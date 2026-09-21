@@ -23,4 +23,4 @@ Include reproduction steps, Hyprland and plugin versions, compiler version, layo
 
 For a crash, provide the relevant backtrace and the action preceding it. Core dumps contain application memory: do not attach raw cores, private window contents or credentials. A compositor crash with a plugin loaded is not sufficient to identify the responsible component.
 
-Use [GitHub issues](https://github.com/nocstah/hyprflip/issues) and pull requests for feedback and changes. Contributions are provided under the repository's [MIT license](LICENSE).
+Use [GitHub issues](https://github.com/nocstah/hyprflip/issues) and pull requests for feedback and changes. Core contributions use the repository's [MIT license](LICENSE). Changes to the optional hy3 bridge use its [GPL-3.0-only license](integrations/hy3/LICENSE); see [integration licensing](integrations/hy3/README.md).
