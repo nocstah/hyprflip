@@ -13,10 +13,12 @@ namespace {
 constexpr const char *VERTEX = R"glsl(#version 300 es
 precision highp float;
 out vec2 local;
+out vec2 screenUV;
 uniform mat3 boxToClip;
 uniform mat3 outputToClip;
 void main() {
     vec2 p = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2));
+    screenUV = p;
     // Affine output mapping belongs at the vertices, not at every pixel.
     local = ((inverse(boxToClip) * outputToClip * vec3(p, 1.0)).xy - 0.5) * 2.0;
     gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
@@ -25,19 +27,70 @@ void main() {
 constexpr const char *FRAGMENT = R"glsl(#version 300 es
 precision highp float;
 in vec2 local;
+in vec2 screenUV;
 out vec4 color;
 uniform sampler2D source;
+uniform sampler2D secondSource;
+uniform int mode;
+uniform float progress;
+uniform float direction;
+uniform float aspect;
 uniform mat3 boxToClip;
 uniform vec3 rotation; // cosine, sine, bounded projection scale
 uniform float perspective;
+vec4 sampleFace(sampler2D face, vec2 p) {
+    vec2 uv = (boxToClip * vec3(p * 0.5 + 0.5, 1.0)).xy * 0.5 + 0.5;
+    if (any(greaterThan(abs(p), vec2(1.0))) || any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0))))
+        return vec4(0.0);
+    return texture(face, uv);
+}
+float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float field(vec2 p) {
+    vec2 cell = floor(p), f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+    return mix(mix(hash(cell), hash(cell + vec2(1.0, 0.0)), f.x),
+               mix(hash(cell + vec2(0.0, 1.0)), hash(cell + vec2(1.0, 1.0)), f.x), f.y);
+}
 void main() {
+    if (mode == -1) { color = texture(source, screenUV); return; }
     color = vec4(0.0);
+    if (mode >= 2) {
+        if (any(greaterThan(abs(local), vec2(1.0)))) return;
+        float t = clamp(progress, 0.0, 1.0);
+        float e = t * t * t * (t * (6.0 * t - 15.0) + 10.0);
+        if (t <= 0.0) { color = sampleFace(source, local); return; }
+        if (t >= 1.0) { color = sampleFace(secondSource, local); return; }
+        if (mode == 2) {
+            color = sampleFace(source, local + vec2(2.0 * e * direction, 0.0))
+                  + sampleFace(secondSource, local - vec2(2.0 * (1.0-e) * direction, 0.0));
+        } else if (mode == 3) {
+            color = mix(sampleFace(source, local), sampleFace(secondSource, local), e);
+        } else if (mode == 4) {
+            // A stable, smoothly interpolated field: reversing retraces it,
+            // with no time-varying noise or separate seams between panes.
+            float n = field((local * 0.5 + 0.5) * vec2(22.0 * aspect, 22.0));
+            float reveal = smoothstep(n - 0.08, n + 0.08, mix(-0.08, 1.08, e));
+            color = mix(sampleFace(source, local), sampleFace(secondSource, local), reveal);
+        } else {
+            vec2 radial = local * vec2(aspect, 1.0);
+            float maximum = length(vec2(aspect, 1.0));
+            float radius = mix(-0.06, 1.06, e) * maximum;
+            float delta = (length(radial) - radius) / maximum;
+            float reveal = 1.0 - smoothstep(-0.04, 0.04, delta);
+            float ring = exp(-delta * delta * 900.0) * sin(t * 3.14159265);
+            color = mix(sampleFace(source, local), sampleFace(secondSource, local / (1.0 + 0.025 * ring)), reveal);
+            color.rgb *= 1.0 + 0.045 * ring;
+        }
+        return;
+    }
+    vec2 axis = mode == 1 ? local.yx : local;
     float c = rotation.x, s = rotation.y, k = rotation.z;
     if (c < 0.00001) return;
-    float divisor = k * c - local.x * s;
-    float x = local.x * perspective / max(divisor, 0.00001);
-    float y = local.y * (perspective + x * s) / k;
-    vec2 sampleUV = (boxToClip * vec3(vec2(x, y) * 0.5 + 0.5, 1.0)).xy * 0.5 + 0.5;
+    float divisor = k * c - axis.x * s;
+    float x = axis.x * perspective / max(divisor, 0.00001);
+    float y = axis.y * (perspective + x * s) / k;
+    vec2 point = mode == 1 ? vec2(y, x) : vec2(x, y);
+    vec2 sampleUV = (boxToClip * vec3(point * 0.5 + 0.5, 1.0)).xy * 0.5 + 0.5;
     // Derivatives must be evaluated before divergent clipping. Four subpixel
     // samples calm text/edge shimmer during minification, on both the color
     // pass and the compositor's blur matte. No temporal smearing or snapshots.
@@ -47,6 +100,12 @@ void main() {
     if (any(lessThan(sampleUV, vec2(0.0))) || any(greaterThan(sampleUV, vec2(1.0)))) return;
     color = (texture(source, sampleUV + dx + dy) + texture(source, sampleUV + dx - dy)
            + texture(source, sampleUV - dx + dy) + texture(source, sampleUV - dx - dy)) * (0.25 * edge.x * edge.y);
+    // A single light field in card coordinates, shared by every pane. Fade it
+    // out at rest and keep alpha untouched so the blur matte and transparent
+    // margins retain the same coverage. This adds no texture samples or pass.
+    float depth = s * s;
+    float light = 1.0 - depth * (0.065 + 0.035 * x * s);
+    color.rgb *= light;
 }
 )glsl";
 
@@ -68,7 +127,8 @@ GLuint compile(GLenum type, const char *source, std::string &error) {
 
 // Restore real GL state, including bindings, so Hyprland's state caches remain valid.
 struct GLState {
-    GLint program, vao, activeTexture, texture, sampler, readFramebuffer;
+    GLint program, vao, activeTexture, texture[2], sampler[2], readFramebuffer;
+    GLint blendSrcRGB, blendDstRGB, blendSrcAlpha, blendDstAlpha, blendEqRGB, blendEqAlpha;
     GLboolean blend, scissor, depth, stencil, cull, depthMask, colorMask[4];
     GLState() {
         glGetIntegerv(GL_CURRENT_PROGRAM, &program);
@@ -76,9 +136,17 @@ struct GLState {
         glGetBooleanv(GL_DEPTH_WRITEMASK, &depthMask);
         glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &vao);
         glGetIntegerv(GL_ACTIVE_TEXTURE, &activeTexture);
-        glActiveTexture(GL_TEXTURE0);
-        glGetIntegerv(GL_TEXTURE_BINDING_2D, &texture);
-        glGetIntegerv(GL_SAMPLER_BINDING, &sampler);
+        for (unsigned i = 0; i < 2; ++i) {
+            glActiveTexture(GL_TEXTURE0 + i);
+            glGetIntegerv(GL_TEXTURE_BINDING_2D, &texture[i]);
+            glGetIntegerv(GL_SAMPLER_BINDING, &sampler[i]);
+        }
+        glGetIntegerv(GL_BLEND_SRC_RGB, &blendSrcRGB);
+        glGetIntegerv(GL_BLEND_DST_RGB, &blendDstRGB);
+        glGetIntegerv(GL_BLEND_SRC_ALPHA, &blendSrcAlpha);
+        glGetIntegerv(GL_BLEND_DST_ALPHA, &blendDstAlpha);
+        glGetIntegerv(GL_BLEND_EQUATION_RGB, &blendEqRGB);
+        glGetIntegerv(GL_BLEND_EQUATION_ALPHA, &blendEqAlpha);
         blend = glIsEnabled(GL_BLEND);
         scissor = glIsEnabled(GL_SCISSOR_TEST);
         depth = glIsEnabled(GL_DEPTH_TEST);
@@ -91,9 +159,13 @@ struct GLState {
         glBindFramebuffer(GL_READ_FRAMEBUFFER, readFramebuffer);
         glDepthMask(depthMask);
         glBindVertexArray(vao);
-        glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, texture);
-        glBindSampler(0, sampler);
+        for (unsigned i = 0; i < 2; ++i) {
+            glActiveTexture(GL_TEXTURE0 + i);
+            glBindTexture(GL_TEXTURE_2D, texture[i]);
+            glBindSampler(i, sampler[i]);
+        }
+        glBlendFuncSeparate(blendSrcRGB, blendDstRGB, blendSrcAlpha, blendDstAlpha);
+        glBlendEquationSeparate(blendEqRGB, blendEqAlpha);
         glActiveTexture(activeTexture);
         for (const auto &[flag, enabled] : {std::pair{GL_BLEND, blend},
                                             {GL_SCISSOR_TEST, scissor},
@@ -151,11 +223,65 @@ bool FlipShader::initialize(std::string &error) {
     rotation = glGetUniformLocation(p, "rotation");
     perspective = glGetUniformLocation(p, "perspective");
     texture = glGetUniformLocation(p, "source");
+    secondTexture = glGetUniformLocation(p, "secondSource");
+    mode = glGetUniformLocation(p, "mode");
+    progress = glGetUniformLocation(p, "progress");
+    direction = glGetUniformLocation(p, "direction");
+    aspect = glGetUniformLocation(p, "aspect");
     return true;
+}
+
+SP<Render::IFramebuffer> FlipShader::captureFace(const std::vector<PHLWINDOW> &windows, PHLMONITOR monitor, std::string &error) {
+    g_pHyprRenderer->glBackend()->makeEGLCurrent();
+    if (!initialize(error)) return nullptr;
+    SP<Render::IFramebuffer> face;
+    for (const auto &window : windows) {
+        auto pane = g_pHyprRenderer->makeSnapshotFB(window);
+        if (!pane || !pane->isAllocated() || !pane->getTexture()) {
+            error = "A face could not be captured";
+            return nullptr;
+        }
+        if (!face) { face = pane; continue; }
+        CRegion damage{0, 0, monitor->m_transformedSize.x, monitor->m_transformedSize.y};
+        if (!g_pHyprRenderer->beginFullFakeRender(monitor, damage, face)) {
+            error = "Could not compose the card face";
+            return nullptr;
+        }
+        {
+            GLState state;
+            glEnable(GL_BLEND);
+            glBlendEquation(GL_FUNC_ADD);
+            glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+            glDisable(GL_SCISSOR_TEST);
+            glDisable(GL_DEPTH_TEST);
+            glDisable(GL_STENCIL_TEST);
+            glDisable(GL_CULL_FACE);
+            glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+            glUseProgram(program);
+            glBindVertexArray(vao);
+            glActiveTexture(GL_TEXTURE0);
+            glBindTexture(GL_TEXTURE_2D, pane->getTexture()->m_texID);
+            glBindSampler(0, 0);
+            glUniform1i(texture, 0);
+            glUniform1i(mode, -1);
+            glDrawArrays(GL_TRIANGLES, 0, 3);
+        }
+        g_pHyprRenderer->endRender();
+    }
+    return face;
 }
 
 FlipTransformer::FlipTransformer(PHLWINDOW window, std::shared_ptr<Pose> pose, std::shared_ptr<FlipShader> shader)
     : m_window(window), m_pose(std::move(pose)), m_shader(std::move(shader)) {}
+
+void FlipTransformer::preWindowRender(CSurfacePassElement::SRenderData *data) {
+    if (snapshots(m_pose->mode) && !m_pose->failed) {
+        // The cached whole face provides color. Zero also disables native
+        // per-pane backdrop blur, which otherwise paints over the composite.
+        data->fadeAlpha = 0;
+        data->decorate = false;
+    }
+}
 
 SP<Render::IFramebuffer> FlipTransformer::transform(SP<Render::IFramebuffer> in) {
     const auto w = m_window.lock();
@@ -165,19 +291,31 @@ SP<Render::IFramebuffer> FlipTransformer::transform(SP<Render::IFramebuffer> in)
     const auto monitor = render.pMonitor;
     if (!monitor || !monitor->resources() || !in->getTexture())
         return in;
+    const bool snapshot = snapshots(m_pose->mode);
+    if (snapshot && m_pose->leader != w) return in; // already cleared and rendered with zero alpha
+    if (snapshot && !m_pose->dirty && m_pose->composite) return m_pose->composite;
     GLState state;
     if (!m_shader->initialize(m_pose->error)) {
         m_pose->failed = true;
         return in;
     }
-    auto out = monitor->resources()->getUnusedWorkBuffer();
+    if (snapshot && !m_pose->composite) {
+        m_pose->composite = g_pHyprRenderer->createFB("Hyprflip transition");
+        if (!m_pose->composite->alloc(in->m_size.x, in->m_size.y, DRM_FORMAT_ABGR8888)) {
+            m_pose->error = "Could not allocate the card transition";
+            m_pose->failed = true;
+            return in;
+        }
+        m_pose->composite->setImageDescription(in->imageDescription());
+    }
+    auto out = snapshot ? m_pose->composite : monitor->resources()->getUnusedWorkBuffer();
     if (!out) {
         m_pose->error = "No compositor work buffer available";
         m_pose->failed = true;
         return in;
     }
     auto guard = g_pHyprRenderer->bindTempFB(out);
-    CBox box = w->getFullWindowBoundingBox();
+    CBox box = m_pose->containerBox.value_or(w->getFullWindowBoundingBox());
     Vector2D offset = w->m_floatingOffset - monitor->m_position;
     if (w->m_workspace && !w->m_pinned)
         offset += w->m_workspace->m_renderOffset->value();
@@ -199,9 +337,19 @@ SP<Render::IFramebuffer> FlipTransformer::transform(SP<Render::IFramebuffer> in)
     glUseProgram(m_shader->program);
     glBindVertexArray(m_shader->vao);
     glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, in->getTexture()->m_texID);
+    glBindTexture(GL_TEXTURE_2D, (snapshot ? m_pose->faces[0] : in)->getTexture()->m_texID);
     glBindSampler(0, 0);
     glUniform1i(m_shader->texture, 0);
+    if (snapshot) {
+        glActiveTexture(GL_TEXTURE1);
+        glBindTexture(GL_TEXTURE_2D, m_pose->faces[1]->getTexture()->m_texID);
+        glBindSampler(1, 0);
+        glUniform1i(m_shader->secondTexture, 1);
+    }
+    glUniform1i(m_shader->mode, static_cast<int>(m_pose->mode));
+    glUniform1f(m_shader->progress, m_pose->progress);
+    glUniform1f(m_shader->direction, m_pose->direction);
+    glUniform1f(m_shader->aspect, box.w / std::max(1.0, box.h));
     glUniformMatrix3fv(m_shader->matrix, 1, GL_FALSE, matrix.getMatrix().data());
     glUniformMatrix3fv(m_shader->composite, 1, GL_FALSE, composite.getMatrix().data());
     const float sine = std::sin(m_pose->angle);
@@ -209,6 +357,7 @@ SP<Render::IFramebuffer> FlipTransformer::transform(SP<Render::IFramebuffer> in)
                 projectionScale(sine, m_pose->perspective, m_pose->retreat));
     glUniform1f(m_shader->perspective, m_pose->perspective);
     glDrawArrays(GL_TRIANGLES, 0, 3);
+    m_pose->dirty = false;
     return out;
 }
 } // namespace Hyprflip

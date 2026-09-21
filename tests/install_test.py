@@ -45,6 +45,7 @@ class InstallerTest(unittest.TestCase):
         self.originals = {p: p.read_bytes() for p in (self.library, self.module, self.main)}
         self.loaded = True
         self.pairs = [PAIR.copy()]
+        self.containers = []
         self.fail_adoption = False
         self.calls = []
 
@@ -59,7 +60,7 @@ class InstallerTest(unittest.TestCase):
         elif args == ["hyprflip", "status"]:
             self.assertTrue(self.loaded)
             version = "0.1.1" if self.library.read_bytes() == b"new plugin" else "0.1.0"
-            reply = {"version": version, "pairs": self.pairs}
+            reply = {"version": version, "pairs": self.pairs, "containers": self.containers}
         elif args == ["hyprflip", "finish"]:
             reply = "ok: settled"
         elif args == ["plugin", "unload", str(self.library)]:
@@ -158,6 +159,16 @@ class InstallerTest(unittest.TestCase):
         self.assertFalse(list(self.home.rglob("*.bak-*")))
         self.assertEqual(self.calls, [["-j", "binds"], ["-j", "plugin", "list"],
                                      ["hyprflip", "status"]])
+
+    def test_active_containers_reject_native_upgrade_before_mutation(self):
+        self.containers = [{"faces": [["0xc"], ["0xd", "0xe"]]}]
+        with self.assertRaisesRegex(SystemExit, "Experimental containers are active"):
+            self.run_installer()
+        for path, content in self.originals.items():
+            self.assertEqual(path.read_bytes(), content)
+        self.assertTrue(self.loaded)
+        self.assertFalse(any(call[0] in ("plugin", "reload") for call in self.calls))
+        self.assertFalse(list(self.home.rglob("*.bak-*")))
 
 
 if __name__ == "__main__":

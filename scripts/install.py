@@ -41,7 +41,11 @@ if conflicts:
 print(f"Plugin: {library}\nShortcuts: {module}\nLoad from: {main}")
 print("Super+Ctrl+Alt with M=mark, P=pair, F=flip, U=unpair, Escape=cancel")
 installed = any(p["name"] == "hyprflip" for p in json.loads(ctl("-j", "plugin", "list")))
-saved_pairs = json.loads(ctl("hyprflip", "status"))["pairs"] if installed else []
+installed_state = json.loads(ctl("hyprflip", "status")) if installed else {}
+if installed_state.get("containers"):
+    raise SystemExit("Experimental containers are active. This installer preserves native pairs only; "
+                     "use the experimental update procedure in docs/CONTAINERS.md before replacing either library.")
+saved_pairs = installed_state.get("pairs", [])
 if not saved_pairs and recovery.is_file():
     pending = json.loads(recovery.read_text())
     if pending.get("instance") == os.environ.get("HYPRLAND_INSTANCE_SIGNATURE"):

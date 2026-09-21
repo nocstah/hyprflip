@@ -19,7 +19,9 @@ int main() {
     require(t.secondSide() && t.angle() < -1.5, "incoming edge without mirrored face");
     t.reverse();
     t.advance(2);
-    require(!t.secondSide(), "reverse crosses midpoint back exactly once");
+    require(t.secondSide(), "reversal brakes before changing direction");
+    t.advance(60);
+    require(!t.secondSide(), "reverse returns across the actual edge");
     t.advance(1000);
     require(t.finished() && t.progress() == 0, "reverse settles to original");
     t.reverse();
@@ -44,6 +46,43 @@ int main() {
         const double angle = smooth.angle() + (smooth.secondSide() ? std::numbers::pi : 0.0);
         require(angle >= previous, "full physical angle is monotonic through the side change");
         previous = angle;
+    }
+    const auto physical = [](const Timeline &turn) {
+        return turn.angle() + (turn.secondSide() ? std::numbers::pi : 0.0);
+    };
+    for (double elapsed : {80.0, 209.0, 211.0, 350.0}) {
+        Timeline reversing(420);
+        reversing.advance(elapsed);
+        const auto before = physical(reversing);
+        reversing.advance(.001);
+        const auto atReverse = physical(reversing);
+        const auto incoming = atReverse - before;
+        reversing.reverse();
+        require(physical(reversing) == atReverse, "retarget preserves the physical angle");
+        reversing.advance(.001);
+        const auto outgoing = physical(reversing) - atReverse;
+        require(std::abs(outgoing - incoming) < incoming * .002, "retarget preserves angular velocity");
+        reversing.advance(1000);
+        require(reversing.finished() && !reversing.secondSide(), "retarget settles on the requested face");
+    }
+    // Dropped frames must not change the trajectory, even when the coast hits
+    // an endpoint before turning back. Exercise repeated retargeting as well.
+    for (double initial : {1.0, 200.0, 419.0}) {
+        for (double interval : {15.0, 60.0, 200.0, 700.0}) {
+            Timeline coarse(420), fine(420);
+            coarse.advance(initial);
+            fine.advance(initial);
+            for (int retarget = 0; retarget < 5; ++retarget) {
+                coarse.reverse();
+                fine.reverse();
+                coarse.advance(interval);
+                for (int frame = 0; frame < int(interval); ++frame)
+                    fine.advance(1);
+                require(std::abs(physical(coarse) - physical(fine)) < 1e-10,
+                        "reversals are independent of frame subdivision");
+                require(coarse.progress() >= 0 && coarse.progress() <= 1, "reversal stays within the card's two faces");
+            }
+        }
     }
     for (int direction : {-1, 1}) {
         for (int i = 0; i <= 1000; ++i) {

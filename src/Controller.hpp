@@ -1,4 +1,5 @@
 #pragma once
+#include "ContainerABI.hpp"
 #include "FlipTransformer.hpp"
 #include "Timeline.hpp"
 #include <array>
@@ -8,12 +9,14 @@
 #include <hyprland/src/managers/eventLoop/EventLoopManager.hpp>
 #include <hyprland/src/plugins/PluginAPI.hpp>
 #include <optional>
+#include <map>
 
 namespace Hyprflip {
 struct Settings {
     SP<Config::Values::Int> duration;
     SP<Config::Values::Bool> enabled, notifications;
     SP<Config::Values::Float> perspective, retreat;
+    SP<Config::Values::String> transition;
 };
 struct Result {
     bool ok;
@@ -26,6 +29,8 @@ class Controller {
     ~Controller();
     Result action(const std::string &action);
     std::string status();
+    bool inContainer();
+    bool protectsWorkspace(uint32_t workspace) const;
     void notify(const Result &result);
 
   private:
@@ -34,6 +39,16 @@ class Controller {
         std::array<PHLWINDOWREF, 2> windows;
         WP<Desktop::View::CGroup> group;
         bool previousLock = false;
+        uint64_t containerID = 0, providerEpoch = 0;
+    };
+    struct State {
+        std::array<std::vector<PHLWINDOW>, 2> faces;
+        std::array<PHLWINDOW, 2> focused;
+        unsigned active = 0;
+        bool unfolded = false;
+        CBox geometry;
+        bool contains(PHLWINDOW window) const;
+        std::vector<PHLWINDOWREF> windows() const;
     };
     struct Turn {
         uint64_t pairID;
@@ -41,29 +56,39 @@ class Controller {
         Timeline timeline;
         std::chrono::steady_clock::time_point last;
         std::shared_ptr<Pose> pose;
-        std::array<Render::IWindowTransformer *, 2> transformers{};
-        std::array<PHLWINDOWREF, 2> windows;
+        std::vector<Render::IWindowTransformer *> transformers;
+        std::vector<PHLWINDOWREF> windows;
         CBox geometry;
         PHLMONITORREF monitor;
         PHLWORKSPACEREF workspace;
         std::optional<uint32_t> triggerKey;
-        std::array<bool, 2> suppressedGlass{};
+        std::vector<bool> suppressedGlass;
+        std::vector<CBox> windowGeometry;
+        bool previewReturn = false;
     };
     Pair *find(PHLWINDOW window);
     Pair *find(uint64_t id);
     bool valid(const Pair &pair) const;
+    std::optional<State> state(const Pair &pair) const;
+    const ContainerAPI *provider(uint64_t epoch = 0) const;
+    void discardContainer(const Pair &pair);
     void reconcile();
     void deferReconcile();
     void onFrame(PHLMONITOR monitor);
     void finish(bool applyDestination = true);
-    void select(Pair &pair, unsigned index);
+    void select(Pair &pair, unsigned index, bool focus = true);
     void damage(const Pair &pair);
     void detach();
     Result mark();
     Result pair();
     Result adopt(const std::string &front, const std::string &back);
-    Result flip();
+    Result flip(std::optional<Transition> preview = std::nullopt);
     Result unpair();
+    Result attach(bool vertical);
+    Result release();
+    Result workspace(uint32_t destination, bool follow);
+    Result move(char direction);
+    Result unfold();
     std::string unavailable(PHLWINDOW window) const;
     bool inputBusy() const;
     std::string animationFallback(PHLWINDOW a, PHLWINDOW b) const;
@@ -77,6 +102,7 @@ class Controller {
     uint64_t m_nextID = 1;
     std::optional<Turn> m_turn;
     std::shared_ptr<FlipShader> m_shader;
+    PHLMONITORREF m_renderingMonitor;
     SP<CEventLoopTimer> m_timer;
     UP<SEventLoopDoLaterLock> m_reconcileLater, m_keyLater;
     std::vector<CHyprSignalListener> m_listeners;
@@ -84,5 +110,12 @@ class Controller {
     bool m_mutating = false;
     bool m_stopping = false;
     std::string m_lastFallback;
+    double m_captureMs = 0;
+    struct Reservation {
+        uint32_t workspace;
+        std::chrono::steady_clock::time_point until;
+    };
+    std::map<std::string, Reservation> m_reservations;
+    std::optional<uint32_t> m_movingWorkspace;
 };
 } // namespace Hyprflip

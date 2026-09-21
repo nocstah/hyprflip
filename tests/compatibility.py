@@ -12,6 +12,7 @@ p.add_argument("session", type=Path)
 p.add_argument("--plugin", type=Path, default=Path("build/hyprflip.so"))
 p.add_argument("--hyprglass", type=Path)
 p.add_argument("--output", type=Path, default=Path("test-results"))
+p.add_argument("--transition", choices=("flip", "vertical", "slide", "fade", "dissolve", "portal"), default="flip")
 args = p.parse_args()
 env = environment(args.session)
 args.output.mkdir(parents=True, exist_ok=True)
@@ -38,7 +39,7 @@ def wait(fn, seconds=5):
 def windows(): return json.loads(ctl("-j", "clients"))
 def check(name): checks.append(name); print("PASS", name, flush=True)
 def capture(name): subprocess.run(["grim", str(args.output / name)], env=env, check=True, timeout=6)
-def settings(): lua('hl.config({plugin={hyprflip={duration_ms=1200,notifications=false}}})')
+def settings(): lua('hl.config({plugin={hyprflip={duration_ms=1200,notifications=false,transition="' + args.transition + '"}}})')
 try:
     assert "hyprflip" not in ctl("plugin", "list")
     ctl("plugin", "load", str(args.plugin.resolve())); loaded = True

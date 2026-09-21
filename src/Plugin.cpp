@@ -17,9 +17,33 @@ int invoke(lua_State *L, const char *action) {
 int mark(lua_State *L) { return invoke(L, "mark"); }
 int pair(lua_State *L) { return invoke(L, "pair"); }
 int flip(lua_State *L) { return invoke(L, "flip"); }
+int preview(lua_State *L) { return invoke(L, (std::string("preview ") + luaL_checkstring(L, 1)).c_str()); }
 int unpair(lua_State *L) { return invoke(L, "unpair"); }
 int cancel(lua_State *L) { return invoke(L, "cancel"); }
 int finish(lua_State *L) { return invoke(L, "finish"); }
+int attach(lua_State *L) {
+    const std::string axis = luaL_optstring(L, 1, "horizontal");
+    return invoke(L, ("attach " + axis).c_str());
+}
+int release(lua_State *L) { return invoke(L, "release"); }
+int workspace(lua_State *L) {
+    const auto destination = luaL_checkinteger(L, 1);
+    if (!lua_isnoneornil(L, 2))
+        luaL_checktype(L, 2, LUA_TBOOLEAN);
+    const bool follow = lua_isnoneornil(L, 2) || lua_toboolean(L, 2);
+    return invoke(L, ("workspace " + std::to_string(destination) + (follow ? "" : " silent")).c_str());
+}
+int move(lua_State *L) { return invoke(L, (std::string("move ") + luaL_checkstring(L, 1)).c_str()); }
+int unfold(lua_State *L) { return invoke(L, "unfold"); }
+int inContainer(lua_State *L) {
+    lua_pushboolean(L, controller->inContainer());
+    return 1;
+}
+int protectsWorkspace(lua_State *L) {
+    const auto workspace = luaL_checkinteger(L, 1);
+    lua_pushboolean(L, workspace > 0 && workspace <= INT32_MAX && controller->protectsWorkspace(workspace));
+    return 1;
+}
 int adopt(lua_State *L) {
     const std::string front = luaL_checkstring(L, 1), back = luaL_checkstring(L, 2);
     return invoke(L, ("adopt " + front + " " + back).c_str());
@@ -47,6 +71,12 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE h) {
                                                     "Full flip duration in milliseconds (zero switches instantly)", 420,
                                                     SIntValueOptions{.min = 0, .max = 2000}));
     settings.enabled = config(makeConfigValue<Bool>("plugin:hyprflip:enabled", "Animate flips", true));
+    settings.transition = config(makeConfigValue<String>("plugin:hyprflip:transition",
+        "Card transition: flip, vertical, slide, fade, dissolve, portal or instant", "flip",
+        SStringValueOptions{.validator = [](const std::string &value) -> std::expected<void, std::string> {
+            if (Hyprflip::transition(value)) return {};
+            return std::unexpected("Choose flip, vertical, slide, fade, dissolve, portal or instant");
+        }}));
     settings.notifications =
         config(makeConfigValue<Bool>("plugin:hyprflip:notifications", "Show pairing and error notifications", true));
     settings.perspective = config(makeConfigValue<Float>("plugin:hyprflip:perspective", "Perspective camera distance",
@@ -57,9 +87,17 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE h) {
     for (const auto &[name, fn] : {std::pair<const char *, PLUGIN_LUA_FN>{"mark", mark},
                                    {"pair", pair},
                                    {"flip", flip},
+                                   {"preview", preview},
                                    {"unpair", unpair},
                                    {"cancel", cancel},
                                    {"finish", finish},
+                                   {"attach", attach},
+                                   {"release", release},
+                                   {"workspace", workspace},
+                                   {"move", move},
+                                   {"unfold", unfold},
+                                   {"in_container", inContainer},
+                                   {"protects_workspace", protectsWorkspace},
                                    {"adopt", adopt},
                                    {"status", status}})
         if (!HyprlandAPI::addLuaFunction(handle, "hyprflip", name, fn))

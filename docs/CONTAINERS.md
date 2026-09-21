@@ -1,0 +1,385 @@
+# Container experiment
+
+Status: opt-in development experiment for Hyprland 0.56.2. The stable native
+two-window backend remains available. The regular installer does not enable this
+provider or change workspace layouts.
+
+## Goal
+
+Flip one desktop tile between two views of a task. For example, Gmail on the
+front and up to three messaging applications sharing its reverse side.
+
+Two sides, at most three panes per side, one split per face. The card's workspace
+command moves its applications together. A flip restores the last focused application on
+the destination face. Closing an application never closes the other applications.
+Releasing a pane and disabling the effect must leave ordinary usable windows.
+
+## Build and try in isolation
+
+For an interactive demo with three shells already arranged into a card:
+
+```sh
+./scripts/build-containers
+python -u tests/nested_session.py --directory /tmp/hf-demo --containers
+```
+
+Click inside the demo and press **F8** to flip. The front shows the other demo
+shortcuts, including mark, pair, attach and release. These bindings exist only
+inside the disposable compositor. Press Ctrl+C in the launcher to finish;
+closing a nested output window alone can leave its compositor running without
+an output. Use a fresh short `/tmp` directory for each running session.
+
+For automated checks, start the regular fixture session instead:
+
+```sh
+./scripts/build-containers
+python -u tests/nested_session.py --directory /tmp/hf-card
+```
+
+Keep that launcher running. In another terminal, run the acceptance suite:
+
+```sh
+python tests/containers.py /tmp/hf-card/session.json
+```
+
+The suite copies the libraries, loads them into the selected disposable session,
+creates real terminal applications, captures the animation, and cleans up. Its
+IPC guard rejects the live compositor. GPU access and an awake parent output are
+required. The full build keeps Hyprland's ABI checks enabled and verifies the hy3
+revision; it needs hy3's normal development dependencies too.
+
+For a manual experiment inside that session, copy the two libraries first:
+
+```sh
+cp build/containers/provider/upstream/libhy3.so /tmp/hf-card/manual-hy3.so
+cp build/containers/core/hyprflip.so /tmp/hf-card/manual-hyprflip.so
+python tests/control.py /tmp/hf-card/session.json plugin load /tmp/hf-card/manual-hy3.so
+python tests/control.py /tmp/hf-card/session.json plugin load /tmp/hf-card/manual-hyprflip.so
+python tests/control.py /tmp/hf-card/session.json repl 'hl.config({general={layout="hy3"}})'
+```
+
+Set the layout after loading both libraries: plugin loading reloads the base
+configuration. A persistent experiment must also declare its hy3 workspace
+layout in that session's configuration. Do not load a stock hy3 and the
+experimental hy3 simultaneously. Stop the disposable launcher with Ctrl+C.
+
+## Dedicated workspace trial
+
+[`examples/containers-trial.lua`](../examples/containers-trial.lua) is an optional
+configuration for an explicitly enabled desktop trial. It selects hy3 only for
+workspace **8** and adds **Super+Ctrl+Alt+H** (attach beside), **V** (attach below),
+and **E** (release). The regular **M/P/F/U/Escape** shortcuts continue to handle
+mark, pair, flip, unpair and cancel. **O** toggles temporary unfold. F6/F7/F8
+belong only to the nested demo.
+
+The example expects the updated core, the experimental provider at
+`~/.local/lib/hyprflip/containers/libhy3.so`, and loading after `hypr.hyprflip`.
+Check that workspace 8 is free and the new shortcuts are unused before enabling
+it. The regular installer does not install the provider or load this module.
+
+The matching `tests/trial.py` check runs in a disposable compositor. It verifies
+native dwindle pairs alongside a hy3 workspace, the attach/release shortcuts,
+Hyprglass during a container flip, reload and unpair. Passing these checks does
+not establish day-to-day stability on the real desktop.
+
+To expand an existing trial, set `trial_workspace = nil` in the example and load
+it after any saved workspace layout rules. This selects hy3 for all normal
+workspaces, including newly created ones and workspaces with earlier layout
+overrides. Special scratchpads retain dwindle. The same Hyprflip shortcuts apply.
+
+Before switching, unpair existing **tiled native pairs while their workspace
+still uses dwindle**. After the switch, mark their original front and pair their
+original back again; they now use containers. Existing hy3 containers can stay
+in place. This ordering matters: the pinned hy3 can retain an expired native
+group target when ungrouping after the layout change. Floating pairs remain
+native and cannot accept additional panes.
+
+The expansion regression adds native-pair conversion, existing-card preservation,
+saved layout overrides, new workspaces, special scratchpads, whole-card moves
+and reload:
+
+```sh
+python tests/trial.py /tmp/hf-test/session.json \
+  --hyprglass /path/to/hyprglass.so --all-workspaces
+```
+
+When disabling several plugins, keep Hyprglass loaded until Hyprflip and hy3
+have unloaded. Removing all three in one config reload exposed a teardown crash
+with the installed Hyprglass 1.0 build; ordinary reloads keeping them loaded pass.
+
+## Normal movement shortcuts
+
+[`examples/containers-navigation.lua`](../examples/containers-navigation.lua)
+optionally replaces Omarchy's existing movement bindings. Load it after the
+container configuration and other keybindings. It calls `hl.unbind` before
+replacing each binding:
+
+| Shortcut | Behavior |
+| --- | --- |
+| Super+Shift+1…0 | Move the entire focused card to workspace 1…10 and follow it |
+| Super+Shift+Alt+1…0 | Move the card there and keep focus on the source workspace |
+| Super+Shift+arrows | Reorder the whole card toward a neighboring tile |
+
+These keys previously moved or swapped the selected window. Ordinary windows
+retain workspace movement and use hy3's directional movement on a hy3 layout;
+other layouts retain the standard swap command. A failed card move leaves all
+panes in place. A directional card move at an outer edge does nothing. Scratchpad
+and drag bindings are not replaced by this module.
+
+## Temporary unfold
+
+**Super+Ctrl+Alt+O** shows both faces in the card's existing tile. The wider axis
+is preferred, with the other axis tried if application size limits require it.
+If neither arrangement fits, the card stays folded. Both faces contain live,
+interactive applications; the normal Hyprland resize animation handles the
+change, including reduced-motion settings.
+
+Press **Super+Ctrl+Alt+O** again to fold onto the face containing the focused
+application. Inner split proportions are retained. While unfolded,
+**Super+Ctrl+Alt+F** folds onto the
+opposite face; it does not run the perspective turn while both faces are visible.
+Movement, release, close and config reload continue to work. Leave fullscreen
+before unfolding or moving a card.
+
+## Guided creation from O
+
+For an enabled container trial on Omarchy 4, install the optional picker:
+
+```sh
+python scripts/install-setup.py --dry-run
+python scripts/install-setup.py
+```
+
+This adds a small Python helper and
+[`examples/containers-setup.lua`](../examples/containers-setup.lua), loaded after
+the other Hyprflip bindings. It backs up the affected files and replaces only
+**Super+Ctrl+Alt+O**; no compositor library is replaced or unloaded.
+
+- On an existing card, **O** still unfolds or folds immediately.
+- On an ungrouped tiled window, **O** opens Omarchy's searchable menu. The focused
+  window becomes the front. Choose an app for the back, then choose **Only one
+  app** or **Add [app name]** for a second app. After choosing a second app,
+  choose **Only two apps** or add a third. When only one other window is
+  available, one selection is enough.
+- The selected apps group automatically, with the card folded onto the front.
+  **Super+Ctrl+Alt+F** flips to the back; **Super+Ctrl+Alt+O** shows both faces
+  together when you want them.
+- **Escape** at any menu cancels without changing the windows, their layout or
+  any pending mark. Ungrouping removes the card; the same shortcut can create it
+  again through the picker.
+
+The current workspace must use hy3. Choices include ungrouped windows
+from any normal workspace; existing cards, pinned windows and scratchpads
+are excluded. Local apps appear first, followed by **Add from workspace X**
+entries in workspace order. Each entry opens that workspace's app list, with
+**Back to all apps** to return. Selected remote apps move to the front window's
+workspace after all choices are complete. App names and window
+titles distinguish choices; same-named windows get separate entries. The helper
+rechecks window identity, workspace and ownership before applying the selection.
+It never launches or closes applications. A second pane uses the card's longer
+axis; the explicit H/V commands can establish the first split in either direction.
+A third app joins the existing row or column, retaining its direction and the
+relative sizes of its existing panes. Creation
+does not require enough space to show both faces simultaneously.
+
+Floating apps get a final **Tile and create card** choice. Cancelling preserves
+their arrangement. Creating tiles only the selected apps; a failure restores
+their previous floating positions and returns imported apps to their workspaces.
+For apps managed by Omachill, install the optional
+[Chill integration](TRANSITIONS.md#chill-mode) so Auto Chill respects cards.
+An older core keeps the original tiled-only picker behavior.
+
+The picker uses the running Omarchy menu, including its current theme, filtering,
+arrow keys and Return. It requires Python 3, `omarchy-shell` and `notify-send`.
+Other desktops can continue using mark/pair/attach. This is guided creation;
+cards are still not saved or restored across compositor restarts.
+
+## Edit an existing card
+
+The same optional helper adds **Super+Ctrl+Alt+C** for **Edit card**. Focus the
+app on the side you want to change, then open the menu:
+
+- **Add an app to this side** opens the familiar app picker. Local apps appear
+  first, followed by **Add from workspace X** entries. Choose an ungrouped,
+  app; floating apps offer **Tile and add to card**. A remote app moves here
+  before joining the side and receives focus. The
+  first split follows the available space: beside on a wide pane, below on a tall
+  pane. Adding a third app keeps that row or column and its existing proportions.
+- On a side with two or three apps, **Remove [app] from card** is available for each app.
+  It releases the chosen app into its own tile and keeps it open. Removing the
+  other app keeps focus on the app you were using. The other apps remain paired. The menu
+  states that the side is full at three apps and omits Add until there is room.
+- When the focused app is alone on its side, the option is **Ungroup card**.
+  This explicitly dissolves the card and leaves all its apps open.
+
+For example, open Telegram, then on your Gmail/WhatsApp card,
+focus WhatsApp, press **Super+Ctrl+Alt+C**, choose **Add an app to this side**,
+then choose **Telegram** locally or under **Add from workspace X**. The Gmail
+face stays intact.
+
+Editing also works while unfolded and preserves that state. **O** continues to
+unfold/fold immediately; **C** opens the editor. Escape at either menu cancels
+before changing focus, marks or layout. A card change, app closure, workspace
+change or changed focus invalidates a pending selection. A refused attachment
+keeps the existing card intact and returns imported apps to their original
+workspaces when they remain available. A source layout may reflow on return.
+Application size limits still apply. Enlarge the card if a third app cannot fit.
+H/V choose the direction when adding a second app; a third retains it.
+
+To update an existing guided setup installation, run
+`python scripts/install-setup.py`. It checks both shortcuts for conflicts, backs
+up the helper and Lua files, and reloads configuration. It does not replace or
+unload compositor libraries.
+
+## Updating an enabled trial
+
+The current core and provider use bridge ABI **3**; rebuild both together.
+The updater restores one-, two- and three-app faces, including their split
+proportions. An ABI 2 installation can upgrade without recreating its cards.
+The regular installer refuses to replace the core while experimental cards are
+active. For an already-enabled trial using the documented library paths:
+
+```sh
+./scripts/build-containers
+make
+python scripts/update-containers.py --dry-run
+python scripts/update-containers.py
+```
+
+The updater backs up both libraries and same-session recovery metadata, settles
+turns, unloads the core before the provider while leaving Hyprglass loaded,
+updates both, and reconstructs the cards. It restores face membership, inner
+split direction and proportion, current face, native pairs and application
+focus. The surrounding tiling tree may reflow when hy3 reloads. No applications
+are launched or closed, and no keybindings or layout rules are installed.
+
+A failed load attempts to restore the previous libraries and cards. Backups live
+under `~/.local/state/hyprflip/container-update-*`. Window addresses in the
+recovery metadata are valid only in that compositor session; this is not saved
+setup support. Complete any fullscreen or native-group changes before updating,
+and dismiss screensavers covering a card workspace so restoration can focus its
+applications. The dry run checks these conditions before any library changes.
+
+## Interaction
+
+Use the following actions through `hyprctl hyprflip` in the experiment, or prefix
+them with `python tests/control.py /tmp/hf-card/session.json` when controlling it
+from the parent desktop.
+
+1. Focus the front application and run `hyprflip mark`.
+2. Focus the back application and run `hyprflip pair`.
+3. Focus a third application and run `hyprflip mark`.
+4. Focus the card face that should receive it and run `hyprflip attach`.
+5. Run `hyprflip flip` for the everyday front/back switch.
+
+| Action | Behavior |
+| --- | --- |
+| `attach` or `attach horizontal` | Add a second app beside the first, or a third in the existing row/column |
+| `attach vertical` | Add a second app below the first, or a third in the existing row/column |
+| `release` | Move the focused pane outside the card; dissolve if that empties a face |
+| `workspace 2` | Move all card members to numbered hy3 workspace 2 and follow them |
+| `workspace 2 silent` | Move the card and remain on the source workspace |
+| `move left` / `right` / `up` / `down` | Reorder the entire card toward a neighbor |
+| `unfold` | Toggle showing both faces together in the existing tile |
+| `unpair` | Turn both faces into ordinary visible splits |
+| `cancel` | Clear the pending mark |
+| `status` | Report native `pairs` and experimental `containers` separately |
+
+Lua exposes `hl.plugin.hyprflip.attach("horizontal")`, `release()` and
+`workspace(2, follow)`, `move("left")`, `unfold()` and `in_container()` alongside
+the existing direct action functions. `follow` defaults to true. Bindings are
+installed only by the optional configuration modules. Existing mark/pair/flip shortcuts use containers when
+both tiled windows belong to the experimental hy3 provider.
+
+Focus, resize and close still act on real applications. Use the navigation module
+or explicit `workspace` action to move a whole card; an unadapted window-move
+command acts on the selected pane. Leave fullscreen before flipping or moving a container.
+New windows open outside the card. Unloading Hyprflip dissolves its containers
+into visible splits; the experimental updater reconstructs them explicitly.
+
+## Current boundaries
+
+- Hyprland 0.56.2 and the pinned hy3 release only. Dwindle retains native pairs.
+- Tiled windows on one workspace; no floating containers or nested flip cards.
+- At most three apps per face, arranged in one row or column. No nested splits
+  within a face. Hy3 supports larger trees; this is the supported Hyprflip subset.
+- Unfold places three-app rows above one another and three-app columns beside
+  one another. Mixed split directions use the card's proportions. Application
+  size limits can select the alternate arrangement or refuse the unfold.
+- Workspace moves currently accept positive numeric IDs and require hy3 at the
+  destination. Named/special workspace moves and whole-card dragging are deferred.
+- Layout navigation uses hy3's model. This does not make dwindle support nested
+  containers, and does not automatically replace existing movement shortcuts.
+- The tab bar is visible at rest and hidden during a turn. Popups do not rotate;
+  unsuitable rendering conditions switch instantly.
+- No saved recipes, session restoration, automatic companion launching or
+  individual-pane capture semantics are added.
+- This is a development experiment, not a replacement for the installed plugin.
+
+## Implementation sequence
+
+1. Build a pinned hy3 revision against the installed Hyprland 0.56.2 headers and
+   load it only in a disposable nested compositor. Stop extending this route if
+   it needs a substantial compatibility fork.
+2. Expose a small bridge to hy3's existing two-tab containers. Hy3 owns the tree,
+   pane geometry, visibility and focus. Hyprflip keeps references to faces and
+   temporary animation state, not another layout tree. Keep bridge code separate
+   from the default native backend, with explicit compatibility checks.
+3. Make a three-window container switch instantly, remember focus, and support
+   release and normal cleanup. Prove lifecycle behavior before adding motion.
+4. Reuse the current timeline and per-window render transformers with a shared
+   container rectangle. Test clipping and both sides of the midpoint. Fall back
+   to an instant switch when the surfaces or geometry are unsuitable.
+5. Provide repeatable setup, commands, documentation and nested regression tests.
+
+## Usability boundaries
+
+- Flip is the everyday operation. Setup actions explicitly add or release a
+  window; unrelated new windows are not silently adopted.
+- Input settles a turn before normal delivery. External focus never gets pulled
+  back. Urgency alone does not flip a container.
+- Ordinary focus and close act on real applications. Do not leave keyboard focus
+  on a structural group as a side effect of a flip.
+- Preserve the external footprint during a flip and the split ratio on each face.
+- Reject unsuitable transient, fullscreen, floating or already-owned windows at
+  setup rather than guessing a layout transformation.
+- External membership changes cancel the effect safely. An empty face or a
+  changed layout must never leave an application inaccessible.
+- Peek, gestures, recipes, nested flip containers and linked flips are deferred.
+  See the [workflow roadmap](ROADMAP.md) for the earlier ideas and priorities.
+
+## Acceptance checks
+
+Run automated checks in a disposable nested session. Desktop trials are a
+separate opt-in step after isolated validation. Copy libraries before loading so
+rebuilding cannot overwrite a mapped file.
+
+- Three real windows, only the active face visible and accepting input.
+- Repeated switches preserve the outer geometry and restore each face's focus.
+- Up to three panes per face share one pivot during animation; reversal and new input settle
+  consistently.
+- Closing/releasing a member, changing workspace, config reload, plugin unload,
+  and external tree edits leave surviving applications accessible.
+- A normal adjacent window remains independently focusable and is not moved by
+  a flip.
+- Workspace shortcuts preserve the complete card, with follow and silent moves
+  across outputs; directional shortcuts stop at an outer edge.
+- Unfold keeps two to six panes live within the original footprint, preserves
+  inner proportions and focused face on refold, and rejects inadequate space.
+- Updating both libraries preserves existing cards and native pairs; a failed
+  load rolls back both libraries and reconstructs the prior arrangements.
+- Existing native pair lifecycle and installer tests continue to pass.
+
+## Evidence and open decisions
+
+[hy3](https://github.com/outfoxxed/hy3) has the required nested tab/split model.
+Its user commands do not constitute a stable inter-plugin container interface,
+so the bridge and exact revision need explicit validation. A selected workspace
+can use hy3, but compatibility does not imply unchanged navigation bindings.
+
+[Hypertile](https://github.com/jdvmi00/hypertile),
+[hyprdeck](https://github.com/chpock/hyprdeck), and
+[hypr-layout](https://github.com/sim590/hypr-layout) provide useful layout,
+lifecycle and setup references. They do not replace hy3's nested tab ownership
+for this experiment. No external implementation is being copied into the native
+Hyprflip backend.

@@ -4,16 +4,18 @@
 #include <cstdlib>
 #include <format>
 #include <hyprland/src/event/EventBus.hpp>
+#include <hyprland/src/output/Monitor.hpp>
 #include <hyprland/src/plugins/PluginAPI.hpp>
 #include <stdexcept>
 #include <vector>
 
 namespace {
 using Clock = std::chrono::steady_clock;
-CHyprSignalListener listener;
+CHyprSignalListener listener, monitorListener;
 SP<SHyprCtlCommand> command;
 Clock::time_point epoch, frameStart;
 std::string pending;
+PHLMONITORREF frameMonitor;
 std::vector<std::string> samples;
 bool recording = false;
 } // namespace
@@ -25,6 +27,8 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     if (std::string_view(__hyprland_api_get_hash()) != std::string_view(__hyprland_api_get_client_hash()))
         throw std::runtime_error("Motion probe ABI mismatch");
     samples.reserve(4096);
+    monitorListener =
+        Event::bus()->m_events.render.preChecks.listen([](PHLMONITOR monitor) { frameMonitor = monitor; });
     listener = Event::bus()->m_events.render.stage.listen([](eRenderStage stage) {
         if (!recording || samples.size() >= 4096)
             return;
@@ -35,14 +39,18 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
                 pending = std::format("{{\"ms\":{},\"state\":{}",
                                       std::chrono::duration<double, std::milli>(frameStart - epoch).count(), state);
         } else if (stage == RENDER_POST && !pending.empty()) {
+            // Both PRE and POST are outside beginRender/endRender: renderData
+            // has no monitor there. preChecks supplies the actual output.
+            const auto monitor = frameMonitor.lock();
             samples.push_back(
-                pending + std::format(",\"cpu_render_ms\":{}}}",
+                pending + std::format(",\"monitor\":\"{}\",\"next_frame_pending\":{},\"cpu_render_ms\":{}}}",
+                                      monitor ? monitor->m_name : "", monitor && monitor->m_pendingFrame,
                                       std::chrono::duration<double, std::milli>(Clock::now() - frameStart).count()));
             pending.clear();
         }
     });
     command = HyprlandAPI::registerHyprCtlCommand(
-        handle, {.name = "hyprflip-motion-probe", .exact = false, .fn = [](eHyprCtlOutputFormat, std::string request) {
+        handle, {.name = "hf-motion-probe", .exact = false, .fn = [](eHyprCtlOutputFormat, std::string request) {
                      if (request.ends_with(" start")) {
                          samples.clear();
                          pending.clear();
@@ -59,10 +67,11 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
                      }
                      return json + "]";
                  }});
-    return {"hyprflip-motion-probe", "Disposable render timing test", "Hyprflip contributors", "1"};
+    return {"hf-motion-probe", "Disposable render timing test", "Hyprflip contributors", "1"};
 }
 APICALL EXPORT void PLUGIN_EXIT() {
     listener.reset();
+    monitorListener.reset();
     command.reset();
     samples.clear();
     pending.clear();

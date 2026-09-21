@@ -1,5 +1,7 @@
 #include "Controller.hpp"
 #include <algorithm>
+#include <charconv>
+#include <dlfcn.h>
 #include <format>
 #include <hyprland/src/desktop/Workspace.hpp>
 #include <hyprland/src/desktop/state/FocusState.hpp>
@@ -7,16 +9,20 @@
 #include <hyprland/src/desktop/view/Group.hpp>
 #include <hyprland/src/desktop/view/Popup.hpp>
 #include <hyprland/src/desktop/view/Window.hpp>
+#include <hyprland/src/layout/algorithm/Algorithm.hpp>
+#include <hyprland/src/layout/algorithm/TiledAlgorithm.hpp>
 #include <hyprland/src/managers/SeatManager.hpp>
 #include <hyprland/src/managers/SessionLockManager.hpp>
 #include <hyprland/src/managers/fullscreen/FullscreenController.hpp>
 #include <hyprland/src/managers/input/InputManager.hpp>
+#include <hyprland/src/plugins/PluginSystem.hpp>
 #include <hyprland/src/protocols/XDGShell.hpp>
 #include <hyprland/src/protocols/core/Compositor.hpp>
 #include <hyprland/src/protocols/core/DataDevice.hpp>
 #include <hyprland/src/render/Renderer.hpp>
 #include <hyprland/src/render/decorations/IHyprWindowDecoration.hpp>
 #include <limits>
+#include <cctype>
 #include <sstream>
 
 namespace Hyprflip {
@@ -55,11 +61,15 @@ Controller::Controller(HANDLE handle, Settings settings)
     m_timer = makeShared<CEventLoopTimer>(std::nullopt, [this](SP<CEventLoopTimer>, void *) { finish(); }, nullptr);
     g_pEventLoopManager->addTimer(m_timer);
     auto &e = Event::bus()->m_events;
-    m_listeners.emplace_back(e.render.preChecks.listen([this](PHLMONITOR m) { onFrame(m); }));
+    m_listeners.emplace_back(e.render.preChecks.listen([this](PHLMONITOR m) {
+        m_renderingMonitor = m;
+        onFrame(m);
+    }));
     m_listeners.emplace_back(e.render.stage.listen([this](eRenderStage stage) {
         // Scheduling here sets the compositor's pending-frame flag. Scheduling
-        // only before rendering can be consumed by the current commit.
-        if (stage == RENDER_POST && m_turn && g_pHyprRenderer->m_renderData.pMonitor == m_turn->monitor)
+        // only before rendering can be consumed by the current commit. The
+        // renderer clears renderData.pMonitor in endRender(), before POST.
+        if (stage == RENDER_POST && m_turn && m_renderingMonitor == m_turn->monitor)
             if (auto monitor = m_turn->monitor.lock())
                 monitor->scheduleFrame();
     }));
@@ -72,8 +82,12 @@ Controller::Controller(HANDLE handle, Settings settings)
         deferReconcile();
     }));
     m_listeners.emplace_back(e.window.fullscreen.listen([this](PHLWINDOW) {
-        if (!m_mutating)
-            finish();
+        if (!m_mutating && m_turn) {
+            auto p = find(m_turn->pairID);
+            // hy3 fullscreen belongs to an application, not the two-tab card.
+            // Keep that application's visible face when fullscreen interrupts.
+            finish(!p || !p->containerID);
+        }
     }));
     m_listeners.emplace_back(e.window.floating.listen([this](PHLWINDOW) {
         if (!m_mutating)
@@ -120,27 +134,104 @@ Controller::~Controller() {
         g_pEventLoopManager->removeTimer(m_timer);
         m_timer.reset();
     }
-    for (auto &pair : m_pairs)
+    for (auto &pair : m_pairs) {
+        discardContainer(pair);
         if (auto g = pair.group.lock())
             g->setLocked(pair.previousLock);
+    }
     m_pairs.clear();
     m_marked.reset();
     m_shader.reset();
 }
 
 Controller::Pair *Controller::find(PHLWINDOW w) {
-    auto it = std::ranges::find_if(m_pairs, [&](const Pair &p) { return p.windows[0] == w || p.windows[1] == w; });
+    auto it = std::ranges::find_if(m_pairs, [&](const Pair &p) {
+        auto s = state(p);
+        return s && s->contains(w);
+    });
     return it == m_pairs.end() ? nullptr : &*it;
 }
 Controller::Pair *Controller::find(uint64_t id) {
     auto it = std::ranges::find_if(m_pairs, [&](const Pair &p) { return p.id == id; });
     return it == m_pairs.end() ? nullptr : &*it;
 }
-bool Controller::valid(const Pair &p) const {
+bool Controller::State::contains(PHLWINDOW w) const {
+    return w && (std::ranges::find(faces[0], w) != faces[0].end() || std::ranges::find(faces[1], w) != faces[1].end());
+}
+std::vector<PHLWINDOWREF> Controller::State::windows() const {
+    std::vector<PHLWINDOWREF> result;
+    for (const auto &face : faces)
+        for (const auto &w : face)
+            result.emplace_back(w);
+    return result;
+}
+const ContainerAPI *Controller::provider(uint64_t epoch) const {
+    // Never retain a function pointer across an event or provider unload.
+    for (auto plugin : g_pPluginSystem->getAllPlugins()) {
+        if (plugin->m_name != "hy3")
+            continue;
+        auto entry = reinterpret_cast<ContainerEntry>(dlsym(plugin->m_handle, CONTAINER_SYMBOL));
+        if (!entry)
+            continue;
+        const auto api = entry();
+        if (api && api->version == CONTAINER_ABI_VERSION && api->size == sizeof(ContainerAPI) &&
+            (!epoch || epoch == api->epoch))
+            return api;
+    }
+    return nullptr;
+}
+void Controller::discardContainer(const Pair &p) {
+    if (p.containerID)
+        if (auto api = provider(p.providerEpoch))
+            api->dissolve(p.containerID);
+}
+std::optional<Controller::State> Controller::state(const Pair &p) const {
+    State result;
+    if (p.containerID) {
+        const auto api = provider(p.providerEpoch);
+        ContainerSnapshot snapshot;
+        if (!api || !api->inspect(p.containerID, &snapshot) || snapshot.active > 1)
+            return std::nullopt;
+        for (unsigned s = 0; s < 2; ++s) {
+            if (snapshot.count[s] < 1 || snapshot.count[s] > CONTAINER_MAX_PANES)
+                return std::nullopt;
+            for (unsigned i = 0; i < snapshot.count[s]; ++i) {
+                PHLWINDOW found;
+                for (const auto &w : Desktop::windowState()->windows())
+                    if (reinterpret_cast<uintptr_t>(w.get()) == snapshot.windows[s][i]) {
+                        found = w;
+                        break;
+                    }
+                if (!found || !found->m_isMapped)
+                    return std::nullopt;
+                result.faces[s].push_back(found);
+                if (reinterpret_cast<uintptr_t>(found.get()) == snapshot.focused[s])
+                    result.focused[s] = found;
+            }
+            if (!result.focused[s])
+                return std::nullopt;
+        }
+        result.active = snapshot.active;
+        result.unfolded = snapshot.unfolded;
+        result.geometry = {snapshot.x, snapshot.y, snapshot.width, snapshot.height};
+        return result;
+    }
     auto a = p.windows[0].lock(), b = p.windows[1].lock();
     auto g = p.group.lock();
-    return a && b && a->m_isMapped && b->m_isMapped && g && g->size() == 2 && a->m_group == g && b->m_group == g &&
-           g->has(a) && g->has(b);
+    if (!a || !b || !a->m_isMapped || !b->m_isMapped || !g || g->size() != 2 || a->m_group != g || b->m_group != g ||
+        !g->has(a) || !g->has(b))
+        return std::nullopt;
+    result.faces = {{{a}, {b}}};
+    result.focused = {a, b};
+    result.active = g->current() == a ? 0 : 1;
+    result.geometry = a->geometricBox(IGeometric::GEOMETRIC_GOAL);
+    return result;
+}
+bool Controller::valid(const Pair &p) const { return state(p).has_value(); }
+bool Controller::inContainer() {
+    reconcile();
+    const auto p = find(Desktop::focusState()->window());
+    return p && p->containerID;
 }
 void Controller::reconcile() {
     if (m_mutating)
@@ -153,6 +244,7 @@ void Controller::reconcile() {
                 finish(false);
             if (auto g = p.group.lock())
                 g->setLocked(p.previousLock);
+            discardContainer(p);
         }
     std::erase_if(m_pairs, [this](const Pair &p) { return !valid(p); });
 }
@@ -164,7 +256,7 @@ void Controller::deferReconcile() {
 void Controller::onClose(PHLWINDOW w) {
     if (m_marked == w)
         m_marked.reset();
-    if (m_turn && (m_turn->windows[0] == w || m_turn->windows[1] == w))
+    if (m_turn && std::ranges::find(m_turn->windows, w) != m_turn->windows.end())
         finish(false);
     deferReconcile();
 }
@@ -173,15 +265,13 @@ void Controller::onFocus(PHLWINDOW w) {
         return;
     if (m_turn) {
         auto p = find(m_turn->pairID);
-        if (!p || !valid(*p))
+        auto s = p ? state(*p) : std::nullopt;
+        if (!s)
             finish(false);
-        else if (w != p->group->current())
+        else if (!s->contains(w))
             finish();
-        else {
-            const auto expected = p->windows[m_turn->source ^ unsigned(m_turn->timeline.secondSide())];
-            if (w != expected)
-                finish(false);
-        }
+        else if (s->active != (m_turn->source ^ unsigned(m_turn->timeline.secondSide())))
+            finish(false);
     }
     deferReconcile();
 }
@@ -190,27 +280,36 @@ void Controller::settleInput() {
         finish();
 }
 void Controller::damage(const Pair &p) {
-    for (const auto &ref : p.windows)
+    auto s = state(p);
+    if (!s)
+        return;
+    for (const auto &ref : s->windows())
         if (auto w = ref.lock()) {
             g_pHyprRenderer->damageWindow(w, true);
             if (w->m_monitor)
                 w->m_monitor->scheduleFrame();
         }
 }
-void Controller::select(Pair &p, unsigned index) {
-    if (!valid(p))
+void Controller::select(Pair &p, unsigned index, bool focus) {
+    auto s = state(p);
+    if (!s || index > 1)
         return;
     const bool old = m_mutating;
     m_mutating = true;
-    p.group->setCurrent(p.windows[index].lock());
-    for (unsigned i = 0; i < 2; ++i)
-        p.windows[i]->alpha(WINDOW_ALPHA_LAYOUT)->setValueAndWarp(i == index ? 1.F : 0.F);
+    if (p.containerID) {
+        if (auto api = provider(p.providerEpoch))
+            api->select(p.containerID, index, focus && s->contains(Desktop::focusState()->window()));
+    } else {
+        p.group->setCurrent(p.windows[index].lock());
+        for (unsigned i = 0; i < 2; ++i)
+            p.windows[i]->alpha(WINDOW_ALPHA_LAYOUT)->setValueAndWarp(i == index ? 1.F : 0.F);
+    }
     m_mutating = old;
 }
 void Controller::detach() {
     if (!m_turn)
         return;
-    for (unsigned i = 0; i < 2; ++i)
+    for (unsigned i = 0; i < m_turn->windows.size(); ++i)
         if (auto w = m_turn->windows[i].lock()) {
             auto *ours = m_turn->transformers[i];
             std::erase_if(w->m_transformers, [ours](const auto &t) { return t.get() == ours; });
@@ -229,6 +328,9 @@ void Controller::finish(bool applyDestination) {
     if (applyDestination)
         if (auto p = find(m_turn->pairID))
             select(*p, m_turn->source ^ unsigned(m_turn->timeline.destination()));
+    if (auto p = find(m_turn->pairID); p && p->containerID)
+        if (auto api = provider(p->providerEpoch))
+            api->animating(p->containerID, false);
     detach();
     m_turn.reset();
     m_timer->updateTimeout(std::nullopt);
@@ -282,12 +384,14 @@ std::string Controller::animationFallback(PHLWINDOW a, PHLWINDOW b) const {
 
 Result Controller::mark() {
     auto w = Desktop::focusState()->window();
+    if (find(w))
+        return {false, "Release this window from its Hyprflip card before marking it."};
     if (auto error = unavailable(w); !error.empty())
         return {false, error};
     if (inputBusy())
         return {false, "Finish the active grab or drag before pairing."};
     m_marked = w;
-    return {true, "First side marked. Focus another window and run pair."};
+    return {true, "Window marked. Focus another window to pair, or a card face to attach."};
 }
 Result Controller::pair() {
     auto a = m_marked.lock(), b = Desktop::focusState()->window();
@@ -298,6 +402,8 @@ Result Controller::pair() {
     for (const auto &w : {a, b})
         if (auto error = unavailable(w); !error.empty())
             return {false, error};
+    if (find(a) || find(b))
+        return {false, "A window already belongs to a Hyprflip card. Use attach to add a pane."};
     if (inputBusy())
         return {false, "Finish the active grab or drag before pairing."};
     if (a->m_workspace != b->m_workspace)
@@ -312,6 +418,33 @@ Result Controller::pair() {
         return {false, "Resize the first window so the second window fits before pairing."};
     finish();
     m_mutating = true;
+    if (auto api = provider(); api && api->supports(reinterpret_cast<uintptr_t>(a.get())) &&
+                               api->supports(reinterpret_cast<uintptr_t>(b.get()))) {
+        const auto id = api->create(reinterpret_cast<uintptr_t>(a.get()), reinterpret_cast<uintptr_t>(b.get()));
+        if (id) {
+            m_pairs.push_back({m_nextID++, {}, {}, false, id, api->epoch});
+            const auto created = state(m_pairs.back());
+            bool fitsAll = created.has_value();
+            if (created)
+                for (const auto &w : created->windows())
+                    fitsAll &= fits(w.lock(), w->size(IGeometric::GEOMETRIC_GOAL));
+            if (!fitsAll) {
+                discardContainer(m_pairs.back());
+                m_pairs.pop_back();
+                m_mutating = false;
+                return {false, "The card cannot satisfy both windows' size limits."};
+            }
+            m_marked.reset();
+        }
+        m_mutating = false;
+        return {id != 0, id ? "Card created. Flip sides, or mark another window and attach it to a face."
+                            : "Could not create the hy3 card."};
+    }
+    if (!a->m_isFloating && a->m_workspace->m_space->algorithm()->tiledAlgo()->layoutName() == "hy3") {
+        m_mutating = false;
+        return {false,
+                "The hy3 container provider is unavailable or incompatible. Rebuild both experimental libraries."};
+    }
     auto g = CGroup::create({a});
     if (!b->canBeGroupedInto(g)) {
         g->destroy();
@@ -356,7 +489,7 @@ Result Controller::adopt(const std::string &front, const std::string &back) {
     g->setLocked(true);
     return {true, "ok"};
 }
-Result Controller::flip() {
+Result Controller::flip(std::optional<Transition> preview) {
     auto w = Desktop::focusState()->window();
     auto p = find(w);
     if (!p || !valid(*p))
@@ -364,36 +497,80 @@ Result Controller::flip() {
     if (inputBusy())
         return {false, "Finish the active grab or drag before flipping."};
     if (m_turn && m_turn->pairID == p->id) {
+        m_turn->previewReturn = false;
+        if (preview) return {false, "Wait for this turn to finish before previewing another transition."};
         m_turn->timeline.reverse();
         return {true, "ok"};
     }
     finish();
-    const unsigned source = p->windows[0] == p->group->current() ? 0 : 1;
-    auto a = p->windows[source].lock(), b = p->windows[1 - source].lock();
-    if (!fits(b, a->size(IGeometric::GEOMETRIC_GOAL)))
+    auto s = state(*p);
+    if (!s)
+        return {false, "This card changed. Pair its windows again."};
+    const unsigned source = s->active;
+    const auto mode = preview.value_or(transition(m_settings.transition->value()).value_or(Transition::Flip));
+    if (s->unfolded) {
+        if (preview) return {false, "Fold the card with O before previewing a transition."};
+        for (const auto &ref : s->windows())
+            if (Fullscreen::controller()->isFullscreen(ref.lock()))
+                return {false, "Leave fullscreen before folding this container."};
+        auto api = provider(p->providerEpoch);
+        m_mutating = true;
+        const bool ok = api && api->unfold(p->containerID, false) && api->select(p->containerID, 1 - source, true);
+        m_mutating = false;
+        return {ok, ok ? "ok" : "The layout could not fold this card."};
+    }
+    auto a = s->focused[source], b = s->focused[1 - source];
+    if (!p->containerID && !fits(b, a->size(IGeometric::GEOMETRIC_GOAL)))
         return {false, "The other side no longer fits this size. Resize the pair before flipping."};
-    if (auto reason = animationFallback(a, b); !reason.empty()) {
+    std::string reason;
+    if (p->containerID) {
+        for (const auto &ref : s->windows()) {
+            auto member = ref.lock();
+            if (Fullscreen::controller()->isFullscreen(member))
+                return {false, "Leave fullscreen before flipping this container."};
+            if (!fits(member, member->size(IGeometric::GEOMETRIC_GOAL)))
+                return {false, "A pane no longer fits its application's size limits. Resize the card before flipping."};
+            if (reason.empty())
+                reason = animationFallback(member, member);
+        }
+    } else
+        reason = animationFallback(a, b);
+    if (!reason.empty() || mode == Transition::Instant) {
+        // A preview of Instant leaves the card where it started.
+        if (preview) return {true, "ok"};
         select(*p, 1 - source);
         damage(*p);
-        m_lastFallback = "Instant switch: " + reason;
+        m_lastFallback = reason.empty() ? "" : "Instant switch: " + reason;
         return {true, "ok"};
     }
     auto pose = std::make_shared<Pose>();
+    pose->mode = mode;
+    pose->direction = source == 0 ? 1.F : -1.F;
+    pose->leader = s->focused[source];
     pose->perspective = m_settings.perspective->value();
     pose->retreat = m_settings.retreat->value();
+    if (p->containerID)
+        pose->containerBox = s->geometry;
     m_turn.emplace(Turn{p->id,
                         source,
                         Timeline(double(m_settings.duration->value())),
                         Clock::now(),
                         pose,
                         {},
-                        p->windows,
-                        a->geometricBox(IGeometric::GEOMETRIC_GOAL),
+                        s->windows(),
+                        s->geometry,
                         a->m_monitor,
                         a->m_workspace,
-                        m_eventKey});
-    for (unsigned i = 0; i < 2; ++i) {
-        const auto w = p->windows[i].lock();
+                        m_eventKey,
+                        {},
+                        {}});
+    m_turn->transformers.resize(m_turn->windows.size());
+    m_turn->suppressedGlass.resize(m_turn->windows.size());
+    m_turn->previewReturn = preview.has_value();
+    m_captureMs = 0;
+    for (unsigned i = 0; i < m_turn->windows.size(); ++i) {
+        const auto w = m_turn->windows[i].lock();
+        m_turn->windowGeometry.push_back(w->geometricBox(IGeometric::GEOMETRIC_GOAL));
         // Hyprglass 1.0 draws its background outside the transformed pass.
         // Its public opt-out tag prevents a stationary rectangle behind the
         // card. Preserve an existing opt-out; restore only tags we introduced.
@@ -404,11 +581,43 @@ Result Controller::flip() {
             w->m_ruleApplicator->propertiesChanged(Desktop::Rule::RULE_PROP_TAG);
         }
         w->resetMotionBlur();
-        auto t = makeUnique<FlipTransformer>(p->windows[i].lock(), pose, m_shader);
-        m_turn->transformers[i] = t.get();
-        p->windows[i]->m_transformers.emplace_back(std::move(t));
     }
     select(*p, source);
+    if (p->containerID)
+        if (auto api = provider(p->providerEpoch))
+            api->animating(p->containerID, true);
+    if (snapshots(mode)) {
+        const auto started = Clock::now();
+        auto monitor = a->m_monitor.lock();
+        // Four native-sized RGBA buffers is the peak capture budget: two
+        // faces, one temporary pane and one reusable transition output.
+        if (!monitor || !g_pHyprRenderer->glBackend() ||
+            monitor->m_pixelSize.x * monitor->m_pixelSize.y * 16 > 256 * 1024 * 1024) {
+            pose->error = "Snapshot transition exceeds the 256 MiB buffer budget";
+        } else {
+            m_mutating = true;
+            for (unsigned side = 0; side < 2; ++side) {
+                select(*p, source ^ side, false);
+                pose->faces[side] = m_shader->captureFace(s->faces[source ^ side], monitor, pose->error);
+                if (!pose->faces[side]) break;
+            }
+            select(*p, source);
+            m_mutating = false;
+        }
+        m_captureMs = std::chrono::duration<double, std::milli>(Clock::now() - started).count();
+        if (!pose->faces[0] || !pose->faces[1]) {
+            m_lastFallback = "Instant switch: " + pose->error;
+            finish(!preview);
+            return {true, "ok"};
+        }
+        m_turn->last = Clock::now(); // capture time is not part of motion progress
+    }
+    for (unsigned i = 0; i < m_turn->windows.size(); ++i) {
+        auto w = m_turn->windows[i].lock();
+        auto t = makeUnique<FlipTransformer>(w, pose, m_shader);
+        m_turn->transformers[i] = t.get();
+        w->m_transformers.emplace_back(std::move(t));
+    }
     m_lastFallback.clear();
     damage(*p);
     m_timer->updateTimeout(std::chrono::milliseconds(250));
@@ -424,26 +633,172 @@ Result Controller::unpair() {
     const auto id = p->id;
     auto g = p->group.lock();
     m_mutating = true;
+    discardContainer(*p);
     if (g) {
         g->setLocked(p->previousLock);
         g->destroy();
     }
     m_mutating = false;
     std::erase_if(m_pairs, [id](const Pair &pair) { return pair.id == id; });
-    return {true, "Unpaired. Both windows are available separately."};
+    return {true, "Unpaired. All windows are available in the layout."};
+}
+
+Result Controller::attach(bool vertical) {
+    if (inputBusy())
+        return {false, "Finish the active grab or drag before attaching."};
+    auto w = m_marked.lock();
+    if (auto error = unavailable(w); !error.empty())
+        return {false, error};
+    if (find(w))
+        return {false, "The marked window already belongs to a card."};
+    auto p = find(Desktop::focusState()->window());
+    if (!p || !p->containerID)
+        return {false, "Focus a card created on the experimental hy3 layout, then attach the marked window."};
+    finish();
+    auto s = state(*p);
+    if (!s)
+        return {false, "This card changed. Pair its windows again."};
+    if (s->faces[s->active].size() >= CONTAINER_MAX_PANES)
+        return {false, "This side already has three apps. Remove an app before adding another."};
+    for (const auto &member : s->windows())
+        if (Fullscreen::controller()->isFullscreen(member.lock()))
+            return {false, "Leave fullscreen before attaching to this container."};
+    if (w->m_isFloating || w->m_workspace != s->focused[s->active]->m_workspace)
+        return {false, "Tile the marked window on the same workspace before attaching it."};
+    auto api = provider(p->providerEpoch);
+    m_mutating = true;
+    bool ok = api && api->attach(p->containerID, reinterpret_cast<uintptr_t>(w.get()), s->active, vertical);
+    if (ok) {
+        const auto attached = state(*p);
+        bool fitsAll = attached.has_value();
+        if (attached)
+            for (const auto &ref : attached->windows())
+                fitsAll &= fits(ref.lock(), ref->size(IGeometric::GEOMETRIC_GOAL));
+        if (!fitsAll) {
+            api->release(p->containerID, reinterpret_cast<uintptr_t>(w.get()));
+            Desktop::focusState()->fullWindowFocus(s->focused[s->active], Desktop::FOCUS_REASON_KEYBIND);
+            m_mutating = false;
+            return {false, "This split is too small for the applications. Resize the card or try the other axis."};
+        }
+    }
+    m_mutating = false;
+    if (ok)
+        m_marked.reset();
+    return {ok, ok ? "Pane attached to this face." : "The layout could not attach this window."};
+}
+Result Controller::release() {
+    if (inputBusy())
+        return {false, "Finish the active grab or drag before releasing."};
+    auto w = Desktop::focusState()->window();
+    auto p = find(w);
+    if (!p)
+        return {false, "This window is not in a Hyprflip card."};
+    if (!p->containerID)
+        return unpair();
+    finish();
+    auto api = provider(p->providerEpoch);
+    m_mutating = true;
+    const bool ok = api && api->release(p->containerID, reinterpret_cast<uintptr_t>(w.get()));
+    m_mutating = false;
+    reconcile();
+    return {ok, ok ? "Window released into the layout." : "The layout could not release this window."};
+}
+Result Controller::workspace(uint32_t destination, bool follow) {
+    if (!destination || destination > INT32_MAX)
+        return {false, "Use workspace <number> with a positive workspace number."};
+    if (inputBusy())
+        return {false, "Finish the active grab or drag before moving the card."};
+    auto p = find(Desktop::focusState()->window());
+    if (!p || !p->containerID)
+        return {false, "Focus an experimental hy3 card to move it as a unit."};
+    finish();
+    auto s = state(*p);
+    if (!s)
+        return {false, "This card changed. Pair its windows again."};
+    for (const auto& window : Desktop::windowState()->windows())
+        if (window->m_isMapped && window->m_isFloating && window->m_workspace &&
+            window->m_workspace->m_id == destination &&
+            window->m_ruleApplicator->m_tagKeeper.isTagged("chillmode"))
+            return {false, "Turn off Chill mode on workspace " + std::to_string(destination) +
+                           " before moving the card there. The card stayed in place."};
+    for (const auto &w : s->windows())
+        if (Fullscreen::controller()->isFullscreen(w.lock()))
+            return {false, "Leave fullscreen before moving this container."};
+    auto api = provider(p->providerEpoch);
+    m_movingWorkspace = destination;
+    m_mutating = true;
+    const bool ok = api && api->workspace(p->containerID, destination, follow);
+    m_mutating = false;
+    m_movingWorkspace.reset();
+    reconcile();
+    return {ok, ok ? "ok" : "The destination workspace must use hy3."};
+}
+bool Controller::protectsWorkspace(uint32_t workspace) const {
+    if (!workspace || m_stopping) return false;
+    if (m_movingWorkspace == workspace) return true;
+    for (const auto& [token, reservation] : m_reservations)
+        if (reservation.workspace == workspace && reservation.until > Clock::now()) return true;
+    for (const auto& pair : m_pairs) {
+        if (!pair.containerID) continue;
+        const auto card = state(pair);
+        if (card && card->focused[0] && card->focused[0]->m_workspace &&
+            card->focused[0]->m_workspace->m_id == workspace) return true;
+    }
+    return false;
+}
+Result Controller::move(char direction) {
+    if (inputBusy())
+        return {false, "Finish the active grab or drag before moving the card."};
+    auto p = find(Desktop::focusState()->window());
+    if (!p || !p->containerID)
+        return {false, "Focus a Hyprflip container to move it as a unit."};
+    finish();
+    auto s = state(*p);
+    if (!s)
+        return {false, "This card changed. Pair its windows again."};
+    for (const auto &w : s->windows())
+        if (Fullscreen::controller()->isFullscreen(w.lock()))
+            return {false, "Leave fullscreen before moving this container."};
+    auto api = provider(p->providerEpoch);
+    m_mutating = true;
+    const bool ok = api && api->move(p->containerID, direction);
+    m_mutating = false;
+    reconcile();
+    return {ok, ok ? "ok" : "The layout could not move this card."};
+}
+Result Controller::unfold() {
+    if (inputBusy())
+        return {false, "Finish the active grab or drag before unfolding the card."};
+    auto p = find(Desktop::focusState()->window());
+    if (!p || !p->containerID)
+        return {false, "Focus a Hyprflip container to show both faces together."};
+    finish();
+    auto s = state(*p);
+    if (!s)
+        return {false, "This card changed. Pair its windows again."};
+    for (const auto &w : s->windows())
+        if (Fullscreen::controller()->isFullscreen(w.lock()))
+            return {false, "Leave fullscreen before unfolding this container."};
+    auto api = provider(p->providerEpoch);
+    m_mutating = true;
+    const bool ok = api && api->unfold(p->containerID, !s->unfolded);
+    m_mutating = false;
+    reconcile();
+    return {ok, ok ? "ok" : "Both faces need more room. Enlarge the card before unfolding."};
 }
 
 void Controller::onFrame(PHLMONITOR monitor) {
     if (!m_turn || monitor != m_turn->monitor)
         return;
     auto p = find(m_turn->pairID);
-    if (!p || !valid(*p)) {
+    auto s = p ? state(*p) : std::nullopt;
+    if (!s) {
         finish(false);
         reconcile();
         return;
     }
-    auto current = p->group->current();
-    if (current != p->windows[m_turn->source ^ unsigned(m_turn->timeline.secondSide())]) {
+    auto current = s->focused[s->active];
+    if (s->active != (m_turn->source ^ unsigned(m_turn->timeline.secondSide()))) {
         finish(false);
         return;
     }
@@ -454,28 +809,67 @@ void Controller::onFrame(PHLMONITOR monitor) {
         return;
     }
     if (current->m_monitor != m_turn->monitor || current->m_workspace != m_turn->workspace ||
-        !current->m_workspace->m_visible ||
-        !sameBox(current->geometricBox(IGeometric::GEOMETRIC_GOAL), m_turn->geometry) || current->popupsCount() > 0 ||
+        !current->m_workspace->m_visible || !sameBox(s->geometry, m_turn->geometry) || current->popupsCount() > 0 ||
         inputBusy()) {
         finish();
         return;
+    }
+    for (unsigned i = 0; i < m_turn->windows.size(); ++i) {
+        auto w = m_turn->windows[i].lock();
+        if (!w || !w->m_isMapped || w->m_monitor != m_turn->monitor || w->m_workspace != m_turn->workspace ||
+            !sameBox(w->geometricBox(IGeometric::GEOMETRIC_GOAL), m_turn->windowGeometry[i]) || w->popupsCount()) {
+            finish();
+            return;
+        }
     }
     auto now = Clock::now();
     m_turn->timeline.advance(std::chrono::duration<double, std::milli>(now - m_turn->last).count());
     m_turn->last = now;
     m_turn->pose->angle = float(m_turn->timeline.angle()) * (m_turn->source == 0 ? 1.F : -1.F);
+    m_turn->pose->progress = m_turn->timeline.progress();
+    m_turn->pose->dirty = true;
     const auto destination = m_turn->source ^ unsigned(m_turn->timeline.secondSide());
-    if (p->group->current() != p->windows[destination])
+    if (s->active != destination)
         select(*p, destination);
+    m_turn->pose->leader = s->focused[destination];
+    if (p->containerID)
+        if (auto api = provider(p->providerEpoch))
+            api->animating(p->containerID, true);
     damage(*p);
     if (m_turn->timeline.finished()) {
-        finish();
-        return;
+        if (m_turn->previewReturn) {
+            m_turn->previewReturn = false;
+            m_turn->timeline.reverse();
+        } else {
+            finish();
+            return;
+        }
     }
     m_timer->updateTimeout(std::chrono::milliseconds(250));
 }
 Result Controller::action(const std::string &action) {
     reconcile();
+    std::erase_if(m_reservations, [](const auto& entry) { return entry.second.until <= Clock::now(); });
+    if (action.starts_with("reserve ")) {
+        std::istringstream args(action.substr(8));
+        uint32_t workspace = 0, seconds = 60;
+        std::string token, extra;
+        if (!(args >> workspace >> token) || !workspace || workspace > INT32_MAX || token.size() > 64 ||
+            !std::ranges::all_of(token, [](unsigned char c) { return std::isalnum(c) || c == '-' || c == '_'; }))
+            return {false, "Use reserve <workspace> <token> [seconds]."};
+        if (args >> extra) {
+            const auto [end, error] = std::from_chars(extra.data(), extra.data() + extra.size(), seconds);
+            if (error != std::errc{} || end != extra.data() + extra.size() || !seconds || seconds > 120)
+                return {false, "A workspace reservation lasts between 1 and 120 seconds."};
+            if (args >> extra) return {false, "Use reserve <workspace> <token> [seconds]."};
+        }
+        m_reservations[token] = {workspace, Clock::now() + std::chrono::seconds(seconds)};
+        return {true, "ok"};
+    }
+    if (action.starts_with("unreserve ")) {
+        m_reservations.erase(action.substr(10));
+        return {true, "ok"};
+    }
     if (action == "mark")
         return mark();
     if (action == "pair")
@@ -489,8 +883,39 @@ Result Controller::action(const std::string &action) {
     }
     if (action == "flip")
         return flip();
+    if (action.starts_with("preview ")) {
+        auto mode = transition(action.substr(8));
+        if (!mode) return {false, "Choose flip, vertical, slide, fade, dissolve, portal or instant."};
+        return flip(mode);
+    }
     if (action == "unpair")
         return unpair();
+    if (action == "attach" || action == "attach horizontal")
+        return attach(false);
+    if (action == "attach vertical")
+        return attach(true);
+    if (action == "release")
+        return release();
+    if (action == "unfold")
+        return unfold();
+    if (action.starts_with("move ")) {
+        const auto direction = action.substr(5);
+        if (direction == "left" || direction == "right" || direction == "up" || direction == "down" ||
+            direction == "l" || direction == "r" || direction == "u" || direction == "d")
+            return move(direction.front());
+        return {false, "Use move <left|right|up|down>."};
+    }
+    if (action.starts_with("workspace ")) {
+        auto value = std::string_view(action).substr(10);
+        const bool follow = !value.ends_with(" silent");
+        if (!follow)
+            value.remove_suffix(7);
+        uint32_t destination = 0;
+        auto [end, error] = std::from_chars(value.data(), value.data() + value.size(), destination);
+        if (error != std::errc{} || end != value.data() + value.size())
+            return {false, "Use workspace <number> with a positive workspace number."};
+        return workspace(destination, follow);
+    }
     if (action == "cancel") {
         m_marked.reset();
         return {true, "Pairing cancelled."};
@@ -499,7 +924,9 @@ Result Controller::action(const std::string &action) {
         finish();
         return {true, "ok"};
     }
-    return {false, "Unknown action. Use mark, pair, cancel, flip, unpair, finish, or status."};
+    return {false, "Unknown action. Use mark, pair, attach [horizontal|vertical], release, unfold, "
+                   "workspace <number> [silent], move <left|right|up|down>, cancel, "
+                   "flip, unpair, finish, or status."};
 }
 void Controller::notify(const Result &r) {
     if (!m_settings.notifications->value() || r.message == "ok")
@@ -509,17 +936,54 @@ void Controller::notify(const Result &r) {
 std::string Controller::status() {
     reconcile();
     std::string json = "{\"version\":\"0.1.1\",\"marked\":" + address(m_marked.lock()) +
+                       ",\"transition\":" + quote(std::string(name(transition(m_settings.transition->value()).value_or(Transition::Flip)))) +
+                       ",\"transition_modes\":[\"flip\",\"vertical\",\"slide\",\"fade\",\"dissolve\",\"portal\",\"instant\"]" +
+                       ",\"capture_ms\":" + std::format("{}", m_captureMs) +
                        ",\"animating\":" + (m_turn ? "true" : "false") +
                        ",\"progress\":" + std::format("{}", m_turn ? m_turn->timeline.progress() : 0) +
                        ",\"last_fallback\":" + quote(m_lastFallback) + ",\"pairs\":[";
     bool first = true;
     for (const auto &p : m_pairs) {
+        if (p.containerID)
+            continue;
         if (!first)
             json += ',';
         first = false;
         json += std::format("{{\"id\":{},\"front\":{},\"back\":{},\"current\":{}}}", p.id, address(p.windows[0].lock()),
                             address(p.windows[1].lock()), address(p.group->current()));
     }
-    return json + "]}";
+    json += "],\"containers\":[";
+    first = true;
+    for (const auto &p : m_pairs) {
+        if (!p.containerID)
+            continue;
+        auto s = state(p);
+        if (!s)
+            continue;
+        if (!first)
+            json += ',';
+        first = false;
+        json +=
+            std::format("{{\"id\":{},\"active\":{},\"unfolded\":{},\"current\":{},\"box\":[{},{},{},{}],\"faces\":[",
+                        p.id, s->active, s->unfolded ? "true" : "false", address(s->focused[s->active]), s->geometry.x,
+                        s->geometry.y, s->geometry.w, s->geometry.h);
+        for (unsigned side = 0; side < 2; ++side) {
+            if (side)
+                json += ',';
+            json += '[';
+            bool firstWindow = true;
+            for (const auto &w : s->faces[side]) {
+                if (!firstWindow)
+                    json += ',';
+                firstWindow = false;
+                json += address(w);
+            }
+            json += ']';
+        }
+        json += "]}";
+    }
+    const bool available = provider();
+    return json + "],\"workspace_protection\":true,\"container_provider\":" + (available ? "true" : "false") +
+           ",\"container_max_panes\":" + std::to_string(available ? CONTAINER_MAX_PANES : 0) + "}";
 }
 } // namespace Hyprflip

@@ -22,7 +22,6 @@ box.append(button)
 window.set_child(box)
 loop = GLib.MainLoop()
 window.connect("close-request", lambda *_: loop.quit())
-window.present()
 last = ""
 dialog = None
 def poll():
@@ -40,6 +39,13 @@ def poll():
         dialog.set_child(Gtk.Label(label="A real modal child"))
         dialog.set_default_size(300, 140); dialog.present()
     elif command == "close": window.close()
+    elif command.startswith("minimum "):
+        width, height = map(int, command.split()[1:])
+        # Constrain content before presenting the toplevel in minimum-size
+        # tests, so the initial Wayland commit advertises the requested limit.
+        box.set_size_request(width, height)
     return True
+poll()
+window.present()
 GLib.timeout_add(50, poll)
 loop.run()

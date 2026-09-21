@@ -65,11 +65,11 @@ try:
         time.sleep(1)
         runs = []
         for run in range(12):
-            ctl("hyprflip-motion-probe", "start")
+            ctl("hf-motion-probe", "start")
             ctl("hyprflip", "flip")
             assert state()["animating"], state()
             wait_done()
-            frames = json.loads(ctl("hyprflip-motion-probe", "stop"))
+            frames = json.loads(ctl("hf-motion-probe", "stop"))
             active = [f for f in frames if f["state"]["animating"]]
             if not active:
                 raise SystemExit("No rendered animation frames: the parent display must be awake and the nested output visible. Previous results are preserved.")

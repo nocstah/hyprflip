@@ -11,7 +11,8 @@ Hyprflip is a native C++/GLES plugin for **Hyprland 0.56.2**. It combines native
 - Mark two existing windows as the front and back of one card.
 - Flip in place with a configurable 420 ms turn, gentle easing and filtered edges.
 - Move, resize and fullscreen the pair through Hyprland's native group behavior.
-- Reverse an unfinished turn by pressing flip again.
+- Reverse an unfinished turn by pressing flip again; the card brakes smoothly
+  before returning, preserving its momentum.
 - Unpair into two ordinary windows whenever you want.
 - Respect disabled animations and settle safely on input, focus or workspace changes.
 
@@ -91,6 +92,7 @@ hyprctl hyprflip status
 ```lua
 hl.config({ plugin = { hyprflip = {
     duration_ms = 420,   -- 0–2000; 0 switches instantly
+    transition = "flip", -- flip, vertical, slide, fade, dissolve, portal, instant
     enabled = true,     -- false keeps pairing without motion
     notifications = true,
     perspective = 5.0,  -- 2–8; higher means less perspective
@@ -99,6 +101,13 @@ hl.config({ plugin = { hyprflip = {
 ```
 
 Hyprland's global `animations.enabled = false` also disables flip motion. Popups, pending geometry changes or unavailable surface buffers use an instant native switch. Active grabs, drag-and-drop and pointer constraints defer flipping. Incompatible application size limits reject pairing or flipping.
+
+On Omarchy, the container picker offers **Super+Ctrl+Alt+C → Transition**,
+with **Preview** and **Use** actions. Previews turn over and back without
+changing the saved preference. Dissolve and Portal are experimental effects.
+The picker saves the mode for all cards across config reloads and restarts.
+See [transitions and Chill compatibility](docs/TRANSITIONS.md) for rendering
+details, limits and the optional Omachill integration.
 
 New application input settles an unfinished turn before normal delivery. Changing focus does not pull it back. One pair animates at a time; starting a turn on another pair settles the previous one.
 
@@ -137,4 +146,40 @@ Read [CONTRIBUTING.md](CONTRIBUTING.md) for development and bug reports, [TESTIN
 
 Automatic companion launching, saved pair recipes, gesture-driven turns and a window picker are possible future additions. The current release focuses on explicitly pairing two existing windows.
 
-Licensed under the [MIT license](LICENSE).
+### Experimental containers
+
+On Omarchy 4, the optional [guided setup](docs/CONTAINERS.md#guided-creation-from-o)
+lets **Super+Ctrl+Alt+O** create a card from an ungrouped window: choose up to three
+apps for its back in the native menu. The apps group automatically, showing the
+front face. On an existing card, the same shortcut
+unfolds or folds it. Cancelling any picker leaves the windows unchanged.
+
+**Super+Ctrl+Alt+C** opens [Edit card](docs/CONTAINERS.md#edit-an-existing-card):
+add an open app to the focused side, or remove any app while keeping it
+open. Local apps come first; **Add from workspace X** lists apps elsewhere and
+moves the selected app here. A full side explains its three-app limit; removing a side's only app is
+explicitly labeled **Ungroup card**.
+
+An opt-in [hy3 container experiment](docs/CONTAINERS.md) supports two faces with
+up to three tiled panes on each face: for example, Gmail on the front and three
+messaging apps on the back. Each side is one row or column; adding a third app
+preserves its split direction and the existing panes' relative sizes. It adds
+explicit attach/release, remembers the focused pane, and moves the whole card
+between hy3 workspaces. All panes rotate around
+one shared pivot. Optional movement bindings keep cards together with normal
+workspace and arrow shortcuts. Temporary unfold shows both faces together;
+three-app rows unfold above one another, and columns beside one another.
+Folding restores the face you are using and retains inner split proportions.
+
+Build it with `./scripts/build-containers`. This creates separate experimental
+libraries; it does not install them or change your desktop. The regular installer
+and hyprpm setup still use native two-window groups. Start with the disposable
+session instructions in the [experiment guide](docs/CONTAINERS.md).
+Already-enabled trials have a separate updater that preserves card definitions;
+the native installer refuses to discard active containers. See the guide for
+the update procedure and [roadmap](docs/ROADMAP.md) for saved setups, peek and
+other proposed features.
+
+The core is licensed under the [MIT license](LICENSE). The optional hy3 bridge
+is [GPL-3.0-only](integrations/hy3/LICENSE) and is built into a separately fetched,
+pinned hy3 library. See [integration licensing](integrations/hy3/README.md).

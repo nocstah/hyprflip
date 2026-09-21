@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+set -euo pipefail
+project_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+build_dir="$project_dir/build/containers"
+hy3_dir="$build_dir/hy3-source"
+revision=42b7ed8fd9aefd3f36e5f617afd5071245c67853
+mkdir -p "$build_dir"
+if [[ ! -d "$hy3_dir/.git" ]]; then
+    git clone --branch hl0.56.0.1 --depth 1 https://github.com/outfoxxed/hy3.git "$hy3_dir"
+fi
+if [[ $(git -C "$hy3_dir" rev-parse HEAD) != "$revision" ]]; then
+    echo "Unexpected hy3 checkout: expected $revision" >&2
+    exit 1
+fi
+cmake -S "$project_dir/integrations/hy3" -B "$build_dir/provider" -G Ninja \
+    -DHY3_SOURCE_DIR="$hy3_dir" -DCMAKE_BUILD_TYPE=RelWithDebInfo
+cmake --build "$build_dir/provider" --parallel "${CMAKE_BUILD_PARALLEL_LEVEL:-2}"
+cmake -S "$project_dir" -B "$build_dir/core" -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo
+cmake --build "$build_dir/core" --parallel "${CMAKE_BUILD_PARALLEL_LEVEL:-2}"
+printf 'Experimental libraries (not installed or loaded):\n%s\n%s\n' \
+    "$build_dir/provider/upstream/libhy3.so" "$build_dir/core/hyprflip.so"
