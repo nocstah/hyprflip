@@ -28,6 +28,7 @@ class CardIPC(IPC):
         super().action(action)
         if action == 'mark': self.snapshot['marked'] = self.active
         if action == 'cancel': self.snapshot['marked'] = None
+        if action.startswith('other_side '): self.active = action.split()[1]
         if action.startswith('attach ') and self.refuse_attach:
             raise setup.SetupError('This split is too small for the applications.')
 
@@ -37,6 +38,23 @@ class CardIPC(IPC):
 
 
 class EditTest(unittest.TestCase):
+    def test_layout_and_transfer_choices_are_capability_gated_and_target_the_chosen_pane(self):
+        ipc = CardIPC(full=True)
+        for index, w in enumerate(ipc.clients.values()): w['at'] = [index * 600, 0]
+        ipc.snapshot['layout_controls'] = True
+        for answers, target, action in ((('layout', 'layout vertical'), '0xb', 'layout vertical'),
+                                         (('other_side', '0xc'), '0xc', 'other_side 0xc')):
+            ipc.active = '0xb'; ipc.mutations.clear()
+            flow = setup.Edit(ipc, Picker(*answers)); plan = flow.prepare('0xb'); flow.apply(plan)
+            self.assertEqual(ipc.mutations, [('focus','0xb'), ('action',action)])
+            self.assertEqual(ipc.active, target)
+        ipc.snapshot['containers'][0]['faces'][0] = ['0xa','0xd','0xe']
+        ipc.clients['0xe'] = window('0xe')
+        ipc.active = '0xb'
+        picker = Picker(None)
+        with self.assertRaises(setup.Cancelled): setup.Edit(ipc, picker).prepare('0xb')
+        self.assertNotIn('other_side', [c.value for c in picker.prompts[0][1]])
+
     def test_native_pair_explains_the_supported_layout(self):
         ipc = CardIPC()
         ipc.snapshot.update(containers=[], pairs=[{'front': '0xa', 'back': '0xb'}])

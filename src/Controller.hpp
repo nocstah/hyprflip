@@ -92,6 +92,7 @@ class Controller {
     Result workspace(uint32_t destination, bool follow);
     Result move(char direction);
     Result unfold();
+    Result editContainer(ContainerEdit operation, const std::string &target = "");
     std::string unavailable(PHLWINDOW window) const;
     bool inputBusy() const;
     std::string animationFallback(PHLWINDOW a, PHLWINDOW b) const;

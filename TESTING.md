@@ -1,5 +1,61 @@
 # Validation
 
+## Saved-card opening and face layout checks (2026-09-21)
+
+This milestone adds explicit app launching to saved cards and ABI 4 face edits.
+The desktop remains on the pinned Hyprland 0.56.2/hy3 combination.
+
+- 67 Python tests cover launcher precedence/hidden entries, ambiguous matching,
+  malformed desktop IDs, changed launcher files, duplicate prevention, stale
+  windows, cancellation, request-lock handoff, launch failure and timeout,
+  alongside existing setup/editor/install/rollback coverage. The C++ core test passes.
+- `tests/opening_workflows.py` exercises real GIO desktop-entry launches in a
+  disposable compositor. Four checks cover reuse/import and missing-app launch,
+  already-open cards, cancellation with a late-arriving app, and a launcher that
+  exits successfully without creating a window.
+- `tests/layout_workflows.py` checks directions and unequal proportions, equal
+  sizing, unfocused pane transfer and remembered focus, unfolded editing, both
+  capacity limits, positive weights after very unequal transfers, application
+  minimum-size refusal and exact geometry rollback with unequal unfolded faces.
+- Six upgrade checks passed from the installed ABI 3 build to ABI 4 with the
+  current Hyprglass kept loaded. They include multiple/six-pane cards, native
+  pairs, focus races, fullscreen refusal and a forced load failure with rollback.
+- The six-app saved-card suite passed across two real disposable compositor
+  processes, including both axes, proportions, focus, cross-workspace import,
+  injected partial failure, Chill geometry/tag recovery and successful retry.
+
+Reproduce the new workflows after `./scripts/build-containers`:
+
+```sh
+python tests/nested_session.py --directory /tmp/hf-open
+# In another terminal:
+python tests/layout_workflows.py /tmp/hf-open/session.json
+python tests/opening_workflows.py /tmp/hf-open/session.json
+```
+
+Evidence: `/tmp/hf-open/layout-results.json`,
+`/tmp/hf-open/opening-results.json`, `/tmp/hf-open-restart/`,
+`/tmp/hyprflip-open-upgrade.log` and `/tmp/hyprflip-opening-unit.log`.
+Tests copy the built libraries before loading; they never replace a mapped
+library in place or restart the real desktop.
+
+The installed native Omarchy menu passed five workflow checks with temporary
+Gmail/WhatsApp/Telegram test windows: layout selection, moving the unfocused
+pane, cancelling the launch review, launching the missing app and rebuilding
+the card, and clicking the progress toast to cancel while Do Not Disturb is
+enabled. The editor, layout/move submenus, launch review and progress toast
+were inspected together. All controls and copy fit the existing native theme.
+Captures and results are in `/tmp/hf-open-ui-check/`.
+
+Installation preserved the existing live card. Library backups are under
+`~/.local/state/hyprflip/container-update-20260921-165455/`; helper/config backups
+are under `guided-setup-20260921-165534-328422/` in the same directory. Hyprglass
+remained loaded and its file did not change. No compositor restart was needed.
+The installed core SHA256 is
+`3f8b6b78d256c027ab3408a5f99184ad810bed6927d9efe1eb4e47cf1ade7423`;
+the ABI 4 provider is
+`74b9e149187ea63589ece5c4bb34b89bc9952e855779044db3debd47a1e0bccb`.
+
 ## Saved-card and peek checks (2026-09-21)
 
 Checkpoint `7f2de93` contains the preceding multi-app container, transition and

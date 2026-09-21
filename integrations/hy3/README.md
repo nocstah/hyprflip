@@ -11,12 +11,18 @@ table through `src/ContainerABI.hpp`, resolves live window identifiers, and neve
 caches the provider across events. A load epoch prevents IDs from being reused
 across different provider lifetimes.
 
-ABI 3 increases each face's snapshot capacity to three windows. Its entry point
-is versioned separately so an old core/provider combination cannot interpret the
-larger structure. The status response advertises `container_max_panes`; the
+ABI 4 retains ABI 3's three-window face snapshots and adds an in-place edit
+operation for face direction, equal sizes and pane transfers. Its entry point
+is versioned separately so an old core/provider combination cannot call an
+incompatible table. Status advertises `layout_controls` and `container_max_panes`; the
 picker defaults to two when talking to older builds. A third attachment retains
 the existing split axis and pane weights. This is a Hyprflip limit, not a hy3
 group limit.
+
+Edits preserve the two-face tree, validate application size limits and restore
+the previous membership, order, weights and selection on refusal. Transfers
+require a nonempty source and room at the destination. Remaining source weights
+are normalized proportionally, avoiding negative weights in very uneven splits.
 
 The bridge also provides whole-card directional movement, silent workspace moves
 and temporary unfolding. The core and provider must be upgraded together. Unfolding changes

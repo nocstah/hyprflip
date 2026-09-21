@@ -858,6 +858,40 @@ Result Controller::unfold() {
     return {ok, ok ? "ok" : "Both faces need more room. Enlarge the card before unfolding."};
 }
 
+Result Controller::editContainer(ContainerEdit operation, const std::string &target) {
+    if (inputBusy())
+        return {false, "Finish the active grab or drag before changing the layout."};
+    auto w = Desktop::focusState()->window();
+    auto p = find(w);
+    if (!p || !p->containerID)
+        return {false, "Focus an app in a Hyprflip container first."};
+    finish();
+    auto s = state(*p);
+    if (!s)
+        return {false, "This card changed. Open the card menu again."};
+    w = s->focused[s->active];
+    if (!target.empty()) {
+        w = nullptr;
+        for (const auto &member : s->faces[s->active])
+            if (address(member) == quote(target)) w = member;
+        if (!w)
+            return {false, "That app is no longer on this side. Open the card menu again."};
+    }
+    for (const auto &member : s->windows())
+        if (Fullscreen::controller()->isFullscreen(member.lock()))
+            return {false, "Leave fullscreen before changing the card layout."};
+    if (s->faces[s->active].size() < 2)
+        return {false, "This side needs at least two apps. Add an app from the card menu first."};
+    if (operation == ContainerEdit::OtherSide && s->faces[1 - s->active].size() >= CONTAINER_MAX_PANES)
+        return {false, "The other side already has three apps. Remove an app there first."};
+    auto api = provider(p->providerEpoch);
+    m_mutating = true;
+    const bool ok = api && api->edit(p->containerID, reinterpret_cast<uintptr_t>(w.get()), operation);
+    m_mutating = false;
+    reconcile();
+    return {ok, ok ? "ok" : "The apps need more room for that layout. Enlarge the card and try again."};
+}
+
 void Controller::onFrame(PHLMONITOR monitor) {
     if (m_peek && !canReturnPeek()) m_peek.reset();
     if (!m_turn || monitor != m_turn->monitor)
@@ -974,6 +1008,16 @@ Result Controller::action(const std::string &action) {
         return release();
     if (action == "unfold")
         return unfold();
+    if (action == "other_side")
+        return editContainer(ContainerEdit::OtherSide);
+    if (action.starts_with("other_side "))
+        return editContainer(ContainerEdit::OtherSide, action.substr(11));
+    if (action == "layout horizontal")
+        return editContainer(ContainerEdit::Horizontal);
+    if (action == "layout vertical")
+        return editContainer(ContainerEdit::Vertical);
+    if (action == "layout balance")
+        return editContainer(ContainerEdit::Balance);
     if (action.starts_with("move ")) {
         const auto direction = action.substr(5);
         if (direction == "left" || direction == "right" || direction == "up" || direction == "down" ||
@@ -1001,6 +1045,7 @@ Result Controller::action(const std::string &action) {
         return {true, "ok"};
     }
     return {false, "Unknown action. Use mark, pair, attach [horizontal|vertical], release, unfold, "
+                   "layout <horizontal|vertical|balance>, other_side, "
                    "workspace <number> [silent], move <left|right|up|down>, cancel, "
                    "flip, peek [end], unpair, finish, or status."};
 }
@@ -1061,6 +1106,7 @@ std::string Controller::status() {
     }
     const bool available = provider();
     return json + "],\"workspace_protection\":true,\"container_provider\":" + (available ? "true" : "false") +
+           ",\"layout_controls\":" + (available ? "true" : "false") +
            ",\"container_max_panes\":" + std::to_string(available ? CONTAINER_MAX_PANES : 0) + "}";
 }
 } // namespace Hyprflip

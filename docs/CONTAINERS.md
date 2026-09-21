@@ -176,7 +176,7 @@ entries in workspace order. Each entry opens that workspace's app list, with
 workspace after all choices are complete. App names and window
 titles distinguish choices; same-named windows get separate entries. The helper
 rechecks window identity, workspace and ownership before applying the selection.
-It never launches or closes applications. A second pane uses the card's longer
+Guided creation never launches or closes applications. A second pane uses the card's longer
 axis; the explicit H/V commands can establish the first split in either direction.
 A third app joins the existing row or column, retaining its direction and the
 relative sizes of its existing panes. Creation
@@ -190,11 +190,12 @@ For apps managed by Omachill, install the optional
 An older core keeps the original tiled-only picker behavior.
 
 The picker uses the running Omarchy menu, including its current theme, filtering,
-arrow keys and Return. It requires Python 3, `omarchy-shell` and `notify-send`.
+arrow keys and Return. It requires Python 3, `omarchy-shell`, `notify-send` and
+GLib's `gio`/`gdbus` tools for saved-card launching and its cancellable notification.
 Other desktops can continue using mark/pair/attach. This is guided creation;
 live card identities do not survive compositor restarts. The optional
-[saved-card menu](SAVED_CARDS.md) can now recreate named arrangements from apps
-you have reopened, including their split directions and proportions.
+[saved-card menu](SAVED_CARDS.md) recreates named arrangements, reuses open apps
+and launches missing ones, including their split directions and proportions.
 
 ## Edit an existing card
 
@@ -213,6 +214,21 @@ app on the side you want to change, then open the menu:
   states that the side is full at three apps and omits Add until there is room.
 - When the focused app is alone on its side, the option is **Ungroup card**.
   This explicitly dissolves the card and leaves all its apps open.
+- **Layout of this side…** offers **Beside**, **Stacked** and **Equal sizes**
+  when a side has multiple apps. Changing direction keeps its proportions;
+  equalizing keeps its direction. The other face keeps its layout.
+- **Move an app to the other side…** lets you choose any pane and follows it
+  onto the opposite face. It is offered when the source has at least two apps
+  and the destination has room. The destination keeps its existing direction,
+  or uses the card's longer axis when gaining its second app.
+
+Layout controls require the matching ABI 4 core/provider. They edit the existing
+tree in place and preserve folded/unfolded state. If an application's size
+limits prevent a change, the original membership, order, proportions and focus
+are restored. Custom bindings can call `hl.plugin.hyprflip.layout("horizontal")`,
+`layout("vertical")`, `layout("balance")` or `other_side()`; the last function
+optionally accepts a live address on the focused face. IPC equivalents are
+`hyprctl hyprflip 'layout horizontal'` and `hyprctl hyprflip other_side`.
 
 For example, open Telegram, then on your Gmail/WhatsApp card,
 focus WhatsApp, press **Super+Ctrl+Alt+C**, choose **Add an app to this side**,
@@ -314,8 +330,9 @@ into visible splits; the experimental updater reconstructs them explicitly.
   containers, and does not automatically replace existing movement shortcuts.
 - The tab bar is visible at rest and hidden during a turn. Popups do not rotate;
   unsuitable rendering conditions switch instantly.
-- No saved recipes, session restoration, automatic companion launching or
-  individual-pane capture semantics are added.
+- The compositor does not restore sessions at login or add individual-pane
+  capture semantics. The optional Omarchy helper handles saved cards and explicit
+  missing-app launching separately.
 - This is a development experiment, not a replacement for the installed plugin.
 
 ## Implementation sequence

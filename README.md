@@ -144,9 +144,9 @@ Use live addresses from `hyprctl -j clients`. Adoption rejects unrelated windows
 
 Read [CONTRIBUTING.md](CONTRIBUTING.md) for development and bug reports, [TESTING.md](TESTING.md) for the nested compositor harness, and [docs/DESIGN.md](docs/DESIGN.md) for the architecture and prior art: Compiz window groups, Sun Project Looking Glass and Apple Dashboard flips.
 
-Automatic companion launching and gesture-controlled turns are possible future
-additions. The native backend pairs two existing windows; the optional Omarchy
-container workflow includes an app picker and saved arrangements.
+Gesture-controlled turns are a possible future addition. The native backend
+pairs two existing windows; the optional Omarchy container workflow includes
+an app picker, layout controls and saved arrangements that can launch apps.
 
 ### Experimental containers
 
@@ -162,10 +162,15 @@ open. Local apps come first; **Add from workspace X** lists apps elsewhere and
 moves the selected app here. A full side explains its three-app limit; removing a side's only app is
 explicitly labeled **Ungroup card**.
 
-The same menu offers **Save card…** and **Restore saved card…**. Save a named
-arrangement, then recreate it from open apps after restarting Hyprland, with
-both faces, split sizes and focus remembered. Restore also works from C on an
-empty workspace. Review matches before any apps move.
+Choose **Layout of this side…** for **Beside**, **Stacked** or **Equal sizes**.
+**Move an app to the other side…** can move any pane, including one that is not
+focused. Both sides keep at least one app, with at most three on either side.
+
+The same menu offers **Save card…** and **Open saved card…**. Save a named
+arrangement, then open it again with both faces, split sizes and focus remembered.
+Open apps are reused; missing apps use installed launchers. Review the choices
+before anything launches or moves. If the card is already open, the menu takes
+you to it. C also works on an empty workspace.
 
 Hold **Super+Ctrl+Alt+Space** to **peek** at the opposite face; release Space to
 return. Clicking or typing keeps the side you are using. See

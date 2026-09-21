@@ -32,15 +32,20 @@ another kind of group or requiring users to manage a layout tree.
 - Each side supports three apps in one row or column. A third app keeps the
   split direction and relative sizes already chosen. H/V establish the first
   split; no nested layout editor or additional shortcuts are introduced. The
-  matching ABI 3 core/provider and updater handle cards with up to six apps.
+  matching core/provider and updater handle cards with up to six apps.
   Unfold keeps three-app rows above one another and columns beside one another,
   trying the alternate arrangement when application minimums need it.
 - The transition picker offers Flip, Vertical Flip, Slide, Fade, Instant and
   experimental Dissolve and Portal, with reversible previews. Chill integration
   protects tiled cards and hands off selected floating apps with rollback.
 - [Saved cards](SAVED_CARDS.md) remember a named two-face arrangement, pane
-  proportions and focus. Explicit restore matches open apps and reviews them
-  before importing or tiling. Missing and ambiguous matches are choices.
+  proportions and focus. Open reuses open apps and launches missing ones through
+  installed desktop entries. Review precedes launch/movement; cancellation and
+  timeouts leave apps open. An already open card is focused without duplication.
+  Manual restore remains available for choosing replacements.
+- ABI 4 adds Beside, Stacked and Equal sizes to C, plus moving any pane to the
+  other face. Both faces stay populated, with three apps maximum. Refused changes
+  restore the original arrangement in place.
 - Hold Super+Ctrl+Alt+Space to peek. Release returns smoothly; input, focus,
   popups, workspace changes and lifecycle interruptions cancel the return.
 
@@ -57,14 +62,12 @@ another kind of group or requiring users to manage a layout tree.
 
 ## Earlier ideas, ordered by likely usefulness
 
-Saved setups and hold-to-peek are implemented. Remaining directions:
+Saved setups, missing-app launching, layout controls and hold-to-peek are
+implemented. The next candidate is:
 
 1. **Touchpad-controlled turns.** Consider after keyboard workflows are stable.
    Gestures must coexist with workspace gestures and have predictable cancel
    and completion behavior. They add input-state complexity.
-2. **Explicit companion launching.** A saved setup may launch a missing app,
-   but only with a clear match and timeout. Browser windows can share processes
-   and classes; avoid attaching an unrelated window by accident.
 
 ## Ideas to defer
 

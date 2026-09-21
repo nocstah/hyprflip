@@ -4,6 +4,7 @@
 #include "ContainerABI.hpp"
 #include "globals.hpp"
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <hyprland/src/desktop/state/FocusState.hpp>
 #include <hyprland/src/desktop/state/WindowState.hpp>
@@ -228,6 +229,103 @@ bool restoreSelection(uint64_t id, const ContainerSnapshot &state, bool focus) {
     }
     return applySelection(id, state.active, focus, false);
 }
+bool fits(uint64_t id) {
+    ContainerSnapshot state;
+    if (!inspect(id, &state))
+        return false;
+    for (uint32_t side = 0; side < 2; ++side)
+        for (uint32_t i = 0; i < state.count[side]; ++i) {
+            auto w = window(state.windows[side][i]);
+            if (!w)
+                return false;
+            const auto size = w->size(Desktop::View::IGeometric::GEOMETRIC_GOAL);
+            const auto min = w->minSize(), max = w->maxSize();
+            if ((min && (size.x < min->x || size.y < min->y)) || (max && (size.x > max->x || size.y > max->y)))
+                return false;
+        }
+    return true;
+}
+bool edit(uint64_t id, uintptr_t child, ContainerEdit operation) {
+    ContainerSnapshot before;
+    if (!inspect(id, &before))
+        return false;
+    uint32_t side = 2, index = 0;
+    for (uint32_t s = 0; s < 2; ++s)
+        for (uint32_t i = 0; i < before.count[s]; ++i)
+            if (before.windows[s][i] == child) { side = s; index = i; }
+    if (side > 1 || before.count[side] < 2 ||
+        (operation == ContainerEdit::OtherSide && before.count[1 - side] >= CONTAINER_MAX_PANES))
+        return false;
+    if (operation != ContainerEdit::Horizontal && operation != ContainerEdit::Vertical &&
+        operation != ContainerEdit::Balance && operation != ContainerEdit::OtherSide)
+        return false;
+    auto r = root(id);
+    auto layout = r->Hy3Node::layout();
+    auto n = node(child);
+    auto &source = face(*r, side)->as_group();
+    std::array<Hy3GroupLayout, 2> axes;
+    std::map<uintptr_t, float> weights;
+    for (uint32_t s = 0; s < 2; ++s) {
+        auto f = face(*r, s);
+        axes[s] = f->is_group() ? f->as_group().layout : Hy3GroupLayout::SplitH;
+        for (uint32_t i = 0; i < before.count[s]; ++i)
+            weights[before.windows[s][i]] = f->is_group() ? node(before.windows[s][i])->size_ratio : 1.F;
+    }
+    auto selection = before;
+    bool wrapped = false;
+    if (operation == ContainerEdit::OtherSide) {
+        auto destination = face(*r, 1 - side);
+        if (destination->is_target()) {
+            wrapped = true;
+            destination->wrap(before.width >= before.height ? Hy3GroupLayout::SplitH : Hy3GroupLayout::SplitV,
+                              GroupEphemeralityOption::Standard, false);
+            destination = face(*r, 1 - side);
+        }
+        auto &target = destination->as_group();
+        source.collapseExpansions();
+        target.collapseExpansions();
+        auto moved = source.extractChildRaw(*n);
+        // Preserve the remaining panes' relative sizes, including very unequal
+        // splits. Subtracting the same weight from every pane can go negative.
+        float total = 0;
+        for (const auto &c : source.children) total += c->size_ratio;
+        for (const auto &c : source.children) c->size_ratio *= source.children.size() / total;
+        moved->size_ratio = 1.F;
+        target.insertChild(std::move(moved));
+        target.locked = true;
+        selection.active = 1 - side;
+        selection.focused[1 - side] = child;
+        selection.focused[side] = address(source.getFocusedNode(true).as_window());
+    } else if (operation == ContainerEdit::Balance) {
+        for (const auto &c : source.children) c->size_ratio = 1.F;
+    } else {
+        source.setLayout(operation == ContainerEdit::Vertical ? Hy3GroupLayout::SplitV : Hy3GroupLayout::SplitH);
+    }
+    update(layout, false);
+    if (fits(id))
+        return restoreSelection(id, selection, true);
+    // Roll back in place. Do not dissolve/recreate the card, collapse ancestors
+    // or leave a pane outside it when application size limits reject a change.
+    if (operation == ContainerEdit::OtherSide) {
+        auto moved = n->parent->as_group().extractChildRaw(*n);
+        source.insertChild(std::next(source.children.begin(), index), std::move(moved));
+        if (wrapped) {
+            auto &wrapper = face(*r, 1 - side)->as_group();
+            auto original = wrapper.extractChildRaw(wrapper.children.begin());
+            r->replaceChild(r->findChild(wrapper), std::move(original));
+        }
+    }
+    for (uint32_t s = 0; s < 2; ++s) {
+        auto f = face(*r, s);
+        if (f->is_group()) {
+            f->as_group().setLayout(axes[s]);
+            for (uint32_t i = 0; i < before.count[s]; ++i)
+                node(before.windows[s][i])->size_ratio = weights.at(before.windows[s][i]);
+        }
+    }
+    restoreSelection(id, before, true);
+    return false;
+}
 bool workspace(uint64_t id, uint32_t destination, bool follow) {
     ContainerSnapshot state;
     if (!destination || destination > INT32_MAX || !inspect(id, &state))
@@ -328,20 +426,7 @@ bool unfold(uint64_t id, bool enabled) {
     for (const auto axis : {preferred, alternate}) {
         r->setLayout(axis);
         update(layout, false);
-        bool fits = true;
-        for (uint32_t side = 0; side < 2; ++side)
-            for (uint32_t i = 0; i < state.count[side]; ++i) {
-                auto w = window(state.windows[side][i]);
-                if (!w) {
-                    fits = false;
-                    continue;
-                }
-                const auto size = w->size(Desktop::View::IGeometric::GEOMETRIC_GOAL);
-                const auto min = w->minSize(), max = w->maxSize();
-                if ((min && (size.x < min->x || size.y < min->y)) || (max && (size.x > max->x || size.y > max->y)))
-                    fits = false;
-            }
-        if (fits)
+        if (fits(id))
             return restoreSelection(id, state, true);
     }
     cards.at(id).unfolded = false;
@@ -374,10 +459,11 @@ const ContainerAPI api{CONTAINER_ABI_VERSION,
                        workspace,
                        move,
                        unfold,
+                       edit,
                        animating};
 } // namespace
 
-extern "C" __attribute__((visibility("default"))) const Hyprflip::ContainerAPI *hyprflip_hy3_bridge_v3() {
+extern "C" __attribute__((visibility("default"))) const Hyprflip::ContainerAPI *hyprflip_hy3_bridge_v4() {
     return &api;
 }
 

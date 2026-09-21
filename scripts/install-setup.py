@@ -33,9 +33,9 @@ def main():
     module = config / 'hyprflip-setup.lua'
     if not main_config.is_file():
         raise SystemExit('An existing Hyprland Lua configuration is required.')
-    for binary in ('python3', 'omarchy-shell', 'notify-send'):
+    for binary in ('python3', 'omarchy-shell', 'notify-send', 'gio', 'gdbus'):
         if not shutil.which(binary):
-            raise SystemExit('Guided setup requires Python 3 and the running Omarchy 4 shell.')
+            raise SystemExit(f'Guided setup requires {binary}. Install Python 3, GLib, libnotify and the Omarchy 4 shell.')
     ping = subprocess.run(['omarchy-shell', 'shell', 'ping'], capture_output=True, text=True, timeout=8,
                           env=os.environ | {'OMARCHY_SHELL_IPC_TIMEOUT': os.environ.get('OMARCHY_SHELL_IPC_TIMEOUT', '5s')})
     if ping.returncode or ping.stdout.strip() != 'ok':
