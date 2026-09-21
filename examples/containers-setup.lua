@@ -40,6 +40,12 @@ hl.bind("SUPER + CTRL + ALT + C", function()
     hl.dispatch(hl.dsp.exec_cmd("python3 " .. shell_quote(helper) .. " --cards"))
 end, { description = "Hyprflip: edit card" })
 
+hl.unbind("SUPER + CTRL + ALT + L")
+hl.bind("SUPER + CTRL + ALT + L", function()
+    local helper = os.getenv("HOME") .. "/.local/lib/hyprflip/setup.py"
+    hl.dispatch(hl.dsp.exec_cmd("python3 " .. shell_quote(helper) .. " --launch"))
+end, { description = "Hyprflip: open saved card" })
+
 if hl.plugin.hyprflip and hl.plugin.hyprflip.peek then
     hl.unbind("SUPER + CTRL + ALT + SPACE")
     hl.bind("SUPER + CTRL + ALT + SPACE", function()

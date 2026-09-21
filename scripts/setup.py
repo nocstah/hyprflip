@@ -662,6 +662,7 @@ class Edit(Setup):
             label = TRANSITIONS.get(state.get('transition'), ('Flip', ''))[0]
             choices.append(Choice('transition', 'Transition', label + ' · All cards'))
         choices.extend([Choice('save', 'Save card…', 'Reuse this arrangement after restarting'),
+                        Choice('manage', 'Manage card…', 'Update saved card · Rename · Duplicate'),
                         Choice('saved', 'Open saved card…', 'Reuse open apps · Launch missing apps')])
         action = self.menu.choose(prompt, choices)
         if action not in {c.value for c in choices}:
@@ -685,6 +686,10 @@ class Edit(Setup):
             if removal not in face: raise SetupError('That app is no longer on this side. Open the card menu again.')
         candidate = None
         if action == 'save': return Saved(self.ipc, self.menu).prepare_save(plan)
+        if action == 'manage':
+            result = Saved(self.ipc, self.menu).prepare_manage(plan)
+            if result is None: raise Cancelled()
+            return result
         if action == 'saved': return Saved(self.ipc, self.menu).prepare_restore()
         if action == 'transition':
             mode = self.choose_transition(plan)
@@ -919,16 +924,24 @@ class RecipeStore:
             raise SetupError(f'Saved cards could not be read. Check {self.path}; it has not been overwritten.') from error
 
     def update(self, name, recipe, previous):
-        if not self.valid_name(name): raise SetupError('Use a card name between 1 and 64 characters.')
-        if recipe is not None: self.validate(recipe)
+        self.change({name: previous}, {name: recipe})
+
+    def change(self, expected, replacements):
+        # Rename removes the source and creates the destination in one locked,
+        # atomic write. Concurrent changes to either name must not be lost.
+        for name in expected.keys() | replacements.keys():
+            if not self.valid_name(name): raise SetupError('Use a card name between 1 and 64 characters.')
+        for recipe in replacements.values():
+            if recipe is not None: self.validate(recipe)
         self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
         with (self.root / 'cards.lock').open('a') as lock:
             fcntl.flock(lock, fcntl.LOCK_EX)
             cards = self.read()
-            if cards.get(name) != previous:
+            if any(cards.get(name) != previous for name, previous in expected.items()):
                 raise SetupError('That saved card changed in another menu. Open Saved cards again.')
-            if recipe is None: cards.pop(name, None)
-            else: cards[name] = recipe
+            for name, recipe in replacements.items():
+                if recipe is None: cards.pop(name, None)
+                else: cards[name] = recipe
             if len(cards) > 100: raise SetupError('You have 100 saved cards. Delete an unused one before saving another.')
             temporary = self.root / ('cards-' + uuid.uuid4().hex)
             try:
@@ -955,6 +968,7 @@ class SavedPlan:
     launchers: dict | None = None
     chosen: list | None = None
     card: dict | None = None
+    new_name: str | None = None
 
 
 class Saved(Setup):
@@ -1032,37 +1046,115 @@ class Saved(Setup):
     def prepare_restore(self):
         workspace = self.ipc.data('-j', 'activeworkspace')['id']
         focus = self.ipc.data('-j', 'activewindow').get('address')
-        cards = self.store.read()
-        if not cards: raise SetupError('No saved cards yet. Focus an existing card, press Super+Ctrl+Alt+C, then choose Save card.')
         while True:
+            cards = self.store.read()
+            windows, state = self.ipc.windows(), self.ipc.status()
+            if not cards:
+                card = next((c for c in state.get('containers', []) if any(focus in f for f in c['faces'])), None)
+                choices = ([Choice('save', 'Save this card…', 'Give the current arrangement a name')]
+                           if card else [Choice('close', 'Close', 'Create a card with Super+Ctrl+Alt+O, then save it from C')])
+                if self.menu.choose('No saved cards yet', choices) == 'save' and card:
+                    members = {a: windows[a] for face in card['faces'] for a in face}
+                    return self.prepare_save(EditPlan(focus, deepcopy(card), deepcopy(members)))
+                raise Cancelled()
             names = sorted(cards, key=str.casefold)
-            selected = self.menu.choose('Saved cards', [Choice(str(i), name, self.describe(cards[name])) for i, name in enumerate(names)])
+            choices = []
+            for index, name in enumerate(names):
+                recipe = cards[name]
+                opened = self.open_cards(recipe, windows, state)
+                if opened:
+                    places = sorted({workspace_name(windows[c['current']]) for c in opened})
+                    detail = 'Open · Workspace ' + ', '.join(places)
+                else:
+                    matches = [w for w in windows.values() if any(self.same_app(app, w)
+                               for face in recipe['faces'] for app in face['apps'])]
+                    remote = sorted({workspace_name(w) for w in matches if w['workspace']['id'] != workspace})
+                    detail = 'Open here'
+                    if remote: detail += ' · Bring apps from ' + ', '.join(remote)
+                    if any(w.get('floating') for w in matches): detail += ' · Tile apps'
+                choices.append(Choice(str(index), name, detail + ' · ' + self.describe(recipe)))
+            choices.append(Choice('manage', 'Manage saved cards…', 'Rename · Duplicate · Review apps'))
+            selected = self.menu.choose('Open saved card', choices)
+            if selected == 'manage':
+                result = self.prepare_manage()
+                if result is not None: return result
+                continue
             if selected not in map(str, range(len(names))): raise SetupError('Choose a saved card from the menu.')
             name = names[int(selected)]; recipe = cards[name]
-            opened = self.open_cards(recipe, self.ipc.windows(), self.ipc.status())
-            choice = self.menu.choose(name, [Choice('open', 'Go to open card' if opened else 'Open on this workspace',
-                                                   'Keep its current arrangement' if opened else 'Reuse open apps · Launch missing apps'),
-                                           Choice('restore', 'Restore from open apps…', 'Choose windows yourself'),
-                                           Choice('delete', 'Delete saved card', 'Keep all running apps and cards'),
-                                           Choice('back', 'Back to saved cards')])
-            if choice == 'back': continue
-            if choice == 'delete':
-                if self.menu.choose(f'Delete saved card “{name}”?', [Choice('delete', 'Delete saved card'),
-                                                                 Choice('cancel', 'Cancel')]) != 'delete': raise Cancelled()
-                return SavedPlan('delete', name, recipe, recipe)
-            if choice == 'open':
-                if opened:
-                    index = '0' if len(opened) == 1 else self.menu.choose('Choose an open card', [
-                        Choice(str(i), 'Workspace ' + workspace_name(self.ipc.windows()[c['current']]), self.describe(recipe))
-                        for i, c in enumerate(opened)])
-                    if index not in map(str, range(len(opened))): raise Cancelled()
-                    card = opened[int(index)]
-                    members = {a: self.ipc.windows()[a] for face in card['faces'] for a in face}
-                    return SavedPlan('goto', name, recipe, workspace=workspace, focus=focus,
-                                     card=deepcopy(card), windows=deepcopy(members))
-                return self.prepare_open(name, recipe, workspace, focus)
-            if choice != 'restore': raise Cancelled()
-            break
+            return self.prepare_named(name, recipe, workspace, focus)
+
+    def prepare_named(self, name, recipe, workspace, focus):
+        windows, state = self.ipc.windows(), self.ipc.status()
+        opened = self.open_cards(recipe, windows, state)
+        if opened:
+            index = '0' if len(opened) == 1 else self.menu.choose('Choose an open card', [
+                Choice(str(i), 'Workspace ' + workspace_name(windows[c['current']]), self.describe(recipe))
+                for i, c in enumerate(opened)])
+            if index not in map(str, range(len(opened))): raise Cancelled()
+            card = opened[int(index)]
+            members = {a: windows[a] for face in card['faces'] for a in face}
+            return SavedPlan('goto', name, recipe, workspace=workspace, focus=focus,
+                             card=deepcopy(card), windows=deepcopy(members))
+        return self.prepare_open(name, recipe, workspace, focus)
+
+    def prepare_manage(self, edit=None):
+        cards = self.store.read()
+        if not cards: raise SetupError('No saved cards yet. Choose Save card in the card menu first.')
+        names = sorted(cards, key=str.casefold)
+        related = []
+        if edit:
+            windows, _ = Edit(self.ipc, self.menu).validate(edit)
+            # Layout and face transfers should not force retyping the name.
+            # Two matching saved variants still require an explicit choice.
+            for name, recipe in cards.items():
+                remaining = [windows[a] for face in edit.card['faces'] for a in face]
+                apps = [app for face in recipe['faces'] for app in face['apps']]
+                if len(remaining) != len(apps): continue
+                for app in apps:
+                    address = self.matches(app, remaining)
+                    if address is None: break
+                    remaining = [w for w in remaining if w['address'] != address]
+                else: related.append(name)
+        if len(related) == 1:
+            name = related[0]
+        else:
+            selected = self.menu.choose('Manage saved cards', [
+                Choice(str(i), name, self.describe(cards[name])) for i, name in enumerate(names)])
+            if selected not in map(str, range(len(names))): raise Cancelled()
+            name = names[int(selected)]
+        recipe = cards[name]
+        workspace = self.ipc.data('-j', 'activeworkspace')['id']
+        focus = self.ipc.data('-j', 'activewindow').get('address')
+        opened = self.open_cards(recipe, self.ipc.windows(), self.ipc.status())
+        choices = [Choice('open', 'Go to open card' if opened else 'Open here', self.describe(recipe))]
+        if edit:
+            choices.insert(0, Choice('update', 'Update saved card', 'Save the current apps, split sizes and visible side'))
+        if not opened:
+            choices += [Choice('review', 'Review apps and launchers…', 'Choose which apps to open'),
+                        Choice('restore', 'Restore from open apps…', 'Choose windows yourself')]
+        choices += [Choice('rename', 'Rename…', 'Change the saved name'),
+                    Choice('duplicate', 'Duplicate…', 'Copy this saved setup under a new name'),
+                    Choice('delete', 'Delete saved card', 'Keep all running apps and cards'),
+                    Choice('back', 'Cancel' if edit else 'Back to saved cards')]
+        action = self.menu.choose('Manage “' + name + '”', choices)
+        if action not in {c.value for c in choices}: raise Cancelled()
+        if action == 'back': return None
+        if action == 'open': return self.prepare_named(name, recipe, workspace, focus)
+        if action == 'review': return self.prepare_open(name, recipe, workspace, focus, review=True)
+        if action == 'restore': return self.prepare_manual(name, recipe, workspace, focus)
+        if action == 'update':
+            return SavedPlan('update', name, recipe, recipe, edit=edit)
+        if action in ('rename', 'duplicate'):
+            prompt = f'Rename “{name}” to' if action == 'rename' else f'Name the copy of “{name}”'
+            new_name = self.menu.input(prompt).strip()
+            if not self.store.valid_name(new_name): raise SetupError('Use a card name between 1 and 64 characters.')
+            if new_name in cards: raise SetupError('That saved name already exists. Choose a different name.')
+            return SavedPlan(action, name, recipe, new_name=new_name)
+        if self.menu.choose(f'Delete saved card “{name}”?', [Choice('delete', 'Delete saved card'),
+                                                         Choice('cancel', 'Cancel')]) != 'delete': raise Cancelled()
+        return SavedPlan('delete', name, recipe, recipe)
+
+    def prepare_manual(self, name, recipe, workspace, focus):
         windows, state = self.ipc.windows(), self.ipc.status()
         self.check_workspace(recipe, workspace)
         eligible = self.eligible(windows, state)
@@ -1113,7 +1205,7 @@ class Saved(Setup):
         if selected not in {e.id for e in entries}: raise SetupError('That app launcher is no longer available.')
         return catalog.apps[selected]
 
-    def prepare_open(self, name, recipe, workspace, focus):
+    def prepare_open(self, name, recipe, workspace, focus, review=False):
         self.check_workspace(recipe, workspace)
         windows, state = self.ipc.windows(), self.ipc.status()
         eligible = self.eligible(windows, state)
@@ -1131,7 +1223,7 @@ class Saved(Setup):
                     raise SetupError(app['label'] + ' is already open but unavailable. Leave fullscreen or release it from its card, then try again.')
                 launchers[index] = catalog.infer(app) or self.choose_launcher(app, catalog)
             chosen.append(match)
-        while True:
+        while review:
             detail = f'Workspace {workspace} · {len(chosen) - len(launchers)} open · {len(launchers)} to launch'
             choices = [Choice('open', 'Open card here', detail)]
             for index, app in enumerate(apps):
@@ -1151,7 +1243,9 @@ class Saved(Setup):
                 chosen[index] = self.choose_window('Choose a different app', candidates, workspace)
                 if chosen[index] not in {w['address'] for w in candidates}: raise Cancelled()
         selected = deepcopy({a: windows[a] for a in chosen if a})
-        self.confirm_tiling(selected, 'Tile and open card')
+        # Selecting Open here already requests this saved tiled arrangement.
+        # Explicit review keeps the existing tiling offer for manual choices.
+        if review: self.confirm_tiling(selected, 'Tile and open card')
         return SavedPlan('open', name, recipe, windows=selected, workspace=workspace, focus=focus,
                          launchers=launchers, chosen=chosen)
 
@@ -1272,16 +1366,28 @@ class Saved(Setup):
         return f'Opened “{plan.name}”.'
 
     def apply(self, plan):
-        if plan.action == 'save':
+        if plan.action in ('save', 'update'):
             windows, _ = Edit(self.ipc, self.menu).validate(plan.edit)
             # A resize while naming the card must not save stale proportions.
             recipe = self.capture(plan.edit.card, windows)
             catalog = DesktopApps(getattr(self.ipc, 'env', None))
+            old_apps = [app for face in (plan.previous or {}).get('faces', []) for app in face['apps']]
             for face in recipe['faces']:
                 for app in face['apps']:
-                    if entry := catalog.infer(app): app['desktop_id'] = entry.id
+                    previous = [old for old in old_apps if self.same_app(old,
+                                {'class': app['class'], 'initialClass': app['initial_class']})]
+                    exact = [old for old in previous if old['title'] == app['title']]
+                    identifiers = {old.get('desktop_id') for old in (exact or previous)} - {None}
+                    if len(identifiers) == 1: app['desktop_id'] = identifiers.pop()
+                    elif entry := catalog.infer(app): app['desktop_id'] = entry.id
             self.store.update(plan.name, recipe, plan.previous)
+            if plan.action == 'update': return f'Updated “{plan.name}”.'
             return f'Saved “{plan.name}”. Open it from the card menu whenever you need it.'
+        if plan.action in ('rename', 'duplicate'):
+            replacements = {plan.new_name: plan.recipe}
+            if plan.action == 'rename': replacements[plan.name] = None
+            self.store.change({plan.name: plan.recipe, plan.new_name: None}, replacements)
+            return (f'Renamed to “{plan.new_name}”.' if plan.action == 'rename' else f'Saved a copy as “{plan.new_name}”.')
         if plan.action == 'delete':
             self.store.update(plan.name, None, plan.previous)
             return f'Deleted saved card “{plan.name}”.'
@@ -1313,6 +1419,7 @@ def main():
     mode.add_argument('--front', help='Create a card from this window address')
     mode.add_argument('--edit', help='Edit the side containing this window address')
     mode.add_argument('--cards', action='store_true', help='Open the card menu, including saved cards on an empty workspace')
+    mode.add_argument('--launch', action='store_true', help='Search saved cards and open or switch to one directly')
     args = parser.parse_args()
     request = None
     try:
@@ -1323,7 +1430,10 @@ def main():
         request.start()
         with tempfile.TemporaryDirectory(prefix='hyprflip-setup-', dir=runtime) as directory:
             menu = OmarchyMenu(Path(directory), request)
-            if args.cards and not any(front in f for c in ipc.status().get('containers', []) for f in c['faces']):
+            if args.launch:
+                flow = Saved(ipc, menu)
+                selected = flow.prepare_restore()
+            elif args.cards and not any(front in f for c in ipc.status().get('containers', []) for f in c['faces']):
                 choices = [Choice('saved', 'Open saved card…', 'Reuse open apps · Launch missing apps')]
                 if front: choices.insert(0, Choice('create', 'Create a card', 'Choose another app for the back'))
                 action = menu.choose('Hyprflip cards', choices)

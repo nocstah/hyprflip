@@ -1,5 +1,42 @@
 # Validation
 
+## Direct card launcher and saved-card management (2026-09-21)
+
+Selecting a saved card now opens or switches to it immediately. The native
+searchable launcher is also available directly on Super+Ctrl+Alt+L; C retains
+the card editor. Optional app/launcher review and manual restore are under
+Manage saved cards. C → Manage card adds Update, Rename and Duplicate.
+
+- **86 Python tests pass.** New checks cover one-selection opening, remote and
+  floating app descriptions, empty-library guidance, existing-card navigation,
+  in-place saved updates after resize/face transfer, remembered launchers,
+  ambiguous saved variants, naming cancellation, stale card/definition refusal,
+  atomic rename failure, concurrent source/destination edits and the 100-card
+  limit. Installer checks include conflicts on L and exact-file rollback.
+- **Six real compositor workflows pass** in `tests/opening_workflows.py`:
+  missing-app launch/reuse/import, existing-card focus, layout update without
+  retyping its name, Duplicate/Rename/Delete without touching running windows,
+  late-app cancellation and launcher timeout.
+- **Three all-closed Brave card launches pass** through the direct path in
+  `tests/cold_open.py`, with Auto Chill and the current Hyprglass build enabled.
+- **Seven native-menu checks pass** with temporary app windows and a separate
+  test library: empty-library saving, search/direct switching, Update, Duplicate
+  and Rename, Escape during naming, optional review cancellation and direct
+  all-closed launching using the updated layout. The empty, running/closed
+  launcher, management, naming and review screens were inspected together;
+  the existing Omarchy theme and controls were retained.
+
+Evidence is under `/tmp/hf-library/cold-open/`,
+`/tmp/hf-library/opening-results.json` and `/tmp/hf-library-ui-check/`.
+The native test restored the original cards, workspaces and focus.
+
+The helper and L binding are installed. Eight post-install checks confirm helper
+bytes, existing card membership/state, saved definitions, focus, plugin handles,
+library bytes, clean config and the registered L binding. No compositor library
+was replaced or unloaded. Backups are under
+`~/.local/state/hyprflip/guided-setup-20260921-175951-194864/`; installation checks
+and logs are under `/tmp/hf-library-installed/`.
+
 ## Saved-card cold-start fix (2026-09-21)
 
 Opening a saved Gmail / WhatsApp + Telegram card with all three apps closed

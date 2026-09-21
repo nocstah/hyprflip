@@ -60,6 +60,9 @@ class SetupInstallTest(unittest.TestCase):
                 if self.module.exists() or self.conflict == 'SPACE':
                     reply.append({'modmask': 76, 'key': 'space', 'description':
                                   'Other action' if self.conflict == 'SPACE' else 'Hyprflip: hold to peek at the other side'})
+                if self.module.exists() or self.conflict == 'L':
+                    reply.append({'modmask': 76, 'key': 'L', 'description':
+                                  'Other action' if self.conflict == 'L' else 'Hyprflip: open saved card'})
             elif args == ['reload']:
                 self.reloads += 1
                 reply = 'ok'
@@ -97,7 +100,7 @@ class SetupInstallTest(unittest.TestCase):
         self.assertFalse(any('plugin' in call or 'mark' in call or 'pair' in call for call in self.calls))
 
     def test_conflict_refuses_before_writing(self):
-        for key in ('O', 'C', 'SPACE'):
+        for key in ('O', 'C', 'L', 'SPACE'):
             self.conflict = key
             with self.assertRaisesRegex(SystemExit, 'assigned to another action'): self.install()
             self.assertEqual(self.main.read_bytes(), self.original)

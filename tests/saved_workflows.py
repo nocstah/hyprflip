@@ -108,7 +108,7 @@ try:
         for address in front: ipc.move(address, 31)
         ipc.focus(b)
         flow = setup.Saved(ipc, Menu('0', 'restore', 'restore'))
-        plan = flow.prepare_restore(); assert not ipc.status()['containers']
+        plan = flow.prepare_manage(); assert not ipc.status()['containers']
         real_call, drift = ipc.call, []
         def distracted(*arguments):
             action = (arguments[:1] == ('hyprflip',) and len(arguments) > 1 and
@@ -142,7 +142,7 @@ try:
         ipc.focus(b); time.sleep(.25)
         original_windows = deepcopy(ipc.windows())
         flow = setup.Saved(ipc, Menu('0', 'restore', 'restore', 'tile'))
-        plan = flow.prepare_restore()
+        plan = flow.prepare_manage()
         real_focused = ipc.focused
         def rejected(*operations):
             if any(action == 'attach vertical' for _, action in operations):
@@ -165,13 +165,13 @@ try:
         assert ipc.data('-j', 'activewindow')['address'] == b
         passed('a failed restore after partial grouping rolls back remote workspaces, floating geometry, Chill tags and original focus')
         flow = setup.Saved(ipc, Menu('0', 'restore', 'restore', 'tile'))
-        flow.apply(flow.prepare_restore()); time.sleep(.2)
+        flow.apply(flow.prepare_manage()); time.sleep(.2)
         assert_shape(before['recipe'])
         assert all(not ipc.windows()[a]['floating'] for a in addresses)
         passed('the same saved card restores successfully from Chill after the refused attempt')
         # Saving and deleting a recipe must never dissolve a running card.
         membership = deepcopy(card()['faces'])
-        flow = setup.Saved(ipc, Menu('0', 'delete', 'delete')); flow.apply(flow.prepare_restore())
+        flow = setup.Saved(ipc, Menu('0', 'delete', 'delete')); flow.apply(flow.prepare_manage())
         assert card()['faces'] == membership and not setup.RecipeStore(env).read()
         passed('deleting a saved arrangement leaves the running card intact')
     completed = True

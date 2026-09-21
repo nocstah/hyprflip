@@ -169,8 +169,14 @@ focused. Both sides keep at least one app, with at most three on either side.
 The same menu offers **Save card…** and **Open saved card…**. Save a named
 arrangement, then open it again with both faces, split sizes and focus remembered.
 Open apps are reused; missing apps use installed launchers. Review the choices
-before anything launches or moves. If the card is already open, the menu takes
-you to it. C also works on an empty workspace.
+when needed under **Manage saved cards… → Review apps and launchers…**.
+**Super+Ctrl+Alt+L** opens the searchable saved-card launcher directly. Select a
+name and press Enter to open it immediately, or switch to its displayed workspace
+if it is already running. C also works on an empty workspace.
+
+After adjusting a card, use **C → Manage card… → Update saved card** to remember
+its current layout without retyping its name. **Rename…** and **Duplicate…**
+manage the saved setup without changing running apps.
 
 Hold **Super+Ctrl+Alt+Space** to **peek** at the opposite face; release Space to
 return. Clicking or typing keeps the side you are using. See

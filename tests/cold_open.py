@@ -144,7 +144,7 @@ h1{{margin:60px}}.corner{{position:fixed;width:40px;height:40px;background:#00cc
     for process in processes:
         process.wait(timeout=10)
     for attempt in range(3):
-        flow = setup.Saved(ipc, Menu('0', 'open', 'open')); plan = flow.prepare_restore()
+        flow = setup.Saved(ipc, Menu('0')); plan = flow.prepare_restore()
         assert len(plan.launchers) == 3 and plan.chosen == [None, None, None]
         print('Opening all three closed apps, attempt', attempt + 1, flush=True)
         flow.apply(plan)

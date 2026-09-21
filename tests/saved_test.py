@@ -100,7 +100,7 @@ class SavedTest(unittest.TestCase):
         self.ipc.clients = {'0x' + str(i): dict(w, address='0x' + str(i), pid=100 + i, title='Changed title')
                             for i, w in enumerate(self.ipc.clients.values(), 10)}
         flow = self.saved('0', 'restore', 'restore')
-        plan = flow.prepare_restore()
+        plan = flow.prepare_manage()
         self.assertEqual(list(plan.windows), ['0x10', '0x11', '0x12'])
         self.assertEqual(plan.arrangement['faces'][1]['windows'], ['0x11', '0x12'])
         self.assertEqual(self.ipc.mutations, [])
@@ -109,7 +109,7 @@ class SavedTest(unittest.TestCase):
         self.ungrouped()
         self.ipc.clients['0xd'].update(self.ipc.clients['0xa'] | {'address': '0xd', 'pid': 4})
         flow = self.saved('0', 'restore', '0xa', 'cancel')
-        with self.assertRaises(setup.Cancelled): flow.prepare_restore()
+        with self.assertRaises(setup.Cancelled): flow.prepare_manage()
         self.assertIn('Front: choose', flow.menu.prompts[2][0])
         self.assertEqual(self.ipc.mutations, [])
 
@@ -118,7 +118,7 @@ class SavedTest(unittest.TestCase):
         del self.ipc.clients['0xa']
         self.ipc.clients['0xd']['workspace'] = {'id': 8, 'name': '8'}
         flow = self.saved('0', 'restore', 'workspace:8', '0xd', 'restore')
-        plan = flow.prepare_restore()
+        plan = flow.prepare_manage()
         self.assertEqual(plan.arrangement['faces'][0]['windows'], ['0xd'])
         self.assertEqual(plan.windows['0xd']['workspace']['id'], 8)
         self.assertEqual(plan.workspace, 2)
@@ -127,7 +127,7 @@ class SavedTest(unittest.TestCase):
     def test_review_can_change_an_automatic_match(self):
         self.ungrouped()
         flow = self.saved('0', 'restore', '0', '0xd', 'restore')
-        plan = flow.prepare_restore()
+        plan = flow.prepare_manage()
         self.assertEqual(plan.arrangement['faces'][0]['windows'], ['0xd'])
         self.assertEqual(self.ipc.mutations, [])
 
@@ -135,7 +135,7 @@ class SavedTest(unittest.TestCase):
         for change in ('file', 'workspace', 'focus', 'app'):
             with self.subTest(change=change):
                 self.setUp(); self.ungrouped()
-                flow = self.saved('0', 'restore', 'restore'); plan = flow.prepare_restore()
+                flow = self.saved('0', 'restore', 'restore'); plan = flow.prepare_manage()
                 if change == 'file': self.store.update('Comms', None, self.recipe)
                 if change == 'workspace': self.ipc.workspace = 3
                 if change == 'focus': self.ipc.active = '0xd'
@@ -145,9 +145,9 @@ class SavedTest(unittest.TestCase):
 
     def test_delete_is_explicit_and_never_ungroups_running_apps(self):
         self.store.update('Comms', self.recipe, None)
-        with self.assertRaises(setup.Cancelled): self.saved('0', 'delete', 'cancel').prepare_restore()
+        with self.assertRaises(setup.Cancelled): self.saved('0', 'delete', 'cancel').prepare_manage()
         self.assertIn('Comms', self.store.read())
-        flow = self.saved('0', 'delete', 'delete'); flow.apply(flow.prepare_restore())
+        flow = self.saved('0', 'delete', 'delete'); flow.apply(flow.prepare_manage())
         self.assertEqual(self.store.read(), {})
         self.assertEqual(self.ipc.mutations, [])
         self.assertEqual(len(self.ipc.snapshot['containers']), 1)

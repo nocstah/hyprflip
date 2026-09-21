@@ -35,7 +35,7 @@ class OpeningTest(unittest.TestCase):
         return path
 
     def flow(self, *extra):
-        flow = setup.Saved(self.ipc, Menu('0', 'open', *extra, 'open'))
+        flow = setup.Saved(self.ipc, Menu('0', *extra))
         return flow, flow.prepare_restore()
 
     def test_existing_windows_are_reused_and_remote_windows_are_planned_for_import(self):
@@ -149,13 +149,14 @@ class OpeningTest(unittest.TestCase):
 
     def test_open_card_is_focused_without_launching_or_rebuilding_it(self):
         self.ipc.snapshot['containers'] = [dict(id=1, faces=[['0xa'],['0xb','0xc']], current='0xc', active=1, unfolded=True)]
-        flow = setup.Saved(self.ipc, Menu('0', 'open'))
+        flow = setup.Saved(self.ipc, Menu('0'))
         plan = flow.prepare_restore()
         self.assertEqual(plan.action, 'goto')
         with patch.object(setup.DesktopApps, 'launch') as launch: flow.apply(plan)
         launch.assert_not_called()
         self.assertEqual(self.ipc.mutations, [('focus','0xc')])
-        self.assertIn('Go to open card', [c.label for c in flow.menu.prompts[1][1]])
+        self.assertEqual(len(flow.menu.prompts), 1)
+        self.assertIn('Open · Workspace 2', flow.menu.prompts[0][1][0].detail)
 
     def test_ambiguous_existing_windows_require_selection(self):
         self.ipc.clients['0xe'] = self.ipc.clients['0xa'] | {'address':'0xe', 'pid':22}
@@ -172,7 +173,8 @@ class OpeningTest(unittest.TestCase):
     def test_missing_launcher_is_chosen_then_shown_in_review_before_launch(self):
         del self.ipc.clients['0xa']
         (self.root / 'data/applications/a.desktop').unlink()
-        flow, plan = self.flow('b.desktop')
+        flow = setup.Saved(self.ipc, Menu('0', 'review', 'b.desktop', 'open'))
+        plan = flow.prepare_manage()
         self.assertEqual(plan.launchers[0].id, 'b.desktop')
         self.assertEqual(flow.menu.prompts[-1][1][1].detail, 'Launch App b')
         self.assertEqual(self.ipc.mutations, [])

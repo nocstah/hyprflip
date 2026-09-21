@@ -54,7 +54,7 @@ def definition(name, command=None):
         '\nStartupWMClass=' + name + '\nExec=' + (command or
         f'/usr/bin/foot --config /dev/null --app-id={name} --title={name} /usr/bin/cat') + '\n')
 def opening():
-    flow = setup.Saved(ipc, Menu('0','open','open'))
+    flow = setup.Saved(ipc, Menu('0'))
     return flow, flow.prepare_restore()
 
 
@@ -78,7 +78,7 @@ try:
     ipc.focused((a,'mark'),(b,'pair')); ipc.focused((c,'mark'),(b,'attach vertical'))
     setup.Setup(ipc,Menu()).restore_ratios({'windows':[b,c],'axis':'vertical','ratios':[.65,.35]})
     ipc.focus(c)
-    flow = setup.Edit(ipc,Menu('save','Communications')); flow.apply(flow.prepare(c))
+    flow = setup.Edit(ipc,Menu('save','Communications','replace')); flow.apply(flow.prepare(c))
     recipe = setup.RecipeStore(env).read()['Communications']
     assert all(app['desktop_id'] == app['class'] + '.desktop' for face in recipe['faces'] for app in face['apps'])
     ipc.action('unpair'); close(c); ipc.move(a,51); ipc.focus(b)
@@ -96,10 +96,28 @@ try:
     passed('GIO launches only the missing app; open apps are reused across workspaces and split proportions/focus restored')
 
     before = deepcopy(card()); identities = {a:w['pid'] for a,w in ipc.windows().items()}
-    flow = setup.Saved(ipc,Menu('0','open')); plan = flow.prepare_restore()
+    flow = setup.Saved(ipc,Menu('0')); plan = flow.prepare_restore()
     assert plan.action == 'goto'; flow.apply(plan)
     assert card() == before and {a:w['pid'] for a,w in ipc.windows().items()} == identities
     passed('opening an already running saved card focuses it without duplicate apps or regrouping')
+
+    ipc.focused((b, 'layout horizontal'))
+    setup.Setup(ipc, Menu()).restore_ratios({'windows': [b,c], 'axis': 'horizontal', 'ratios': [.6,.4]})
+    flow = setup.Edit(ipc, Menu('manage', 'update')); flow.apply(flow.prepare(b))
+    saved = setup.RecipeStore(env).read()['Communications']
+    assert saved['faces'][1]['axis'] == 'horizontal'
+    assert all(abs(x-y) < .035 for x,y in zip(saved['faces'][1]['ratios'], [.6,.4]))
+    assert all(app.get('desktop_id') for face in saved['faces'] for app in face['apps'])
+    passed('Update saves the current split without asking for a name and preserves app launchers')
+
+    before = deepcopy(card()); identities = {a:w['pid'] for a,w in ipc.windows().items()}
+    flow = setup.Saved(ipc, Menu('0', 'duplicate', 'Copy')); flow.apply(flow.prepare_manage())
+    flow = setup.Saved(ipc, Menu('1', 'rename', 'Renamed copy')); flow.apply(flow.prepare_manage())
+    assert setup.RecipeStore(env).read() == {'Communications': saved, 'Renamed copy': saved}
+    assert card() == before and {a:w['pid'] for a,w in ipc.windows().items()} == identities
+    flow = setup.Saved(ipc, Menu('1', 'delete', 'delete')); flow.apply(flow.prepare_manage())
+    assert setup.RecipeStore(env).read() == {'Communications': saved}
+    passed('Duplicate, Rename and Delete change only the saved library; live apps and card remain intact')
 
     ipc.action('unpair'); close(c); ipc.focus(b)
     delayed = root / 'delayed-app.py'

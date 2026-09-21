@@ -40,9 +40,13 @@ another kind of group or requiring users to manage a layout tree.
   protects tiled cards and hands off selected floating apps with rollback.
 - [Saved cards](SAVED_CARDS.md) remember a named two-face arrangement, pane
   proportions and focus. Open reuses open apps and launches missing ones through
-  installed desktop entries. Review precedes launch/movement; cancellation and
+  installed desktop entries. Selecting a saved card opens it directly; an
+  optional app/launcher review lives under Manage. Cancellation and
   timeouts leave apps open. An already open card is focused without duplication.
   Manual restore remains available for choosing replacements.
+- Super+Ctrl+Alt+L opens the searchable card launcher, displaying the workspace
+  of running cards. C → Manage card updates the saved layout without retyping
+  its name; Rename and Duplicate change saved definitions atomically.
 - ABI 4 adds Beside, Stacked and Equal sizes to C, plus moving any pane to the
   other face. Both faces stay populated, with three apps maximum. Refused changes
   restore the original arrangement in place.
@@ -63,9 +67,12 @@ another kind of group or requiring users to manage a layout tree.
 ## Earlier ideas, ordered by likely usefulness
 
 Saved setups, missing-app launching, layout controls and hold-to-peek are
-implemented. The next candidate is:
+implemented. The next candidates are:
 
-1. **Touchpad-controlled turns.** Consider after keyboard workflows are stable.
+1. **Restore a missing pane.** Reopen a closed app in its saved position while
+   preserving the surviving card and split sizes. Keep this explicit and avoid
+   guessing when several saved variants could apply.
+2. **Touchpad-controlled turns.** Consider after keyboard workflows are stable.
    Gestures must coexist with workspace gestures and have predictable cancel
    and completion behavior. They add input-state complexity.
 

@@ -196,6 +196,9 @@ Other desktops can continue using mark/pair/attach. This is guided creation;
 live card identities do not survive compositor restarts. The optional
 [saved-card menu](SAVED_CARDS.md) recreates named arrangements, reuses open apps
 and launches missing ones, including their split directions and proportions.
+**Super+Ctrl+Alt+L** opens that searchable launcher directly. Selecting a saved
+card opens or switches to it; optional review is under **Manage saved cards…**.
+**C → Manage card…** adds Update, Rename and Duplicate for saved arrangements.
 
 ## Edit an existing card
 
