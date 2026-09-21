@@ -35,34 +35,34 @@ another kind of group or requiring users to manage a layout tree.
   matching ABI 3 core/provider and updater handle cards with up to six apps.
   Unfold keeps three-app rows above one another and columns beside one another,
   trying the alternate arrangement when application minimums need it.
-
-The user selected temporary unfold as the next feature after movement on
-2026-09-20. It takes priority over saved setups and hold-to-peek.
+- The transition picker offers Flip, Vertical Flip, Slide, Fade, Instant and
+  experimental Dissolve and Portal, with reversible previews. Chill integration
+  protects tiled cards and hands off selected floating apps with rollback.
+- [Saved cards](SAVED_CARDS.md) remember a named two-face arrangement, pane
+  proportions and focus. Explicit restore matches open apps and reviews them
+  before importing or tiling. Missing and ambiguous matches are choices.
+- Hold Super+Ctrl+Alt+Space to peek. Release returns smoothly; input, focus,
+  popups, workspace changes and lifecycle interruptions cancel the return.
 
 ## Before a wider container preview
 
-- Resolve the known native-group migration and combined-plugin unload hazards,
-  including a reproduction independent of Hyprglass where possible.
-- Broaden monitor coverage to hotplug, and exercise application size changes,
-  suspend/resume and longer daily use. Keep isolated test evidence separate from
-  desktop evidence.
+- The reproduced native-group migration crash has a pinned hy3 lifetime fix;
+  provider unload clears retained render passes before its code is unmapped.
+  Preserve those regressions as the implementation changes.
+- Virtual monitor hotplug and DPMS off/on are covered. Physical monitor
+  reconnection, actual system suspend/resume and longer daily use still need
+  desktop evidence. Keep isolated checks separate from hardware claims.
 - Publish the matching core/provider sources together, with exact ABI pins,
   recovery instructions and a short communications-workflow recording.
 
 ## Earlier ideas, ordered by likely usefulness
 
-1. **Saved setups.** Recreate a named arrangement, such as Gmail versus WhatsApp
-   and Telegram, from windows already open. Start with explicit restore and
-   handle ambiguous matches visibly. Automatic launching and complete session
-   restoration are separate work.
-2. **Hold to peek.** Press and hold to inspect the opposite face; release to
-   return. Define what happens if the user clicks, types, changes workspace or
-   receives a modal dialog before implementing it. Never undo an explicit focus
-   change just because a key was released.
-3. **Touchpad-controlled turns.** Consider after keyboard workflows are stable.
+Saved setups and hold-to-peek are implemented. Remaining directions:
+
+1. **Touchpad-controlled turns.** Consider after keyboard workflows are stable.
    Gestures must coexist with workspace gestures and have predictable cancel
    and completion behavior. They add input-state complexity.
-4. **Explicit companion launching.** A saved setup may launch a missing app,
+2. **Explicit companion launching.** A saved setup may launch a missing app,
    but only with a clear match and timeout. Browser windows can share processes
    and classes; avoid attaching an unrelated window by accident.
 

@@ -79,7 +79,9 @@ def check(name):
     print("PASS", name, flush=True)
 
 def capture(name):
-    subprocess.run(["grim", str(args.output / name)], env=env, check=True, timeout=5,
+    monitor = client(status()['pairs'][0]['current'])['monitor']
+    output = next(m['name'] for m in json.loads(ctl('-j', 'monitors')) if m['id'] == monitor)
+    subprocess.run(["grim", '-o', output, str(args.output / name)], env=env, check=True, timeout=5,
                    stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
 
 loaded = False
@@ -90,6 +92,7 @@ try:
     lua("hl.config({plugin={hyprflip={duration_ms=180,notifications=false}}})")
     assert status()["pairs"] == []
     a, b = spawn("a"), spawn("b")
+    source_workspace = client(a)['workspace']['id']
     focus(a)
     assert ctl("hyprflip", "pair", success=False).startswith("error:")
     action("mark"); action("cancel")
@@ -213,7 +216,7 @@ try:
     action("flip")
     ctl("dispatch", "hl.dsp.focus({workspace=2})")
     assert not status()["animating"]
-    ctl("dispatch", "hl.dsp.focus({workspace=1})")
+    ctl("dispatch", f"hl.dsp.focus({{workspace={source_workspace}}})")
     time.sleep(1)
     focus(a)
     check("workspace change settles without losing the pair")

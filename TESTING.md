@@ -1,5 +1,69 @@
 # Validation
 
+## Saved-card and peek checks (2026-09-21)
+
+Checkpoint `7f2de93` contains the preceding multi-app container, transition and
+Chill work. The next change adds named saved arrangements and hold-to-peek.
+
+- 52 Python tests cover the existing setup/editor/installer plus saved-card
+  cancellation, duplicate names, concurrent updates, corrupt files, atomic
+  write failure, stale windows, changed focus, ambiguous matches and review.
+- `tests/saved_restart.py` starts two separate disposable compositor processes.
+  It saves a six-app card with different split axes and unequal proportions,
+  restarts the compositor, opens fresh app processes, and restores the card
+  from other workspaces. All memberships, proportions and remembered focus
+  match. Further checks restore from Chill, inject a failure after partial
+  grouping, recover floating geometry/workspaces/tags, and delete a saved
+  definition without dissolving its running card.
+- `tests/peek.py` passes 19 checks: every transition in both directions, early
+  reversal, an actual synthetic key press/release with modifiers released first,
+  typing, focus, unfold, workspace changes, config reload, a real GTK popup,
+  pane closure, virtual monitor removal during Portal, virtual DPMS off/on,
+  unload while holding, and native two-window pairs.
+- The existing native suite passes all 18 lifecycle checks against the new
+  core. The standalone C++ core test passes too.
+
+Commands (after building):
+
+```sh
+python -m unittest discover -s tests -p '*_test.py'
+ctest --test-dir build --output-on-failure
+python tests/peek.py /tmp/hf-test/session.json
+WAYLAND_DISPLAY=/run/user/1000/wayland-1 XDG_RUNTIME_DIR=/run/user/1000 \
+  python tests/saved_restart.py --results /tmp/hf-saveproof \
+  --engine /path/to/integrated/chillmode.lua
+```
+
+Use a fresh results directory for the restart test. It creates and stops its
+own nested compositors and never restarts the real desktop. Omitting `--engine`
+checks ordinary floating apps instead of Chill-tagged apps.
+
+Evidence from this run is in `/tmp/hf-saveproof/`,
+`/tmp/hf-peek/peek-results.json`, `/tmp/hf-peek/native/integration.json` and
+`/tmp/hyprflip-saved-unit.log`. The tested core SHA256 is
+`7e0a6116f66acff17ca7236b548672e888aba685884022e99d5d31513b967caa`;
+the unchanged ABI 3 provider is
+`2fa46bc9dc6da8ca19aa986a540ea5c3b54d56e4bc11804df8b88fdeedc5cdb6`.
+
+The synthetic keyboard uses `input.resolve_binds_by_sym=true` only inside its
+test configuration. The physical desktop's resolver setting is retained.
+Geometry changes legitimately trigger the existing instant-switch fallback;
+the hotplug test settles both faces before requesting an animated turn.
+GPU tests use a headless output so hiding the parent nested window cannot stop
+their presentation loop. Native regression screenshots target the tested
+output, and workspace return uses the actual starting workspace.
+
+The DPMS check uses the current
+[Lua dispatcher](https://wiki.hypr.land/configuring/core/dispatchers/).
+Virtual hotplug and output power checks are not evidence of a physical monitor
+reconnection or real system suspend/resume; those remain hardware checks before
+a wider release.
+
+Native menu verification and installation on the main desktop require it to be
+unlocked. The initial live UI attempts stopped before opening a menu because
+Omarchy's lock service reported a secure, active session lock. Temporary apps
+were closed and the original cards, workspaces and focus were restored.
+
 ## Tested environment
 
 The 0.1.1 implementation was built against Hyprland 0.56.2 (`efb50993780079460b0cbed1363e2166a2de1d9f`) with GCC 16.2.1. Compositor tests ran in a disposable Wayland-nested session with temporary configuration, followed by installation and daily use on a desktop running the same ABI.

@@ -83,6 +83,9 @@ class Controller {
     Result pair();
     Result adopt(const std::string &front, const std::string &back);
     Result flip(std::optional<Transition> preview = std::nullopt);
+    Result peek();
+    Result endPeek();
+    bool canReturnPeek() const;
     Result unpair();
     Result attach(bool vertical);
     Result release();
@@ -101,6 +104,16 @@ class Controller {
     std::vector<Pair> m_pairs;
     uint64_t m_nextID = 1;
     std::optional<Turn> m_turn;
+    struct Peek {
+        uint64_t pairID;
+        unsigned source;
+        std::optional<uint32_t> triggerKey;
+        PHLWORKSPACEREF workspace;
+        PHLMONITORREF monitor;
+        CBox geometry;
+        std::vector<PHLWINDOWREF> windows;
+    };
+    std::optional<Peek> m_peek;
     std::shared_ptr<FlipShader> m_shader;
     PHLMONITORREF m_renderingMonitor;
     SP<CEventLoopTimer> m_timer;

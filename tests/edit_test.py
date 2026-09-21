@@ -67,7 +67,7 @@ class EditTest(unittest.TestCase):
         setup.Edit(ipc, picker).prepare('0xb')
         prompt, choices = picker.prompts[0]
         self.assertIn('2 apps on this side', prompt)
-        self.assertEqual([c.value for c in choices], ['add', 'release:0xb', 'release:0xc'])
+        self.assertEqual([c.value for c in choices], ['add', 'release:0xb', 'release:0xc', 'save', 'saved'])
         self.assertIn('Keep open', choices[1].detail)
 
     def test_full_side_offers_all_three_removals_and_no_add(self):
@@ -77,7 +77,7 @@ class EditTest(unittest.TestCase):
         plan = flow.prepare('0xb')
         prompt, choices = picker.prompts[0]
         self.assertIn('full (3 apps)', prompt)
-        self.assertEqual([c.value for c in choices], ['release:0xb', 'release:0xc', 'release:0xd'])
+        self.assertEqual([c.value for c in choices], ['release:0xb', 'release:0xc', 'release:0xd', 'save', 'saved'])
         flow.apply(plan)
         self.assertEqual(ipc.active, '0xb')
 
@@ -92,8 +92,9 @@ class EditTest(unittest.TestCase):
         ipc, picker = CardIPC(), Picker('unpair')
         flow = setup.Edit(ipc, picker)
         plan = flow.prepare('0xb')
-        self.assertEqual(picker.prompts[0][1][-1].label, 'Ungroup card')
-        self.assertIn('All apps stay open', picker.prompts[0][1][-1].detail)
+        ungroup = next(c for c in picker.prompts[0][1] if c.value == 'unpair')
+        self.assertEqual(ungroup.label, 'Ungroup card')
+        self.assertIn('All apps stay open', ungroup.detail)
         flow.apply(plan)
         self.assertIn(('action', 'unpair'), ipc.mutations)
 

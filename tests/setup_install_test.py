@@ -34,7 +34,8 @@ class SetupInstallTest(unittest.TestCase):
         self.original = self.main.read_bytes()
         self.calls, self.reloads = [], 0
         self.fail_reload, self.conflict = False, None
-        self.state = {'container_provider': True, 'containers': [{'faces': [['0xa'], ['0xb', '0xc']]}], 'pairs': []}
+        self.state = {'container_provider': True, 'peek_available': True,
+                      'containers': [{'faces': [['0xa'], ['0xb', '0xc']]}], 'pairs': []}
 
     def run_command(self, command, **kwargs):
         self.calls.append(command)
@@ -56,6 +57,9 @@ class SetupInstallTest(unittest.TestCase):
                 if self.module.exists() or self.conflict == 'C':
                     reply.append({'modmask': 76, 'key': 'C', 'description':
                                   'Other action' if self.conflict == 'C' else 'Hyprflip: edit card'})
+                if self.module.exists() or self.conflict == 'SPACE':
+                    reply.append({'modmask': 76, 'key': 'space', 'description':
+                                  'Other action' if self.conflict == 'SPACE' else 'Hyprflip: hold to peek at the other side'})
             elif args == ['reload']:
                 self.reloads += 1
                 reply = 'ok'
@@ -93,7 +97,7 @@ class SetupInstallTest(unittest.TestCase):
         self.assertFalse(any('plugin' in call or 'mark' in call or 'pair' in call for call in self.calls))
 
     def test_conflict_refuses_before_writing(self):
-        for key in ('O', 'C'):
+        for key in ('O', 'C', 'SPACE'):
             self.conflict = key
             with self.assertRaisesRegex(SystemExit, 'assigned to another action'): self.install()
             self.assertEqual(self.main.read_bytes(), self.original)

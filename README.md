@@ -144,7 +144,9 @@ Use live addresses from `hyprctl -j clients`. Adoption rejects unrelated windows
 
 Read [CONTRIBUTING.md](CONTRIBUTING.md) for development and bug reports, [TESTING.md](TESTING.md) for the nested compositor harness, and [docs/DESIGN.md](docs/DESIGN.md) for the architecture and prior art: Compiz window groups, Sun Project Looking Glass and Apple Dashboard flips.
 
-Automatic companion launching, saved pair recipes, gesture-driven turns and a window picker are possible future additions. The current release focuses on explicitly pairing two existing windows.
+Automatic companion launching and gesture-controlled turns are possible future
+additions. The native backend pairs two existing windows; the optional Omarchy
+container workflow includes an app picker and saved arrangements.
 
 ### Experimental containers
 
@@ -159,6 +161,15 @@ add an open app to the focused side, or remove any app while keeping it
 open. Local apps come first; **Add from workspace X** lists apps elsewhere and
 moves the selected app here. A full side explains its three-app limit; removing a side's only app is
 explicitly labeled **Ungroup card**.
+
+The same menu offers **Save card…** and **Restore saved card…**. Save a named
+arrangement, then recreate it from open apps after restarting Hyprland, with
+both faces, split sizes and focus remembered. Restore also works from C on an
+empty workspace. Review matches before any apps move.
+
+Hold **Super+Ctrl+Alt+Space** to **peek** at the opposite face; release Space to
+return. Clicking or typing keeps the side you are using. See
+[saved cards and peek](docs/SAVED_CARDS.md) for matching, storage and input behavior.
 
 An opt-in [hy3 container experiment](docs/CONTAINERS.md) supports two faces with
 up to three tiled panes on each face: for example, Gmail on the front and three
@@ -177,8 +188,7 @@ and hyprpm setup still use native two-window groups. Start with the disposable
 session instructions in the [experiment guide](docs/CONTAINERS.md).
 Already-enabled trials have a separate updater that preserves card definitions;
 the native installer refuses to discard active containers. See the guide for
-the update procedure and [roadmap](docs/ROADMAP.md) for saved setups, peek and
-other proposed features.
+the update procedure and [roadmap](docs/ROADMAP.md) for remaining work.
 
 The core is licensed under the [MIT license](LICENSE). The optional hy3 bridge
 is [GPL-3.0-only](integrations/hy3/LICENSE) and is built into a separately fetched,

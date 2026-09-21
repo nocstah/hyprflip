@@ -36,12 +36,16 @@ end, { description = "Hyprflip: unfold, fold or create a card" })
 
 hl.unbind("SUPER + CTRL + ALT + C")
 hl.bind("SUPER + CTRL + ALT + C", function()
-    local window = hl.get_active_window()
-    if not window then
-        hl.dispatch(hl.dsp.exec_cmd("notify-send --app-name=Hyprflip Hyprflip " ..
-            shell_quote("Focus an app in a Hyprflip card, then open Edit card again.")))
-        return
-    end
     local helper = os.getenv("HOME") .. "/.local/lib/hyprflip/setup.py"
-    hl.dispatch(hl.dsp.exec_cmd("python3 " .. shell_quote(helper) .. " --edit " .. shell_quote(tostring(window.address))))
+    hl.dispatch(hl.dsp.exec_cmd("python3 " .. shell_quote(helper) .. " --cards"))
 end, { description = "Hyprflip: edit card" })
+
+if hl.plugin.hyprflip and hl.plugin.hyprflip.peek then
+    hl.unbind("SUPER + CTRL + ALT + SPACE")
+    hl.bind("SUPER + CTRL + ALT + SPACE", function()
+        local plugin = hl.plugin.hyprflip
+        if plugin and plugin.peek then plugin.peek() end
+    end, { description = "Hyprflip: hold to peek at the other side" })
+    -- Hyprflip observes the physical Space release, including when the
+    -- modifiers are released first. Clicking or typing keeps the visible side.
+end

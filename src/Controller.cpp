@@ -58,7 +58,10 @@ Controller::Controller(HANDLE handle, Settings settings)
     : m_handle(handle), m_settings(std::move(settings)), m_shader(std::make_shared<FlipShader>()) {
     // Only a watchdog for outputs that stop presenting (e.g. DPMS). Motion is
     // sampled by the output's render cycle, never by an independent timer.
-    m_timer = makeShared<CEventLoopTimer>(std::nullopt, [this](SP<CEventLoopTimer>, void *) { finish(); }, nullptr);
+    m_timer = makeShared<CEventLoopTimer>(std::nullopt, [this](SP<CEventLoopTimer>, void *) {
+        m_peek.reset();
+        finish();
+    }, nullptr);
     g_pEventLoopManager->addTimer(m_timer);
     auto &e = Event::bus()->m_events;
     m_listeners.emplace_back(e.render.preChecks.listen([this](PHLMONITOR m) {
@@ -77,11 +80,14 @@ Controller::Controller(HANDLE handle, Settings settings)
     m_listeners.emplace_back(e.window.destroy.listen([this](PHLWINDOWREF) { deferReconcile(); }));
     m_listeners.emplace_back(e.window.active.listen([this](PHLWINDOW w, Desktop::eFocusReason) { onFocus(w); }));
     m_listeners.emplace_back(e.window.moveToWorkspace.listen([this](PHLWINDOW, PHLWORKSPACE) {
-        if (!m_mutating)
+        if (!m_mutating) {
+            m_peek.reset();
             finish();
+        }
         deferReconcile();
     }));
     m_listeners.emplace_back(e.window.fullscreen.listen([this](PHLWINDOW) {
+        if (!m_mutating) m_peek.reset();
         if (!m_mutating && m_turn) {
             auto p = find(m_turn->pairID);
             // hy3 fullscreen belongs to an application, not the two-tab card.
@@ -90,20 +96,25 @@ Controller::Controller(HANDLE handle, Settings settings)
         }
     }));
     m_listeners.emplace_back(e.window.floating.listen([this](PHLWINDOW) {
-        if (!m_mutating)
+        if (!m_mutating) {
+            m_peek.reset();
             finish();
+        }
     }));
     m_listeners.emplace_back(e.workspace.active.listen([this](PHLWORKSPACE) {
-        if (!m_mutating)
+        if (!m_mutating) {
+            m_peek.reset();
             finish();
+        }
     }));
-    m_listeners.emplace_back(e.monitor.preRemoved.listen([this](PHLMONITOR) { finish(); }));
-    m_listeners.emplace_back(e.monitor.layoutChanged.listen([this]() { finish(); }));
+    m_listeners.emplace_back(e.monitor.preRemoved.listen([this](PHLMONITOR) { m_peek.reset(); finish(); }));
+    m_listeners.emplace_back(e.monitor.layoutChanged.listen([this]() { m_peek.reset(); finish(); }));
     m_listeners.emplace_back(e.config.preReload.listen([this]() {
+        m_peek.reset();
         finish();
         m_marked.reset();
     }));
-    m_listeners.emplace_back(g_pSessionLockManager->m_events.lock.listen([this]() { finish(false); }));
+    m_listeners.emplace_back(g_pSessionLockManager->m_events.lock.listen([this]() { m_peek.reset(); finish(false); }));
     m_listeners.emplace_back(
         e.input.mouse.button.listen([this](const IPointer::SButtonEvent &, Event::SCallbackInfo &) { settleInput(); }));
     m_listeners.emplace_back(
@@ -114,8 +125,15 @@ Controller::Controller(HANDLE handle, Settings settings)
         e.input.tablet.tip.listen([this](const CTablet::STipEvent &, Event::SCallbackInfo &) { settleInput(); }));
     m_listeners.emplace_back(
         e.input.keyboard.key.listen([this](const IKeyboard::SKeyEvent &key, Event::SCallbackInfo &) {
+            // Observe the physical key release, even when modifiers were
+            // released first. No release binding or background helper is needed.
+            if (key.state == WL_KEYBOARD_KEY_STATE_RELEASED && m_peek && m_peek->triggerKey == key.keycode) {
+                endPeek();
+                return;
+            }
             if (key.state != WL_KEYBOARD_KEY_STATE_PRESSED)
                 return;
+            if (m_peek && m_peek->triggerKey != key.keycode) m_peek.reset();
             if (m_turn && m_turn->triggerKey != key.keycode)
                 finish();
             m_eventKey = key.keycode;
@@ -125,6 +143,7 @@ Controller::Controller(HANDLE handle, Settings settings)
 
 Controller::~Controller() {
     m_stopping = true;
+    m_peek.reset();
     m_listeners.clear();
     m_reconcileLater.reset();
     m_keyLater.reset();
@@ -240,6 +259,7 @@ void Controller::reconcile() {
         m_marked.reset();
     for (auto &p : m_pairs)
         if (!valid(p)) {
+            if (m_peek && m_peek->pairID == p.id) m_peek.reset();
             if (m_turn && m_turn->pairID == p.id)
                 finish(false);
             if (auto g = p.group.lock())
@@ -254,6 +274,7 @@ void Controller::deferReconcile() {
     m_reconcileLater = g_pEventLoopManager->doLaterLock([this]() { reconcile(); });
 }
 void Controller::onClose(PHLWINDOW w) {
+    if (m_peek && std::ranges::find(m_peek->windows, w) != m_peek->windows.end()) m_peek.reset();
     if (m_marked == w)
         m_marked.reset();
     if (m_turn && std::ranges::find(m_turn->windows, w) != m_turn->windows.end())
@@ -263,6 +284,10 @@ void Controller::onClose(PHLWINDOW w) {
 void Controller::onFocus(PHLWINDOW w) {
     if (m_mutating)
         return;
+    if (m_peek) {
+        m_peek.reset();
+        finish(false); // An explicit focus change always wins over the return.
+    }
     if (m_turn) {
         auto p = find(m_turn->pairID);
         auto s = p ? state(*p) : std::nullopt;
@@ -276,8 +301,10 @@ void Controller::onFocus(PHLWINDOW w) {
     deferReconcile();
 }
 void Controller::settleInput() {
-    if (!m_mutating)
+    if (!m_mutating) {
+        m_peek.reset();
         finish();
+    }
 }
 void Controller::damage(const Pair &p) {
     auto s = state(p);
@@ -488,6 +515,50 @@ Result Controller::adopt(const std::string &front, const std::string &back) {
     m_pairs.push_back({m_nextID++, {a, b}, g, g->locked()});
     g->setLocked(true);
     return {true, "ok"};
+}
+bool Controller::canReturnPeek() const {
+    if (!m_peek || inputBusy() || !m_peek->workspace || !m_peek->workspace->m_visible || !m_peek->monitor ||
+        !m_peek->monitor->m_dpmsStatus)
+        return false;
+    const auto p = std::ranges::find_if(m_pairs, [this](const Pair &p) { return p.id == m_peek->pairID; });
+    const auto s = p == m_pairs.end() ? std::nullopt : state(*p);
+    if (!s || s->unfolded || !s->contains(Desktop::focusState()->window()) ||
+        !sameBox(s->geometry, m_peek->geometry) || s->windows() != m_peek->windows)
+        return false;
+    for (const auto &ref : s->windows()) {
+        auto w = ref.lock();
+        if (!w || w->m_workspace != m_peek->workspace || w->m_monitor != m_peek->monitor ||
+            w->popupsCount() || Fullscreen::controller()->isFullscreen(w)) return false;
+    }
+    return true;
+}
+Result Controller::peek() {
+    if (m_peek) return {true, "ok"};
+    if (m_turn) return {false, "Let the turn finish before peeking."};
+    auto p = find(Desktop::focusState()->window());
+    auto s = p ? state(*p) : std::nullopt;
+    if (!s) return {false, "Focus an app in a Hyprflip card before peeking."};
+    if (s->unfolded) return {false, "Both sides are already visible. Fold the card with O before peeking."};
+    Peek pending{p->id, s->active, m_eventKey, s->focused[s->active]->m_workspace,
+                 s->focused[s->active]->m_monitor, s->geometry, s->windows()};
+    auto result = flip();
+    if (result.ok) m_peek = std::move(pending);
+    return result;
+}
+Result Controller::endPeek() {
+    if (!m_peek) return {true, "ok"};
+    const auto pending = *m_peek;
+    const bool returnable = canReturnPeek();
+    m_peek.reset();
+    if (!returnable) return {true, "ok"};
+    if (m_turn && m_turn->pairID == pending.pairID) {
+        if ((m_turn->source ^ unsigned(m_turn->timeline.destination())) != pending.source)
+            m_turn->timeline.reverse();
+        return {true, "ok"};
+    }
+    auto p = find(pending.pairID);
+    auto s = p ? state(*p) : std::nullopt;
+    return s && s->active != pending.source ? flip() : Result{true, "ok"};
 }
 Result Controller::flip(std::optional<Transition> preview) {
     auto w = Desktop::focusState()->window();
@@ -788,6 +859,7 @@ Result Controller::unfold() {
 }
 
 void Controller::onFrame(PHLMONITOR monitor) {
+    if (m_peek && !canReturnPeek()) m_peek.reset();
     if (!m_turn || monitor != m_turn->monitor)
         return;
     auto p = find(m_turn->pairID);
@@ -870,6 +942,10 @@ Result Controller::action(const std::string &action) {
         m_reservations.erase(action.substr(10));
         return {true, "ok"};
     }
+    if (action == "peek") return peek();
+    if (action == "peek end") return endPeek();
+    // Any explicit card operation replaces the temporary peek interaction.
+    m_peek.reset();
     if (action == "mark")
         return mark();
     if (action == "pair")
@@ -926,7 +1002,7 @@ Result Controller::action(const std::string &action) {
     }
     return {false, "Unknown action. Use mark, pair, attach [horizontal|vertical], release, unfold, "
                    "workspace <number> [silent], move <left|right|up|down>, cancel, "
-                   "flip, unpair, finish, or status."};
+                   "flip, peek [end], unpair, finish, or status."};
 }
 void Controller::notify(const Result &r) {
     if (!m_settings.notifications->value() || r.message == "ok")
@@ -940,6 +1016,7 @@ std::string Controller::status() {
                        ",\"transition_modes\":[\"flip\",\"vertical\",\"slide\",\"fade\",\"dissolve\",\"portal\",\"instant\"]" +
                        ",\"capture_ms\":" + std::format("{}", m_captureMs) +
                        ",\"animating\":" + (m_turn ? "true" : "false") +
+                       ",\"peek_available\":true,\"peeking\":" + (m_peek ? "true" : "false") +
                        ",\"progress\":" + std::format("{}", m_turn ? m_turn->timeline.progress() : 0) +
                        ",\"last_fallback\":" + quote(m_lastFallback) + ",\"pairs\":[";
     bool first = true;

@@ -192,7 +192,9 @@ An older core keeps the original tiled-only picker behavior.
 The picker uses the running Omarchy menu, including its current theme, filtering,
 arrow keys and Return. It requires Python 3, `omarchy-shell` and `notify-send`.
 Other desktops can continue using mark/pair/attach. This is guided creation;
-cards are still not saved or restored across compositor restarts.
+live card identities do not survive compositor restarts. The optional
+[saved-card menu](SAVED_CARDS.md) can now recreate named arrangements from apps
+you have reopened, including their split directions and proportions.
 
 ## Edit an existing card
 
@@ -345,8 +347,9 @@ into visible splits; the experimental updater reconstructs them explicitly.
   setup rather than guessing a layout transformation.
 - External membership changes cancel the effect safely. An empty face or a
   changed layout must never leave an application inaccessible.
-- Peek, gestures, recipes, nested flip containers and linked flips are deferred.
-  See the [workflow roadmap](ROADMAP.md) for the earlier ideas and priorities.
+- [Saved arrangements and hold-to-peek](SAVED_CARDS.md) use the existing two-face
+  model. Gestures, nested flip containers and linked flips remain deferred.
+  See the [workflow roadmap](ROADMAP.md) for the remaining ideas and priorities.
 
 ## Acceptance checks
 

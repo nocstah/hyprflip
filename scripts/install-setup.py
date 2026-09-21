@@ -48,7 +48,8 @@ def main():
     available = ctl('repl', 'return hl.plugin.hyprflip.unfold ~= nil and hl.plugin.hyprflip.in_container ~= nil')
     if available != 'true':
         raise SystemExit('Update the container trial to the unfold build first.')
-    conflicts = [b for b in json.loads(ctl('-j', 'binds')) if b['modmask'] == 76 and b['key'].upper() in ('O', 'C')
+    keys = ('O', 'C', 'SPACE')
+    conflicts = [b for b in json.loads(ctl('-j', 'binds')) if b['modmask'] == 76 and b['key'].upper() in keys
                  and not b.get('description', '').startswith('Hyprflip:')]
     if conflicts:
         keys = ', '.join('Super+Ctrl+Alt+' + b['key'].upper() for b in conflicts)
@@ -62,6 +63,7 @@ def main():
                     main_config: content.encode()}
     print('Super+Ctrl+Alt+O: unfold/fold an existing card, or choose its reverse side. Existing cards stay in place.')
     print('Super+Ctrl+Alt+C: edit the current side using the app picker.')
+    if state.get('peek_available'): print('Super+Ctrl+Alt+Space: hold to peek; release to return.')
     if args.dry_run:
         return 0
     originals = {p: (p.read_bytes(), p.stat().st_mode & 0o777) if p.exists() else (None, 0o644)
@@ -88,7 +90,9 @@ def main():
         if errors := ctl('configerrors'):
             raise RuntimeError(errors)
         binds = json.loads(ctl('-j', 'binds'))
-        for key, description in (('O', 'Hyprflip: unfold, fold or create a card'), ('C', 'Hyprflip: edit card')):
+        expected = [('O', 'Hyprflip: unfold, fold or create a card'), ('C', 'Hyprflip: edit card')]
+        if state.get('peek_available'): expected.append(('SPACE', 'Hyprflip: hold to peek at the other side'))
+        for key, description in expected:
             matches = [b for b in binds if b['modmask'] == 76 and b['key'].upper() == key]
             if len(matches) != 1 or matches[0]['description'] != description:
                 raise RuntimeError('The guided ' + key + ' shortcut did not register exactly once.')
