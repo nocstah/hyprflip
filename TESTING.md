@@ -77,13 +77,27 @@ were closed and the user's cards were preserved. Evidence is in
 `/tmp/hf-saved-ui-confirm/`; subsequent focus-guard changes leave the UI intact
 and passed the restart/workflow suite again.
 
-The live installation did **not** complete. An initial attempt rolled back after
+An initial live installation attempt rolled back after
 marking an already grouped window; the guarded-focus fix above addresses that
 race. The retry crashed while unloading the old core, before copying either new
 library. Analysis found a stale Hyprglass decoration deletion callback into a
 previously unloaded library. See [the crash analysis](docs/UNLOAD_CRASH_2026-09-21.md).
-The installed Hyprflip libraries and helper remain the previous versions. Do
-not treat the nested checks as evidence of a completed desktop installation.
+
+After the user confirmed concurrent Hyprglass work and later resumed this task,
+installation completed at 16:08–16:10. Configuration was clean, Hyprglass matched
+the compatibility-test library, and its loaded handle remained unchanged through
+the update. The core, provider, menu helper and Lua bindings match the tested
+files byte for byte. O, C and Space each register exactly once.
+
+The existing workspace 2 card (Gmail opposite WhatsApp + Telegram) retained its
+members, visible face, focused pane, sizes and positions. An installed peek
+round trip revealed the other face and returned to the original pane. All
+monitor workspaces and desktop focus were restored, with no configuration errors.
+Evidence is in `/tmp/hyprflip-saved-installed-check.json`,
+`/tmp/hyprflip-saved-install-resumed.log` and
+`/tmp/hyprflip-saved-setup-resumed.log`. Backups are
+`~/.local/state/hyprflip/container-update-20260921-160853/` and
+`~/.local/state/hyprflip/guided-setup-20260921-160955-712179/`.
 
 ## Tested environment
 

@@ -45,8 +45,9 @@ not involve Hyprflip. A normal desktop session was running afterward.
 
 ## Recovery and follow-up
 
-The installed core and provider still match their pre-update backups. The setup
-helper and shortcuts were not updated. Session-specific reconstruction metadata
+Immediately after the crash, the installed core and provider still matched their
+pre-update backups. The setup helper and shortcuts had not been updated.
+Session-specific reconstruction metadata
 is at `~/.local/state/hyprflip/container-update-20260921-154126/recovery.json`.
 It records WhatsApp + Telegram opposite Gmail on workspace 2. Old window
 addresses cannot be replayed after a compositor restart; the apps must be
@@ -61,6 +62,14 @@ Hyprglass changes. Fix and verify decoration cleanup before hot-replacing that
 plugin. The six disposable upgrade checks passed with the preserved Hyprglass
 build, including forced focus interference and rollback; they did not exercise
 concurrent Hyprglass replacement.
+
+The user subsequently confirmed another chat was updating Hyprglass, then asked
+to resume. At 16:08–16:10 the Hyprflip installation completed with the preserved,
+tested Hyprglass build kept loaded throughout. Configuration was clean; the
+recreated Gmail / WhatsApp + Telegram card, its geometry and focus survived the
+update, and an installed peek round trip passed. This validates the coordinated
+Hyprflip update, not the safety of hot-unloading Hyprglass. See the completed
+installation record in [TESTING.md](../TESTING.md).
 
 Local diagnostic records: `/tmp/hyprflip-unload-crash-info.txt`,
 `/tmp/hyprflip-unload-gdb.txt`, `/tmp/hyprflip-decoration-gdb.txt`, and
