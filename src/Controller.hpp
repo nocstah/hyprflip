@@ -96,6 +96,7 @@ class Controller {
     Result unfold();
     Result editContainer(ContainerEdit operation, const std::string &target = "");
     Result arrangeFace(const std::string &arguments);
+    Result replacePane(const std::string &arguments);
     std::string unavailable(PHLWINDOW window) const;
     bool inputBusy() const;
     std::string animationFallback(PHLWINDOW a, PHLWINDOW b) const;

@@ -163,6 +163,13 @@ moves the selected app here. A full side explains its three-app limit; removing 
 explicitly labeled **Ungroup card**.
 
 Choose **Layout of this side…** for **Beside**, **Stacked** or **Equal sizes**.
+It also offers **Swap app positions** for two apps, or **Reorder apps…** for
+three. Move apps left/right or up/down while keeping the split sizes and focus.
+Omarchy's **Super+J** continues to toggle between beside and stacked.
+**Replace an app…** exchanges any app on this side with an open app, including
+one from another workspace. Its position and share of the side are retained;
+the previous app stays open separately. This also works on a full side or a
+side containing only one app.
 **Move an app to the other side…** can move any pane, including one that is not
 focused. Both sides keep at least one app, with at most three on either side.
 

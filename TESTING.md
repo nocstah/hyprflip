@@ -1,5 +1,67 @@
 # Validation
 
+## Pane reordering and replacement (2026-09-21)
+
+C → Layout adds a direct two-app swap and directional three-app reordering.
+Split sizes stay attached to positions, and focus stays with the same app.
+C → Replace exchanges any pane with an open app while keeping the old app open.
+The matching ABI 6 provider swaps existing leaf slots without dissolving groups.
+Super+J retains its existing split-direction toggle.
+
+- **111 Python tests and the C++ core test pass.** The 12 new helper tests cover
+  every adjacent move in both directions, full/singleton faces, focused and
+  unfocused replacement, unfolded cards, remote floating apps, cancellation,
+  stale layouts and window identities, failed-import recovery, lost IPC replies,
+  marks and unchanged saved definitions.
+- **12 real compositor workflows pass** in `tests/pane_workflows.py`, with Auto
+  Chill and the current Hyprglass enabled. They verify Super+J, unequal slot
+  sizes, focus, exact geometry after replacement, closing released original
+  front/back apps, folded/unfolded operation, malformed arguments, remote
+  floating handoff and rollback including Chill tags. Real GTK minimum sizes
+  exercise refusal when either the incoming app or the released app cannot fit.
+  A replacement from an ordinary nested hy3 split retains its siblings,
+  proportions and independent layout controls.
+- All **nine saved-card repair workflows** pass with the new provider.
+- All **six upgrade checks** pass in a fresh disposable compositor: installed
+  ABI 5 → ABI 6, later six-pane updates, focus interference, fullscreen refusal,
+  and failed-load recovery while Hyprglass stays loaded.
+- **Five installed native-menu workflows** pass using temporary windows: direct
+  swap, directional reordering of an unfocused app, Escape from replacement,
+  replacement on a full side and singleton-face replacement. Four menu captures
+  were inspected in one batch; the native controls and theme are retained.
+
+Reproduce after `./scripts/build-containers`:
+
+```sh
+python -m unittest discover -s tests -p '*_test.py'
+ctest --test-dir build/containers/core --output-on-failure
+python tests/nested_session.py --directory /tmp/hf-pane
+# In another terminal:
+python tests/pane_workflows.py /tmp/hf-pane/session.json \
+  --engine /path/to/integrated/chillmode.lua --hyprglass /path/to/hyprglass.so
+python tests/repair_workflows.py /tmp/hf-pane/session.json
+```
+
+Evidence: `/tmp/hf-pane/pane-results.json`, `/tmp/hf-pane/repair-results.json`,
+`/tmp/hf-up-pane/`, `test-results/container-upgrade.json` and
+`/tmp/hf-pane-ui-check/`. Both disposable compositors were stopped. The native
+check closed only its temporary windows and returned to the desktop view from
+which it started.
+
+The tested core/provider and helper are installed. Backups are under
+`~/.local/state/hyprflip/container-update-20260921-194252/` and
+`~/.local/state/hyprflip/guided-setup-20260921-194526-033342/`. The menu service
+temporarily stopped answering IPC after the plugin update; its later ping and
+helper-only retry succeeded, without repeating the plugin update. Eleven final
+checks in `/tmp/hf-pane-installed/checks.json` confirm installed bytes, original
+apps/workspaces, card membership and splits, saved definitions, configuration,
+Super+J, the unchanged Hyprglass library/handle/mapping and feature availability.
+The immediate post-upgrade snapshot preserves the original card selection too.
+Later desktop focus, selected workspace and remembered back-pane focus changed;
+these observations are recorded separately and were not overwritten. Omachill
+and Omaglass regenerated their shell-owned configuration modules; other Hyprland
+Lua files and the Super+J binding remained unchanged.
+
 ## Reopen missing apps in an existing card (2026-09-21)
 
 C → Reopen missing apps now restores a partially intact saved card without

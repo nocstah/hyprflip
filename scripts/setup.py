@@ -124,6 +124,7 @@ class Hyprctl:
                     name == 'attach' and argument in ('horizontal', 'vertical') or
                     name == 'layout' and argument in ('horizontal', 'vertical', 'balance') or
                     name == 'arrange' and re.fullmatch(r'(horizontal|vertical)( 0x[0-9a-fA-F]+:[0-9.eE+-]+){1,3}', argument) or
+                    name == 'replace' and re.fullmatch(r'0x[0-9a-fA-F]+ 0x[0-9a-fA-F]+', argument) or
                     name == 'preview' and argument in TRANSITIONS):
                 raise SetupError('The card action is unavailable.')
             parameter = json.dumps(argument) if argument else ''
@@ -567,6 +568,7 @@ class EditPlan:
     candidate: str | None = None
     removal: str | None = None
     transition: str | None = None
+    order: tuple[str, ...] | None = None
 
 
 class Edit(Setup):
@@ -606,6 +608,8 @@ class Edit(Setup):
         if (not state.get('container_provider') or state.get('animating') or not card
                 or any(card[k] != plan.card[k] for k in ('faces', 'active', 'current', 'unfolded'))):
             raise SetupError('The card changed. Focus the side you want and open Edit card again.')
+        if plan.action in ('reorder', 'replace') and card.get('layouts') != plan.card.get('layouts'):
+            raise SetupError('The split changed. Open Edit card again to use its current layout.')
         workspace = plan.windows[plan.anchor]['workspace']['id']
         layouts = {w['id']: w['tiledLayout'] for w in self.ipc.data('-j', 'workspaces')}
         if workspace < 1 or layouts.get(workspace) != 'hy3':
@@ -645,12 +649,16 @@ class Edit(Setup):
         limit = state.get('container_max_panes', 2)
         choices = ([Choice('add', 'Add an app to this side', 'Choose an open app from any workspace')]
                    if len(face) < limit else [])
+        if state.get('pane_replacement'):
+            choices.append(Choice('replace', f'Replace {name}…' if len(face) == 1 else 'Replace an app…',
+                                  'Keep its position · Previous app stays open'))
         if len(face) == 1:
             choices.append(Choice('unpair', 'Ungroup card', 'All apps stay open as separate windows'))
             prompt = f'Edit card: {name}'
         else:
             if state.get('layout_controls'):
-                choices.append(Choice('layout', 'Layout of this side…', 'Beside · Stacked · Equal sizes'))
+                choices.append(Choice('layout', 'Layout of this side…', 'Beside · Stacked · Equal sizes' +
+                                      (' · App order' if state.get('repair_cards') and card.get('layouts') else '')))
                 other = next(f for f in card['faces'] if anchor not in f)
                 if len(other) < limit:
                     choices.append(Choice('other_side', 'Move an app to the other side…',
@@ -671,18 +679,41 @@ class Edit(Setup):
         action = self.menu.choose(prompt, choices)
         if action not in {c.value for c in choices}:
             raise SetupError('That action is no longer available. Open Edit card again.')
-        removal = None
+        removal, order = None, None
         if action.startswith('release:'):
             removal, action = action.removeprefix('release:'), 'release'
         if action == 'layout':
             first, second = (windows[a] for a in face[:2])
             vertical = abs(first['at'][1] - second['at'][1]) > abs(first['at'][0] - second['at'][0])
-            action = self.menu.choose('Layout of this side', [
+            if card.get('layouts'): vertical = card['layouts'][card['active']]['axis'] == 'vertical'
+            choices = [
                 Choice('layout horizontal', 'Beside', 'Current layout' if not vertical else 'Arrange apps in a row'),
                 Choice('layout vertical', 'Stacked', 'Current layout' if vertical else 'Arrange apps in a column'),
-                Choice('layout balance', 'Equal sizes', 'Keep the current direction')])
-            if action not in ('layout horizontal', 'layout vertical', 'layout balance'):
+                Choice('layout balance', 'Equal sizes', 'Keep the current direction')]
+            if state.get('repair_cards') and card.get('layouts'):
+                choices.append(Choice('reorder', 'Swap app positions' if len(face) == 2 else 'Reorder apps…',
+                                      'Keep the current split sizes'))
+            action = self.menu.choose('Layout of this side', choices)
+            if action not in {c.value for c in choices}:
                 raise SetupError('Choose a layout from the card menu.')
+            if action == 'reorder':
+                order = list(face)
+                if len(face) == 2:
+                    order.reverse()
+                else:
+                    choices = []
+                    for index, choice in enumerate(window_choices([windows[a] for a in face])):
+                        for step, direction in ((-1, 'up' if vertical else 'left'), (1, 'down' if vertical else 'right')):
+                            destination = index + step
+                            if 0 <= destination < len(face):
+                                neighbor = app_name(windows[face[destination]])
+                                choices.append(Choice(f'{index}:{destination}', f'Move {choice.label} {direction}',
+                                    ('Before ' if step < 0 else 'After ') + neighbor + ' · ' + choice.detail))
+                    selected = self.menu.choose('Reorder apps on this side', choices)
+                    if selected not in {c.value for c in choices}: raise SetupError('Choose a move from the card menu.')
+                    index, destination = map(int, selected.split(':'))
+                    order[index], order[destination] = order[destination], order[index]
+                order = tuple(order)
         if action == 'other_side':
             removal = self.menu.choose('Move to the other side',
                 [Choice(c.value, c.label, ('Focused app · ' if c.value == anchor else '') + c.detail)
@@ -699,18 +730,25 @@ class Edit(Setup):
         if action == 'transition':
             mode = self.choose_transition(plan)
             return EditPlan(anchor, plan.card, deepcopy(members), action, transition=mode)
-        if action == 'add':
+        if action in ('add', 'replace'):
             windows, state = self.validate(plan)
             workspace = members[anchor]['workspace']['id']
+            if action == 'replace':
+                removal = face[0] if len(face) == 1 else self.menu.choose('App to replace', [
+                    Choice(c.value, c.label, ('Focused app · ' if c.value == anchor else '') + c.detail)
+                    for c in window_choices([windows[anchor]] + [windows[a] for a in face if a != anchor])])
+                if removal not in face: raise SetupError('That app is no longer on this side. Open Edit card again.')
             candidates = list(self.eligible(windows, state).values())
             if not candidates:
+                if action == 'replace': raise SetupError('Open an ungrouped app to use as the replacement, then open Edit card again.')
                 raise SetupError('Open another ungrouped, tiled app, then choose Add an app to this side.')
-            candidate = self.choose_window('Add an app to this side', candidates, workspace)
+            prompt = 'Replace ' + app_name(windows[removal]) + ' with' if action == 'replace' else 'Add an app to this side'
+            candidate = self.choose_window(prompt, candidates, workspace)
             if candidate not in {w['address'] for w in candidates}:
                 raise SetupError('That app is no longer available. Open Edit card again.')
             members[candidate] = windows[candidate]
-            self.confirm_tiling({candidate: windows[candidate]}, 'Tile and add to card')
-        return EditPlan(anchor, plan.card, deepcopy(members), action, candidate, removal)
+            self.confirm_tiling({candidate: windows[candidate]}, 'Tile and replace app' if action == 'replace' else 'Tile and add to card')
+        return EditPlan(anchor, plan.card, deepcopy(members), action, candidate, removal, order=order)
 
     def apply(self, plan):
         if isinstance(plan, SavedPlan): return Saved(self.ipc, self.menu).apply(plan)
@@ -719,9 +757,22 @@ class Edit(Setup):
 
     def apply_reserved(self, plan):
         windows, state = self.validate(plan)
-        if plan.action not in ('add', 'release', 'unpair', 'transition', 'other_side',
+        if plan.action not in ('add', 'replace', 'reorder', 'release', 'unpair', 'transition', 'other_side',
                                'layout horizontal', 'layout vertical', 'layout balance'):
             raise SetupError('Choose an action in Edit card first.')
+        if plan.action == 'replace':
+            if not state.get('pane_replacement'):
+                raise SetupError('Update the container plugins before replacing an app.')
+            return self.replace_reserved(plan)
+        if plan.action == 'reorder':
+            side = plan.card['active']
+            if (not state.get('repair_cards') or not plan.card.get('layouts') or not plan.order or
+                    len(plan.order) != len(plan.card['faces'][side]) or set(plan.order) != set(plan.card['faces'][side])):
+                raise SetupError('The app order changed. Open Edit card again.')
+            layout = plan.card['layouts'][side]
+            argument = layout['axis'] + ''.join(f' {a}:{r:.12g}' for a, r in zip(plan.order, layout['ratios']))
+            self.ipc.focused((plan.anchor, 'arrange ' + argument))
+            return
         if (plan.action == 'other_side' or plan.action.startswith('layout ')) and not state.get('layout_controls'):
             raise SetupError('Update the container plugins before changing the layout.')
         if plan.action == 'transition':
@@ -779,6 +830,50 @@ class Edit(Setup):
                 raise recovery_error
             raise
         self.ipc.focus(plan.candidate)
+
+    def replace_reserved(self, plan):
+        side = plan.card['active']
+        if plan.removal not in plan.card['faces'][side] or not plan.candidate:
+            raise SetupError('Choose an app to replace and its replacement first.')
+        incoming = plan.windows[plan.candidate]
+        workspace = plan.windows[plan.anchor]['workspace']['id']
+        moved, tiled = [], []
+        expected = [[plan.candidate if a == plan.removal else a for a in face] for face in plan.card['faces']]
+        focus = plan.candidate if plan.removal == plan.anchor else plan.anchor
+
+        def committed():
+            # A lost IPC reply after the atomic exchange must not pull the new
+            # member back out of its card or float it during import recovery.
+            try:
+                live, state = self.ipc.windows(), self.ipc.status()
+                card = next((c for c in state.get('containers', []) if c['id'] == plan.card['id']), None)
+                return (card and card['faces'] == expected and card['current'] == focus and
+                        card['active'] == side and card['unfolded'] == plan.card['unfolded'] and
+                        all(a in live and all(live[a][k] == w[k] for k in ('pid', 'class')) for a, w in plan.windows.items()))
+            except (SetupError, OSError, subprocess.TimeoutExpired): return False
+
+        try:
+            self.tile_selected({plan.candidate: incoming}, tiled)
+            self.import_windows({plan.candidate: incoming}, workspace, moved)
+            self.ipc.focus(plan.anchor)
+            live = self.ipc.windows()
+            current = live.get(plan.candidate)
+            if (not current or any(current[k] != incoming[k] for k in ('pid', 'class')) or
+                    current['workspace']['id'] != workspace or current.get('floating')):
+                raise SetupError('The replacement app changed. Open Edit card again.')
+            ready = EditPlan(plan.anchor, plan.card, plan.windows | {plan.candidate: deepcopy(current)},
+                             'replace', plan.candidate, plan.removal)
+            self.validate(ready)
+            self.ipc.focused((plan.anchor, f'replace {plan.removal} {plan.candidate}'))
+        except Exception as error:
+            if committed(): return
+            recovery = []
+            for restore, arguments in ((self.restore_imports, (moved, workspace)), (self.restore_floats, (tiled,))):
+                try: restore(*arguments)
+                except (SetupError, OSError, subprocess.TimeoutExpired) as failure: recovery.append(str(failure))
+            self.restore_focus(plan.windows[plan.anchor])
+            if recovery: raise SetupError(str(error) + ' Recovery: ' + ' '.join(recovery)) from error
+            raise
 
 
 @dataclass(frozen=True)

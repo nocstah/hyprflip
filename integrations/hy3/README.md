@@ -11,9 +11,9 @@ table through `src/ContainerABI.hpp`, resolves live window identifiers, and neve
 caches the provider across events. A load epoch prevents IDs from being reused
 across different provider lifetimes.
 
-ABI 5 retains ABI 4's face edits and adds exact split axes, normalized pane
-weights and remembered focus to snapshots, plus an atomic face arrangement
-operation for missing-pane recovery. Its entry point
+ABI 6 retains ABI 4's face edits and ABI 5's exact split snapshots and atomic
+face arrangement, and adds atomic pane replacement. Its entry point
+`hyprflip_hy3_bridge_v6`
 is versioned separately so an old core/provider combination cannot call an
 incompatible table. Status advertises `layout_controls` and `container_max_panes`; the
 picker defaults to two when talking to older builds. A third attachment retains
@@ -28,6 +28,19 @@ previous order, axis, exact weights and selection. The helper uses
 `hyprctl hyprflip 'arrange horizontal 0xADDRESS:0.6 0xADDRESS:0.4'` (or the Lua
 `arrange` function), focused on that face. Status advertises `repair_cards` and
 includes each container's `layouts` with `axis`, `ratios` and `focused` address.
+The editor also uses `arrange` to swap/reorder apps, keeping ratios attached to
+slots and focus attached to the same app.
+
+`replace` exchanges a card leaf and an eligible tiled leaf on the same
+workspace. It swaps their owning list slots, parents and weights, updating the
+parents' focused-child pointers without extracting nodes or collapsing groups.
+Both leaves and all card members must fit their resulting slots; failure
+exchanges them back. The card's ID, root and surrounding groups survive, and
+replacing the remembered pane follows the incoming app. A sole face app and a
+full three-pane face need no special restructuring. Status advertises
+`pane_replacement`; the IPC action is `replace 0xOLD 0xNEW` (also available as a
+single string argument to the Lua `replace` function). The helper imports/tiles
+the incoming app before calling it and restores that handoff on refusal.
 
 Edits preserve the two-face tree, validate application size limits and restore
 the previous membership, order, weights and selection on refusal. Transfers

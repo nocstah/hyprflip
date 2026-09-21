@@ -759,6 +759,45 @@ Result Controller::attach(bool vertical) {
         m_marked.reset();
     return {ok, ok ? "Pane attached to this face." : "The layout could not attach this window."};
 }
+Result Controller::replacePane(const std::string &arguments) {
+    std::istringstream input(arguments);
+    std::string outgoing, incoming, extra;
+    if (!(input >> outgoing >> incoming) || input >> extra)
+        return {false, "Use replace <current-app-address> <replacement-address>."};
+    if (inputBusy())
+        return {false, "Finish the active grab or drag before replacing an app."};
+    auto p = find(Desktop::focusState()->window());
+    if (!p || !p->containerID)
+        return {false, "Focus an app in a Hyprflip container first."};
+    finish();
+    auto s = state(*p);
+    if (!s)
+        return {false, "This card changed. Open the card menu again."};
+    PHLWINDOW old, next;
+    for (const auto &w : s->faces[s->active])
+        if (address(w) == quote(outgoing)) old = w;
+    for (const auto &w : Desktop::windowState()->windows())
+        if (address(w) == quote(incoming)) next = w;
+    if (!old)
+        return {false, "The app to replace is no longer on this side."};
+    if (auto error = unavailable(next); !error.empty())
+        return {false, error};
+    if (find(next) || next->m_group)
+        return {false, "The replacement already belongs to a card or group."};
+    if (next->m_isFloating || next->m_workspace != old->m_workspace)
+        return {false, "Tile the replacement on the card workspace first."};
+    for (const auto &w : s->windows())
+        if (Fullscreen::controller()->isFullscreen(w.lock()))
+            return {false, "Leave fullscreen before replacing an app."};
+    auto api = provider(p->providerEpoch);
+    m_mutating = true;
+    const bool ok = api && api->replace(p->containerID, reinterpret_cast<uintptr_t>(old.get()),
+                                        reinterpret_cast<uintptr_t>(next.get()));
+    m_mutating = false;
+    if (ok && m_marked == next) m_marked.reset();
+    reconcile();
+    return {ok, ok ? "ok" : "The apps do not fit in those positions. The original card was kept."};
+}
 Result Controller::release() {
     if (inputBusy())
         return {false, "Finish the active grab or drag before releasing."};
@@ -1047,6 +1086,8 @@ Result Controller::action(const std::string &action) {
         return attach(true);
     if (action == "release")
         return release();
+    if (action.starts_with("replace "))
+        return replacePane(action.substr(8));
     if (action == "unfold")
         return unfold();
     if (action == "other_side")
@@ -1087,7 +1128,7 @@ Result Controller::action(const std::string &action) {
         finish();
         return {true, "ok"};
     }
-    return {false, "Unknown action. Use mark, pair, attach [horizontal|vertical], release, unfold, "
+    return {false, "Unknown action. Use mark, pair, attach [horizontal|vertical], replace <old> <new>, release, unfold, "
                    "layout <horizontal|vertical|balance>, other_side, "
                    "workspace <number> [silent], move <left|right|up|down>, cancel, "
                    "flip, peek [end], unpair, finish, or status."};
@@ -1162,6 +1203,7 @@ std::string Controller::status() {
     return json + "],\"workspace_protection\":true,\"container_provider\":" + (available ? "true" : "false") +
            ",\"layout_controls\":" + (available ? "true" : "false") +
            ",\"repair_cards\":" + (available ? "true" : "false") +
+           ",\"pane_replacement\":" + (available ? "true" : "false") +
            ",\"container_max_panes\":" + std::to_string(available ? CONTAINER_MAX_PANES : 0) + "}";
 }
 } // namespace Hyprflip

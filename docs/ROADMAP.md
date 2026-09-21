@@ -55,6 +55,14 @@ another kind of group or requiring users to manage a layout tree.
   proportions, asks when several saved setups match, and restores saved pane
   positions through ABI 5's guarded face arrangement operation. It shares the
   existing launcher, cancellation and workspace-protection flow.
+- C → Layout offers a direct two-app swap and directional three-app reordering.
+  Pane proportions remain attached to their slots; keyboard focus follows the
+  same app. Super+J keeps its existing split-direction toggle.
+- C → Replace exchanges any pane with an open app, including an unfocused pane,
+  a full side or a side's only app. The old app remains open. ABI 6 exchanges
+  existing leaf slots without dissolving groups, checks size limits on both
+  apps, and preserves the card's identity, focus and folded/unfolded state.
+  Remote/floating choices reuse the guarded workspace handoff and rollback.
 - Hold Super+Ctrl+Alt+Space to peek. Release returns smoothly; input, focus,
   popups, workspace changes and lifecycle interruptions cancel the return.
 
@@ -71,10 +79,12 @@ another kind of group or requiring users to manage a layout tree.
 
 ## Earlier ideas, ordered by likely usefulness
 
-Saved setups, missing-pane recovery, layout controls and hold-to-peek are
+Saved setups, missing-pane recovery, layout controls, pane order/replacement and hold-to-peek are
 implemented. The next candidates are:
 
-1. **Touchpad-controlled turns.** Consider after keyboard workflows are stable.
+1. **Undo the last card edit.** Start with membership and layout edits while all
+   affected windows are still open and unchanged. Avoid a general desktop history.
+2. **Touchpad-controlled turns.** Consider after keyboard workflows are stable.
    Gestures must coexist with workspace gestures and have predictable cancel
    and completion behavior. They add input-state complexity.
 

@@ -206,7 +206,7 @@ The same optional helper adds **Super+Ctrl+Alt+C** for **Edit card**. Focus the
 app on the side you want to change, then open the menu:
 
 - **Add an app to this side** opens the familiar app picker. Local apps appear
-  first, followed by **Add from workspace X** entries. Choose an ungrouped,
+  first, followed by **Add from workspace X** entries. Choose an ungrouped
   app; floating apps offer **Tile and add to card**. A remote app moves here
   before joining the side and receives focus. The
   first split follows the available space: beside on a wide pane, below on a tall
@@ -220,18 +220,42 @@ app on the side you want to change, then open the menu:
 - **Layout of this side…** offers **Beside**, **Stacked** and **Equal sizes**
   when a side has multiple apps. Changing direction keeps its proportions;
   equalizing keeps its direction. The other face keeps its layout.
+- The same layout menu offers **Swap app positions** for two apps, with no
+  additional chooser, or **Reorder apps…** for three. Moves are labeled
+  left/right for rows and up/down for columns. Split sizes stay with their
+  positions, and focus stays on the app you were using.
+- **Replace an app…** lets you replace any pane, including one that is not
+  focused. A side with one app names it directly, for example **Replace Gmail…**.
+  Choose an open app locally or under **Add from workspace X**. Floating apps
+  offer **Tile and replace app**. The replacement keeps the pane's position and
+  share of the side; the previous app stays open separately on the card's
+  workspace. Replacing the focused app follows its replacement; replacing
+  another pane retains your focus. Full three-app sides are supported.
 - **Move an app to the other side…** lets you choose any pane and follows it
   onto the opposite face. It is offered when the source has at least two apps
   and the destination has room. The destination keeps its existing direction,
   or uses the card's longer axis when gaining its second app.
 
-Layout controls require the matching ABI 4 core/provider. They edit the existing
+Layout controls require matching core/provider builds (ABI 4 or later;
+reordering needs ABI 5 and replacement needs ABI 6). They edit the existing
 tree in place and preserve folded/unfolded state. If an application's size
 limits prevent a change, the original membership, order, proportions and focus
 are restored. Custom bindings can call `hl.plugin.hyprflip.layout("horizontal")`,
 `layout("vertical")`, `layout("balance")` or `other_side()`; the last function
 optionally accepts a live address on the focused face. IPC equivalents are
 `hyprctl hyprflip 'layout horizontal'` and `hyprctl hyprflip other_side`.
+
+Omarchy's **Super+J** keeps toggling the focused split between beside and
+stacked. App order and replacement use C; no desktop shortcuts are reassigned.
+Replacement exchanges two existing hy3 leaf slots atomically. Both apps must
+fit their new slots. Importing or tiling a replacement can reflow the surrounding
+workspace first, just as adding an app does. The direct API expects an ungrouped,
+tiled replacement already on this workspace:
+`hyprctl hyprflip 'replace 0xOLD 0xNEW'` or
+`hl.plugin.hyprflip.replace("0xOLD 0xNEW")`. A refused replacement keeps the
+card intact and the helper returns imported/floating apps to their previous
+workspace and state. Reordering and replacement do not change saved definitions;
+use **Manage card… → Update saved card** to keep the new setup.
 
 For example, open Telegram, then on your Gmail/WhatsApp card,
 focus WhatsApp, press **Super+Ctrl+Alt+C**, choose **Add an app to this side**,
@@ -254,7 +278,7 @@ unload compositor libraries.
 
 ## Updating an enabled trial
 
-The current core and provider use bridge ABI **3**; rebuild both together.
+The current core and provider use bridge ABI **6**; rebuild both together.
 The updater restores one-, two- and three-app faces, including their split
 proportions. An ABI 2 installation can upgrade without recreating its cards.
 The regular installer refuses to replace the core while experimental cards are

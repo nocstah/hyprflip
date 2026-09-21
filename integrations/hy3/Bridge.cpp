@@ -238,18 +238,21 @@ bool restoreSelection(uint64_t id, const ContainerSnapshot &state, bool focus) {
     }
     return applySelection(id, state.active, focus, false);
 }
+bool fitsWindow(PHLWINDOW w) {
+    if (!w)
+        return false;
+    const auto size = w->size(Desktop::View::IGeometric::GEOMETRIC_GOAL);
+    const auto min = w->minSize(), max = w->maxSize();
+    return (!min || (size.x >= min->x && size.y >= min->y)) &&
+           (!max || (size.x <= max->x && size.y <= max->y));
+}
 bool fits(uint64_t id) {
     ContainerSnapshot state;
     if (!inspect(id, &state))
         return false;
     for (uint32_t side = 0; side < 2; ++side)
         for (uint32_t i = 0; i < state.count[side]; ++i) {
-            auto w = window(state.windows[side][i]);
-            if (!w)
-                return false;
-            const auto size = w->size(Desktop::View::IGeometric::GEOMETRIC_GOAL);
-            const auto min = w->minSize(), max = w->maxSize();
-            if ((min && (size.x < min->x || size.y < min->y)) || (max && (size.x > max->x || size.y > max->y)))
+            if (!fitsWindow(window(state.windows[side][i])))
                 return false;
         }
     return true;
@@ -375,6 +378,47 @@ bool arrange(uint64_t id, uint32_t side, bool vertical, uint32_t count,
     split.setLayout(previousAxis);
     for (uint32_t i = 0; i < count; ++i)
         node(before.windows[side][i])->size_ratio = weights[i];
+    restoreSelection(id, before, true);
+    return false;
+}
+bool replace(uint64_t id, uintptr_t outgoing, uintptr_t incoming) {
+    ContainerSnapshot before;
+    if (!inspect(id, &before) || !supports(incoming))
+        return false;
+    uint32_t side = 2;
+    for (uint32_t s = 0; s < 2; ++s)
+        for (uint32_t i = 0; i < before.count[s]; ++i)
+            if (before.windows[s][i] == outgoing) side = s;
+    if (side > 1)
+        return false;
+    auto old = node(outgoing), next = node(incoming);
+    auto layout = root(id)->Hy3Node::layout();
+    if (!old || !next || next->layout() != layout || old->parent == next->parent)
+        return false;
+    auto &destination = old->parent->as_group();
+    auto &source = next->parent->as_group();
+    auto oldSlot = destination.findChild(*old), newSlot = source.findChild(*next);
+    if (oldSlot == destination.children.end() || newSlot == source.children.end())
+        return false;
+    // Exchange two live leaves in their existing slots. No empty face, fourth
+    // pane, unlocked group, extracted ancestor or transient tree destruction.
+    // Repeating the exchange restores the exact parents, weights and selections.
+    auto exchange = [&] {
+        auto a = oldSlot->get(), b = newSlot->get();
+        if (destination.focused_child == a) destination.focused_child = b;
+        if (source.focused_child == b) source.focused_child = a;
+        std::swap(a->parent, b->parent);
+        std::swap(a->size_ratio, b->size_ratio);
+        std::swap(*oldSlot, *newSlot);
+    };
+    exchange();
+    update(layout, false);
+    if (fits(id) && fitsWindow(window(outgoing))) {
+        auto selection = before;
+        if (selection.focused[side] == outgoing) selection.focused[side] = incoming;
+        return restoreSelection(id, selection, true);
+    }
+    exchange();
     restoreSelection(id, before, true);
     return false;
 }
@@ -513,10 +557,11 @@ const ContainerAPI api{CONTAINER_ABI_VERSION,
                        unfold,
                        edit,
                        arrange,
+                       replace,
                        animating};
 } // namespace
 
-extern "C" __attribute__((visibility("default"))) const Hyprflip::ContainerAPI *hyprflip_hy3_bridge_v5() {
+extern "C" __attribute__((visibility("default"))) const Hyprflip::ContainerAPI *hyprflip_hy3_bridge_v6() {
     return &api;
 }
 

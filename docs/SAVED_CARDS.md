@@ -53,6 +53,10 @@ Rename, Duplicate and Delete are also available through **L → Manage saved
 cards…** while a card is closed. Updates are explicit; editing a live layout does
 not silently change its saved definition. Ordinary **Save card…** still asks
 before replacing an existing name.
+This includes swapping/reordering panes and replacing an app. After a
+replacement, **Manage card…** may ask which saved name to update because the
+apps no longer match the old setup. Until you update it, opening that saved
+card still uses its original apps and layout.
 
 ## Reopen missing apps
 
@@ -65,7 +69,7 @@ side and unfolded state remain intact. No additional confirmation is needed.
 A uniquely matching saved setup is selected automatically. If several match,
 choose a name. Surviving apps must still be in their original face and order;
 indistinguishable browser windows with changed titles are not guessed. Save the
-complete arrangement before closing apps. The feature needs matching ABI 5
+complete arrangement before closing apps. The feature needs matching ABI 5 or later
 core/provider builds; older providers keep their existing menu.
 
 The helper reuses eligible open apps, including floating apps on other
