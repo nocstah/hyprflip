@@ -66,6 +66,87 @@ class OpeningTest(unittest.TestCase):
         self.assertEqual(saved['desktop_id'], 'c.desktop')
         self.assertNotIn('Exec', self.store.path.read_text())
 
+    def test_all_closed_apps_can_take_focus_between_client_and_focus_queries(self):
+        for address in ('0xa', '0xb', '0xc'): del self.ipc.clients[address]
+        flow, plan = self.flow()
+        pending = iter(('0xa', '0xb', '0xc'))
+        launched = False
+        original_data = self.ipc.data
+        def data(*args):
+            if launched and args == ('-j', 'activewindow'):
+                if address := next(pending, None):
+                    self.ipc.clients[address] = deepcopy(self.original[address])
+                    self.ipc.active = address
+            return original_data(*args)
+        def launch(entry):
+            nonlocal launched
+            launched = True
+            return Mock(poll=lambda: 0)
+        with patch.object(setup.DesktopApps, 'launch', side_effect=launch), patch.object(setup, 'Opening'), \
+                patch.object(self.ipc, 'windows', side_effect=lambda: deepcopy(self.ipc.clients)), \
+                patch.object(self.ipc, 'data', side_effect=data), patch.object(flow, 'apply_reserved') as apply:
+            flow.apply(plan)
+        self.assertEqual(apply.call_args.args[1]['faces'][0]['windows'], ['0xa'])
+        self.assertEqual(apply.call_args.args[1]['faces'][1]['windows'], ['0xb', '0xc'])
+
+    def test_new_window_can_finish_startup_identity_before_it_is_selected(self):
+        del self.ipc.clients['0xc']
+        flow, plan = self.flow()
+        def launch(entry):
+            self.ipc.clients['0xe'] = self.original['0xc'] | {'address': '0xe', 'pid': 22,
+                                                          'class': '', 'initialClass': ''}
+            self.ipc.active = '0xe'
+            return Mock(poll=lambda: 0)
+        def settle(_):
+            self.ipc.clients['0xe'].update({'class': 'app-0xc', 'initialClass': 'app-0xc'})
+        with patch.object(setup.DesktopApps, 'launch', side_effect=launch), patch.object(setup, 'Opening'), \
+                patch.object(setup.time, 'sleep', side_effect=settle), patch.object(flow, 'apply_reserved') as apply:
+            flow.apply(plan)
+        self.assertEqual(apply.call_args.args[1]['faces'][1]['windows'], ['0xb', '0xe'])
+
+    def test_navigation_to_an_existing_unrelated_app_cancels_pending_launch(self):
+        del self.ipc.clients['0xc']
+        self.ipc.clients['0xf'] = window('0xf')
+        flow, plan = self.flow()
+        def launch(entry):
+            self.ipc.active = '0xf'
+            return Mock(poll=lambda: 0)
+        with patch.object(setup.DesktopApps, 'launch', side_effect=launch), patch.object(setup, 'Opening'), \
+                patch.object(flow, 'apply_reserved') as apply:
+            with self.assertRaises(setup.Cancelled): flow.apply(plan)
+            apply.assert_not_called()
+
+    def test_navigation_to_an_empty_workspace_cancels_pending_launch(self):
+        del self.ipc.clients['0xc']
+        flow, plan = self.flow()
+        def launch(entry):
+            self.ipc.active = None
+            self.ipc.workspace = 8
+            return Mock(poll=lambda: 0)
+        with patch.object(setup.DesktopApps, 'launch', side_effect=launch), patch.object(setup, 'Opening'), \
+                patch.object(flow, 'apply_reserved') as apply:
+            with self.assertRaises(setup.Cancelled): flow.apply(plan)
+            apply.assert_not_called()
+
+    def test_unmatched_new_focused_app_never_gets_grouped_or_focus_stolen(self):
+        del self.ipc.clients['0xc']
+        for matching in (False, True):
+            with self.subTest(matching=matching):
+                self.ipc.active = '0xd'
+                flow, plan = self.flow()
+                def launch(entry):
+                    if matching:
+                        self.ipc.clients['0xe'] = self.original['0xc'] | {'address': '0xe', 'pid': 22}
+                    self.ipc.clients['0xf'] = window('0xf', **{'class': 'unrelated'})
+                    self.ipc.active = '0xf'
+                    return Mock(poll=lambda: 0)
+                with patch.object(setup.DesktopApps, 'launch', side_effect=launch), patch.object(setup, 'Opening'), \
+                        patch.object(flow, 'apply_reserved') as apply:
+                    with self.assertRaises((setup.Cancelled, setup.SetupError)): flow.apply_open(plan, timeout=0)
+                    apply.assert_not_called()
+                self.ipc.clients.pop('0xf')
+                self.ipc.clients.pop('0xe', None)
+
     def test_open_card_is_focused_without_launching_or_rebuilding_it(self):
         self.ipc.snapshot['containers'] = [dict(id=1, faces=[['0xa'],['0xb','0xc']], current='0xc', active=1, unfolded=True)]
         flow = setup.Saved(self.ipc, Menu('0', 'open'))

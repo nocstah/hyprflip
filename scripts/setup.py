@@ -1194,6 +1194,12 @@ class Saved(Setup):
                 while True:
                     check()
                     if plan.launchers: progress.check()
+                    # Observe focus before clients: an app can map and focus
+                    # between IPC replies. The later client list can identify
+                    # it instead of mistaking our own launch for navigation.
+                    active_window = self.ipc.data('-j', 'activewindow')
+                    active = active_window.get('address')
+                    workspace = self.ipc.data('-j', 'activeworkspace')['id']
                     windows, state = self.ipc.windows(), self.ipc.status()
                     eligible = self.eligible(windows, state)
                     for index, entry in plan.launchers.items():
@@ -1216,13 +1222,18 @@ class Saved(Setup):
                             selected[match] = deepcopy(windows[match])
                         elif processes[index].poll() not in (None, 0):
                             raise SetupError('Could not launch ' + apps[index]['label'] + '. Open it yourself, then try the saved card again.')
-                    active = self.ipc.data('-j', 'activewindow').get('address')
-                    workspace = self.ipc.data('-j', 'activeworkspace')['id']
-                    if (active not in (None, plan.focus, *chosen) or
-                            (workspace != plan.workspace and (active not in selected or
-                             selected[active]['workspace']['id'] != workspace))):
-                        raise Cancelled()  # Respect navigation while apps launch.
-                    if all(chosen): break
+                    allowed_focus = active in (None, plan.focus, *chosen)
+                    # A new app may focus before its startup class is ready.
+                    # Wait for identification, but never group that window or
+                    # take focus from it unless it uniquely matches a slot.
+                    if not allowed_focus and (not plan.launchers or active in baseline):
+                        raise Cancelled()
+                    focused = windows.get(active, active_window)
+                    if workspace != plan.workspace and focused.get('workspace', {}).get('id') != workspace:
+                        raise Cancelled()  # Includes navigating to an empty workspace.
+                    if all(chosen):
+                        if not allowed_focus: raise Cancelled()
+                        break
                     if time.monotonic() >= deadline:
                         missing = ', '.join(app['label'] for app, address in zip(apps, chosen) if not address)
                         raise SetupError('Still waiting for ' + missing + '. Apps were left open. Choose Restore from open apps to select them yourself.')

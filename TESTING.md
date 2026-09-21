@@ -1,5 +1,51 @@
 # Validation
 
+## Saved-card cold-start fix (2026-09-21)
+
+Opening a saved Gmail / WhatsApp + Telegram card with all three apps closed
+could silently stop before grouping. The helper queried clients, then focus;
+a browser window mapping between those replies looked like unrelated user
+navigation. Cancelling released the workspace reservation, so Auto Chill
+floated the three separate apps. The saved front/back definition was intact.
+
+The helper now observes focus before collecting clients and allows a newly
+mapped window time to acquire its startup identity. Only uniquely matched
+windows can enter the card. Focusing a pre-existing unrelated app, moving to
+an empty workspace, clicking Cancel or starting another menu still stops the
+operation. Final focus and stale-window checks remain in place.
+
+- 72 Python tests pass, including deterministic mapping between IPC replies,
+  delayed startup identity, unrelated existing/new windows and workspace
+  navigation. Both startup regressions failed before the fix.
+- `tests/cold_open.py` reproduced the cancellation on the first pre-fix run
+  with two real Brave app windows sharing an isolated profile and a Foot pane.
+  With the fix, three consecutive all-closed launches rebuilt the saved
+  one-front/two-back card with Auto Chill and the installed Hyprglass build
+  enabled. Captures of both faces show complete browser surfaces after resize.
+- All four existing `tests/opening_workflows.py` checks pass: reuse/import,
+  focusing an already-open card, cancellation with a late app and launch timeout.
+
+```sh
+python tests/nested_session.py --directory /tmp/hf-reopen
+# In another terminal; both optional integrations are copies inside the fixture:
+python tests/cold_open.py /tmp/hf-reopen/session.json \
+  --engine /path/to/integrated/chillmode.lua --hyprglass /path/to/hyprglass.so
+python tests/opening_workflows.py /tmp/hf-reopen/session.json
+```
+
+Evidence: `/tmp/hf-reopen/cold-open/{results,trace}.json`, the front/back PNGs
+in that directory, and `/tmp/hf-reopen/opening-results.json`. Browser tests use
+local HTML and a temporary profile; they do not close the user's applications.
+
+The live helper update preserved the existing card, plugin handles and focus;
+configuration validation passed. Helper/config backups are in
+`~/.local/state/hyprflip/guided-setup-20260921-173641-315436/`.
+The three already-open user apps were restored to Gmail in front with WhatsApp
+and Telegram behind, and both faces were visually checked. No compositor
+library was changed or unloaded, and no rendering patch was needed for the
+restored card. The clipping seen while the apps were left floating was not
+independently reproduced or attributed to a renderer.
+
 ## Saved-card opening and face layout checks (2026-09-21)
 
 This milestone adds explicit app launching to saved cards and ABI 4 face edits.
