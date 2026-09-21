@@ -6,6 +6,12 @@ Pair two real applications into one window that turns over to reveal the other. 
 
 Hyprflip is a native C++/GLES plugin for **Hyprland 0.56.2**. It combines native two-member window groups with a reversible perspective animation, synchronized to the output's render cycle.
 
+[![Gmail flips to WhatsApp and Telegram, then unfolds into three apps](media/hyprflip-preview.gif)](media/hyprflip-demo.mp4)
+
+Real workspace footage, with app contents obscured. This demo uses the
+[experimental hy3 containers](docs/CONTAINERS.md).
+[Watch the video](media/hyprflip-demo.mp4) · [Media and recording notes](media/README.md)
+
 ## What it does
 
 - Mark two existing windows as the front and back of one card.
