@@ -10,7 +10,7 @@ experimental-container sources with the demo so viewers can reproduce it.
 
 I've been building a Hyprland plugin that gives your windows a back side.
 This is my actual workspace: Gmail on the front, with WhatsApp and Telegram
-sharing the back. The contents are obscured for the recording.
+sharing the back.
 
 Flip between the two sides, or temporarily unfold the card to use all three
 apps together. They stay live, and folding brings them back into the same space.
@@ -27,6 +27,6 @@ tabs or workspaces would still be easier.
 ## Short caption
 
 Gmail in front. WhatsApp + Telegram on the back. Flip between them, or unfold
-all three together. Real desktop footage, with contents obscured.
+all three together. Recorded live on Hyprland.
 
 Hyprflip — https://github.com/nocstah/hyprflip

@@ -8,7 +8,7 @@ Hyprflip is a native C++/GLES plugin for **Hyprland 0.56.2**. It combines native
 
 [![Gmail flips to WhatsApp and Telegram, then unfolds into three apps](media/hyprflip-preview.gif)](media/hyprflip-demo.mp4)
 
-Real workspace footage, with app contents obscured. This demo uses the
+Real workspace footage of Gmail, WhatsApp and Telegram. This demo uses the
 [experimental hy3 containers](docs/CONTAINERS.md).
 [Watch the video](media/hyprflip-demo.mp4) · [Media and recording notes](media/README.md)
 
