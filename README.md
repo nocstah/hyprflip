@@ -64,8 +64,11 @@ supported model; it is not a limit of hy3 itself.
 ## Install
 
 You need Hyprland **0.56.2**, its matching development headers, a matching
-C++26-capable compiler, CMake 3.25+, Ninja, pkg-config, Lua 5.4 and GLES libraries.
+C++26-capable compiler, CMake 3.25+, Ninja, pkg-config, Lua 5.5 and GLES libraries.
 The installer also needs Python 3 and an existing Hyprland Lua configuration.
+
+On NixOS, use the [pinned development environment](docs/INSTALL.md#nixos-development-environment)
+to build and test in a disposable nested desktop.
 
 ### Native two-window pairs
 

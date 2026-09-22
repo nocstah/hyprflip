@@ -19,7 +19,7 @@ See [the panel interface](PANEL_API.md) for its behavior and compatibility.
 
 | Component | Requirements |
 | --- | --- |
-| Core | Hyprland 0.56.2 and matching development headers; matching C++26-capable compiler; CMake 3.25+; Ninja; pkg-config; Lua 5.4; GLESv2 |
+| Core | Hyprland 0.56.2 and matching development headers; matching C++26-capable compiler; CMake 3.25+; Ninja; pkg-config; Lua 5.5; GLESv2 |
 | Supplied installer | Python 3, `hyprctl`, a running Hyprland session and an existing `~/.config/hypr/hyprland.lua` |
 | Experimental provider | Git, Python 3, and the pinned hy3 dependencies: pixman, libdrm, Pango/PangoCairo, libinput, Wayland client and xkbcommon development files |
 | Guided menus and saved cards | Omarchy 4 with a responding `omarchy-shell`, Python 3, `notify-send` (libnotify), and `gio`/`gdbus` (GLib) |
@@ -29,7 +29,7 @@ Check the compositor and headers before building:
 
 ```sh
 hyprctl version
-pkg-config --modversion hyprland lua5.4 glesv2
+pkg-config --modversion hyprland lua5.5 glesv2
 ```
 
 The Hyprland package version alone is insufficient if its commit, dependencies
@@ -43,6 +43,58 @@ Clone once, then run the remaining build commands from the checkout:
 git clone https://github.com/nocstah/hyprflip.git
 cd hyprflip
 ```
+
+## NixOS development environment
+
+With devenv installed, enter the pinned environment from this checkout:
+
+```sh
+devenv shell
+make test
+python3 -m unittest discover -s tests -p '*_test.py'
+./scripts/build-containers
+ctest --test-dir build/containers/core --output-on-failure
+```
+
+The committed `devenv.lock` pins Hyprland 0.56.2, its development dependencies
+and GCC 16.1.0. The environment also supplies Lua 5.5, GLES, Python's xkbcommon
+library lookup, foot and grim. First entry may download or build substantial
+dependencies. A fixed-hash Glaze 7.2.0 override corrects the compositor's
+upstream Nix dependency mismatch. If a build directory was configured outside
+this environment, move it aside before building so CMake selects the pinned compiler.
+
+To try the three-window card, run inside the environment:
+
+```sh
+python3 tests/nested_session.py --directory /tmp/hf-demo --containers
+```
+
+Use a fresh short temporary path (at most 18 bytes) and an existing Wayland
+session. Wait for `READY`, click inside the demo and press F8 to flip. Stop the
+launcher with Ctrl+C; it closes its test compositor and applications.
+
+For automated native checks, start a separate session without `--containers`:
+
+```sh
+python3 tests/nested_session.py --directory /tmp/hf-native
+```
+
+In a second `devenv shell` in the same checkout, run:
+
+```sh
+python3 tests/integration.py /tmp/hf-native/session.json
+```
+
+For provider checks, start another fresh session without `--containers` and
+run `python3 tests/containers.py` with that session's JSON path. The test loads
+its own libraries. Stop each launcher after testing.
+
+Entering the environment does not install plugins or change the host desktop.
+Its plugin binaries are intended for the matching nested compositor; a host
+with a different Hyprland build still needs matching plugins. An unqualified
+`hyprctl` addresses the host session even inside the environment. To inspect
+the demo, use `python3 tests/control.py /tmp/hf-demo/session.json version`.
+Automatic directory trust is optional; explicit `devenv shell` is sufficient.
 
 ## Native pairs with the supplied installer
 

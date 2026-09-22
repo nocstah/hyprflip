@@ -1,0 +1,5 @@
+inputs:
+  hyprland:
+    url: github:hyprwm/Hyprland/efb50993780079460b0cbed1363e2166a2de1d9f
+  nixpkgs:
+    follows: hyprland/nixpkgs

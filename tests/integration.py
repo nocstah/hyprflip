@@ -68,11 +68,15 @@ def spawn(name, x11=False):
     wait(lambda: any(c["class"] == app for c in clients()))
     return next(c["address"] for c in clients() if c["class"] == app)
 
-def pair(a, b):
+def pair(a, b, floating=False):
     focus(a); action("mark"); focus(b); action("pair")
-    wait(lambda: len(status()["pairs"]) == 1)
+    wait(lambda: len(status()["containers" if floating else "pairs"]) == 1)
     time.sleep(1.0)
-    assert status()["pairs"][0]["current"] == a
+    if floating:
+        card = status()["containers"][0]
+        assert card["faces"] == [[a], [b]] and card["active"] == 0
+    else:
+        assert status()["pairs"][0]["current"] == a
 
 def check(name):
     checks.append(name)
@@ -162,9 +166,9 @@ try:
     for address in (a, b):
         focus(address); ctl("dispatch", 'hl.dsp.window.float({action="float"})')
     time.sleep(.5)
-    pair(a, b)
+    pair(a, b, floating=True)
     action("flip"); action("finish")
-    assert client(b)["floating"] and status()["pairs"][0]["current"] == b
+    assert client(b)["floating"] and status()["containers"][0]["active"] == 1
     action("unpair")
     for address in (a, b):
         focus(address); ctl("dispatch", 'hl.dsp.window.float({action="tile"})')

@@ -1,5 +1,51 @@
 # Validation
 
+## NixOS development environment (2026-09-22)
+
+Validated on x86_64-linux using the committed devenv inputs: Hyprland 0.56.2
+at `efb50993780079460b0cbed1363e2166a2de1d9f`, GCC 16.1.0, Lua 5.5.0 and
+Python 3.14.6. The host compositor remained on 0.56.0. The first environment
+build required a local Hyprland compilation. Its upstream Nix package selected
+Glaze 8 although the compositor requires Glaze 7; the environment supplies the
+upstream-requested Glaze 7.2.0 through a fixed-hash override.
+
+- `make test` passed, including the C++ timeline test.
+- All **142 Python unit tests** passed inside `devenv shell`.
+- `scripts/build-containers` built both libraries at the existing hy3 pin;
+  the container build's C++ test passed.
+- All **18 native integration checks** passed in a disposable nested session.
+  The initial run exposed a stale floating-pair assertion: floating cards are
+  now reported under `containers`, not `pairs`. The test was corrected and
+  rerun in a fresh session; production controller behavior was unchanged.
+- All **13 container integration checks** passed, including rotated output
+  at scale 1.6, midpoint captures, input/focus, close recovery and provider
+  unload/reload.
+- The interactive `--containers` demo reached READY, reported one card with
+  one front and two back windows, and passed a flip round trip with no
+  configuration errors. Native, split-face, rotated and demo captures were
+  inspected for visible content and geometry.
+- All task-owned nested sessions and clients were stopped. Hashes of the
+  host's 49 Hyprland configuration files and its empty plugin list were
+  unchanged afterward.
+
+The core directly links Lua 5.5 and the nested compositor reports `Lua 5.5`.
+The pinned libinput package also brings Lua 5.4 transitively for its own Lua
+plugin support; this is not a claim that the entire runtime closure contains
+only one Lua version. CMake's optional static-link pkg-config probes emit
+missing private dependency messages (initially `sysprof-capture-4`); normal
+shared-library configuration and compilation succeed. A full static development
+closure is not supplied by this environment. The hy3 build emits GCC 16
+`-Wmismatched-new-delete` warnings for upstream `std::generator` methods in
+`Hy3Node.cpp`. Those warnings
+were not suppressed or fixed by this environment change; the lifecycle checks
+above passed, but they do not constitute a memory-safety proof.
+
+Reproduction commands are in the
+[NixOS development instructions](docs/INSTALL.md#nixos-development-environment).
+Local logs, JSON reports and captures are under ignored
+`test-results/nix-validation/`. These results establish this nested setup,
+not compatibility with another host ABI, Omarchy menus or OmaCards.
+
 ## Pane reordering and replacement (2026-09-21)
 
 C → Layout adds a direct two-app swap and directional three-app reordering.

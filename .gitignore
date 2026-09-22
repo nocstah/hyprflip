@@ -14,3 +14,7 @@ core.*
 /CRASH-*.md
 /PLAN.md
 /PRODUCT.md
+/.devenv/
+/.direnv/
+/devenv.local.nix
+/devenv.local.yaml

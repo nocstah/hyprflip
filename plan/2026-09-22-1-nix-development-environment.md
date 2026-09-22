@@ -67,8 +67,9 @@ in `TESTING.md`, distinguishing unit/build results from nested/GPU checks.
 
 4. Run `scripts/build-containers` with the pinned environment and default
    two-job limit, then run its C++ test. Inspect core and provider dynamic
-   dependencies for missing libraries and Lua 5.4 leakage; the core must use
-   Lua 5.5. Confirm both builds retain compositor ABI checks and the hy3 pin.
+   dependencies for missing libraries; the core must directly use Lua 5.5.
+   Record libinput's transitive Lua 5.4 dependency. Confirm both builds retain
+   compositor ABI checks and the hy3 pin.
    Investigate any build failure before changing scope or package pins.
 
 5. Use fresh paths of at most 18 bytes for three disposable sessions:
@@ -95,6 +96,39 @@ in `TESTING.md`, distinguishing unit/build results from nested/GPU checks.
 If implementation deviates, update this plan in the same commit as the code.
 Do not weaken checks or silently substitute a different compositor/toolchain.
 
+### Implementation adjustment: upstream Glaze packaging
+
+The initial shell build failed configuring Hyprland: its pinned Nix package
+provides Glaze 8.0.0, but CMake requires Glaze 7 and falls back to an unavailable
+in-sandbox source download. In `devenv.nix`, override only the compositor's
+`glaze-hyprland` argument with Glaze 7.2.0 (the version its CMake fallback names).
+Use `fetchFromGitHub` with the verified source hash
+`sha256-f3NVRi3SXKo42hn0WCw7JsOK3EkdOVJIcuzhPorKjFY=` and CMake flags supported
+by that release. Keep the approved compositor, compiler and nixpkgs revisions.
+The development headers and nested compositor must use this same override.
+
+### Implementation adjustment: runtime test dependencies and stale assertion
+
+Include `wtype` for the existing keyboard-input integration check. CMake's
+FindPkgConfig also probes unused static-link metadata and emits missing-private-
+dependency messages. Investigation confirmed resolving those probes would
+require a separate transitive static development closure. Keep the environment
+limited to this project's shared-library builds, document these non-fatal
+messages, and validate normal pkg-config flags and runtime shared dependencies.
+The first native integration run passed nine checks, then timed out because
+its floating-pair helper expected
+`status.pairs`. `Controller::pair()` routes floating windows through
+`FloatingCards::api()`, reported in `status.containers`. Update only that test's
+floating case to verify container faces and active side; keep tiled-pair
+assertions unchanged. Rerun the suite in a fresh nested session. No production
+controller or renderer behavior changes are needed.
+
+Link inspection found Lua 5.4 transitively through the pinned libinput package's
+Lua plugin support. Keep that upstream dependency unchanged. Verify that
+Hyprflip directly links Lua 5.5, no libraries are missing, and the nested
+compositor reports `Lua 5.5` when evaluating `return _VERSION`; report the
+libinput dependency explicitly rather than claiming a Lua-5.4-free closure.
+
 ## Tests
 
 Run the following inside `devenv shell`, unless stated otherwise. Execute
@@ -110,7 +144,7 @@ and inspect each result before proceeding to a dependent check.
 | Python | `python3 -m unittest discover -s tests -p '*_test.py'` | All tests pass; current baseline has 142 tests |
 | Provider/core | `./scripts/build-containers` | Both plugin libraries built |
 | Container core test | `ctest --test-dir build/containers/core --output-on-failure` | All tests pass |
-| Shared libraries | `readelf -d` and `ldd` on built core/provider libraries | Core links Lua 5.5; no missing libraries or Lua 5.4 dependency |
+| Shared libraries | `readelf -d` and `ldd` on built core/provider libraries | Core directly links Lua 5.5; no missing libraries; libinput's transitive Lua 5.4 dependency recorded |
 | Native session | `python3 tests/nested_session.py --directory /tmp/hf-native`, then `python3 tests/integration.py /tmp/hf-native/session.json` in another shell | READY, integration checks pass and captures render correctly |
 | Container session | `python3 tests/nested_session.py --directory /tmp/hf-cards`, then `python3 tests/containers.py /tmp/hf-cards/session.json` in another shell | READY, container checks pass and captures render correctly |
 | Interactive demo | `python3 tests/nested_session.py --directory /tmp/hf-demo --containers` | READY; matching plugins loaded; one card with one front and two back windows |
