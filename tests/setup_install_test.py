@@ -21,7 +21,8 @@ class SetupInstallTest(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
         self.project, self.home = self.root / 'project', self.root / 'user'
-        for relative in ('scripts/install-setup.py', 'scripts/setup.py', 'examples/containers-setup.lua'):
+        for relative in ('scripts/install-setup.py', 'scripts/setup.py', 'scripts/workflow.py',
+                         'scripts/control.py', 'scripts/shortcuts.py', 'examples/shortcuts.lua', 'examples/containers-setup.lua', 'examples/preferences.lua'):
             target = self.project / relative
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(ROOT / relative, target)
@@ -106,6 +107,16 @@ class SetupInstallTest(unittest.TestCase):
             self.assertEqual(self.main.read_bytes(), self.original)
             self.assertFalse(self.helper.exists())
             self.assertEqual(self.reloads, 0)
+
+    def test_backend_only_supports_native_pairs_without_rebinding(self):
+        self.state['container_provider'] = False
+        self.conflict = 'O'
+        with self.assertRaises(SystemExit) as result: self.install('--backend-only')
+        self.assertEqual(result.exception.code, 0)
+        self.assertFalse(self.module.exists())
+        self.assertTrue((self.helper.parent / 'control.py').is_file())
+        self.assertTrue((self.config / 'hyprflip-preferences.lua').is_file())
+        self.assertIn('require("hypr.hyprflip-preferences")', self.main.read_text())
 
     def test_parse_failure_restores_exact_files_and_removes_new_files(self):
         self.fail_reload = True

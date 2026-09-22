@@ -1,4 +1,5 @@
 #include "Controller.hpp"
+#include "FloatingCards.hpp"
 #include <algorithm>
 #include <charconv>
 #include <dlfcn.h>
@@ -159,6 +160,7 @@ Controller::~Controller() {
             g->setLocked(pair.previousLock);
     }
     m_pairs.clear();
+    FloatingCards::shutdown();
     m_marked.reset();
     m_shader.reset();
 }
@@ -185,6 +187,7 @@ std::vector<PHLWINDOWREF> Controller::State::windows() const {
     return result;
 }
 const ContainerAPI *Controller::provider(uint64_t epoch) const {
+    if (epoch == FloatingCards::EPOCH) return FloatingCards::api();
     // Never retain a function pointer across an event or provider unload.
     for (auto plugin : g_pPluginSystem->getAllPlugins()) {
         if (plugin->m_name != "hy3")
@@ -281,11 +284,16 @@ void Controller::onClose(PHLWINDOW w) {
         m_marked.reset();
     if (m_turn && std::ranges::find(m_turn->windows, w) != m_turn->windows.end())
         finish(false);
+    const bool mutating = m_mutating;
+    m_mutating = true;
+    FloatingCards::closing(w);
+    m_mutating = mutating;
     deferReconcile();
 }
 void Controller::onFocus(PHLWINDOW w) {
     if (m_mutating)
         return;
+    FloatingCards::focused(w);
     if (m_peek) {
         m_peek.reset();
         finish(false); // An explicit focus change always wins over the return.
@@ -447,7 +455,7 @@ Result Controller::pair() {
         return {false, "Resize the first window so the second window fits before pairing."};
     finish();
     m_mutating = true;
-    if (auto api = provider(); api && api->supports(reinterpret_cast<uintptr_t>(a.get())) &&
+    if (auto api = a->m_isFloating ? FloatingCards::api() : provider(); api && api->supports(reinterpret_cast<uintptr_t>(a.get())) &&
                                api->supports(reinterpret_cast<uintptr_t>(b.get()))) {
         const auto id = api->create(reinterpret_cast<uintptr_t>(a.get()), reinterpret_cast<uintptr_t>(b.get()));
         if (id) {
@@ -736,7 +744,7 @@ Result Controller::attach(bool vertical) {
     for (const auto &member : s->windows())
         if (Fullscreen::controller()->isFullscreen(member.lock()))
             return {false, "Leave fullscreen before attaching to this container."};
-    if (w->m_isFloating || w->m_workspace != s->focused[s->active]->m_workspace)
+    if ((w->m_isFloating && p->providerEpoch != FloatingCards::EPOCH) || w->m_workspace != s->focused[s->active]->m_workspace)
         return {false, "Tile the marked window on the same workspace before attaching it."};
     auto api = provider(p->providerEpoch);
     m_mutating = true;
@@ -784,7 +792,7 @@ Result Controller::replacePane(const std::string &arguments) {
         return {false, error};
     if (find(next) || next->m_group)
         return {false, "The replacement already belongs to a card or group."};
-    if (next->m_isFloating || next->m_workspace != old->m_workspace)
+    if ((next->m_isFloating && p->providerEpoch != FloatingCards::EPOCH) || next->m_workspace != old->m_workspace)
         return {false, "Tile the replacement on the card workspace first."};
     for (const auto &w : s->windows())
         if (Fullscreen::controller()->isFullscreen(w.lock()))
@@ -1033,8 +1041,52 @@ void Controller::onFrame(PHLMONITOR monitor) {
     }
     m_timer->updateTimeout(std::chrono::milliseconds(250));
 }
+Result Controller::floating() {
+    if (inputBusy()) return {false, "Finish the active drag before changing the card mode."};
+    auto p = find(Desktop::focusState()->window());
+    if (!p) return {false, "Choose a card first."};
+    finish();
+    auto current = state(*p);
+    if (!current) return {false, "This card changed. Open Cards again."};
+    for (const auto &w : current->windows())
+        if (Fullscreen::controller()->isFullscreen(w.lock())) return {false, "Leave fullscreen before changing the card mode."};
+    m_mutating = true;
+    if (p->providerEpoch == FloatingCards::EPOCH) {
+        const bool ok = FloatingCards::toggle(p->containerID);
+        m_mutating = false;
+        return {ok, ok ? "ok" : "The card could not change mode."};
+    }
+    ContainerSnapshot snapshot;
+    snapshot.active = current->active; snapshot.unfolded = current->unfolded;
+    snapshot.x = current->geometry.x; snapshot.y = current->geometry.y;
+    snapshot.width = current->geometry.w; snapshot.height = current->geometry.h;
+    for (unsigned side = 0; side < 2; ++side) {
+        snapshot.count[side] = current->faces[side].size();
+        snapshot.focused[side] = reinterpret_cast<uintptr_t>(current->focused[side].get());
+        snapshot.vertical[side] = current->vertical[side];
+        for (unsigned i = 0; i < current->faces[side].size(); ++i) {
+            snapshot.windows[side][i] = reinterpret_cast<uintptr_t>(current->faces[side][i].get());
+            snapshot.ratios[side][i] = current->ratios[side][i] > 0 ? current->ratios[side][i] : 1. / current->faces[side].size();
+        }
+    }
+    if (!FloatingCards::canCreate(snapshot)) {
+        m_mutating = false;
+        return {false, "These apps have incompatible size limits. The current card was kept."};
+    }
+    if (p->containerID) discardContainer(*p);
+    else if (auto g = p->group.lock()) {g->setLocked(p->previousLock);g->destroy();}
+    const auto id = FloatingCards::create(snapshot);
+    if (id) {
+        p->containerID = id; p->providerEpoch = FloatingCards::EPOCH;
+        p->group.reset(); p->windows = {};
+    }
+    m_mutating = false;
+    reconcile();
+    return {id != 0, id ? "Card floats as one unit. Drag or resize any app." : "These apps cannot fit a floating card. They remain open."};
+}
 Result Controller::action(const std::string &action) {
     reconcile();
+    if (action == "floating") return floating();
     std::erase_if(m_reservations, [](const auto& entry) { return entry.second.until <= Clock::now(); });
     if (action.starts_with("reserve ")) {
         std::istringstream args(action.substr(8));
@@ -1140,7 +1192,7 @@ void Controller::notify(const Result &r) {
 }
 std::string Controller::status() {
     reconcile();
-    std::string json = "{\"version\":\"0.1.1\",\"marked\":" + address(m_marked.lock()) +
+    std::string json = "{\"version\":\"" HYPRFLIP_VERSION "\",\"marked\":" + address(m_marked.lock()) +
                        ",\"transition\":" + quote(std::string(name(transition(m_settings.transition->value()).value_or(Transition::Flip)))) +
                        ",\"transition_modes\":[\"flip\",\"vertical\",\"slide\",\"fade\",\"dissolve\",\"portal\",\"instant\"]" +
                        ",\"capture_ms\":" + std::format("{}", m_captureMs) +
@@ -1186,7 +1238,7 @@ std::string Controller::status() {
             }
             json += ']';
         }
-        json += "],\"layouts\":[";
+        json += "],\"native_group\":" + std::string(p.providerEpoch == FloatingCards::EPOCH ? "true" : "false") + ",\"floating\":" + std::string(s->focused[s->active]->m_isFloating ? "true" : "false") + ",\"layouts\":[";
         for (unsigned side = 0; side < 2; ++side) {
             if (side) json += ',';
             json += "{\"axis\":" + quote(s->vertical[side] ? "vertical" : "horizontal") +
@@ -1200,7 +1252,7 @@ std::string Controller::status() {
         json += "]}";
     }
     const bool available = provider();
-    return json + "],\"workspace_protection\":true,\"container_provider\":" + (available ? "true" : "false") +
+    return json + "],\"floating_cards\":true,\"workspace_protection\":true,\"container_provider\":" + (available ? "true" : "false") +
            ",\"layout_controls\":" + (available ? "true" : "false") +
            ",\"repair_cards\":" + (available ? "true" : "false") +
            ",\"pane_replacement\":" + (available ? "true" : "false") +

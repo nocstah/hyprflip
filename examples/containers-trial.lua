@@ -1,3 +1,7 @@
+-- Share owned shortcut handles with OmaCards when guided setup is installed.
+local ok_shortcuts, shortcuts = pcall(require, "hypr.hyprflip-shortcuts")
+if not ok_shortcuts then shortcuts = hl end
+
 -- Optional container trial for Hyprland 0.56.2, after hypr.hyprflip.
 -- Requires the pinned provider built by scripts/build-containers.
 -- Set to nil to enable containers on all normal workspaces instead.
@@ -24,10 +28,10 @@ if hl.plugin.hyprflip and hl.plugin.hyprflip.attach then
             if plugin and plugin[action] then plugin[action](argument) end
         end
     end
-    hl.bind("SUPER + CTRL + ALT + H", run("attach", "horizontal"), { description = "Hyprflip: attach pane beside" })
-    hl.bind("SUPER + CTRL + ALT + V", run("attach", "vertical"), { description = "Hyprflip: attach pane below" })
-    hl.bind("SUPER + CTRL + ALT + E", run("release"), { description = "Hyprflip: release focused pane" })
+    shortcuts.bind("SUPER + CTRL + ALT + H", run("attach", "horizontal"), { description = "Hyprflip: attach pane beside" })
+    shortcuts.bind("SUPER + CTRL + ALT + V", run("attach", "vertical"), { description = "Hyprflip: attach pane below" })
+    shortcuts.bind("SUPER + CTRL + ALT + E", run("release"), { description = "Hyprflip: release focused pane" })
     if hl.plugin.hyprflip.unfold then
-        hl.bind("SUPER + CTRL + ALT + O", run("unfold"), { description = "Hyprflip: unfold or fold both faces" })
+        shortcuts.bind("SUPER + CTRL + ALT + O", run("unfold"), { description = "Hyprflip: unfold or fold both faces" })
     end
 end

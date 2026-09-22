@@ -44,7 +44,8 @@ installed = any(p["name"] == "hyprflip" for p in json.loads(ctl("-j", "plugin", 
 installed_state = json.loads(ctl("hyprflip", "status")) if installed else {}
 if installed_state.get("containers"):
     raise SystemExit("Experimental containers are active. This installer preserves native pairs only; "
-                     "use the experimental update procedure in docs/CONTAINERS.md before replacing either library.")
+                     "use the matching core/provider updater in docs/INSTALL.md. "
+                     "For a core-only installation, ungroup floating cards first; their apps stay open.")
 saved_pairs = installed_state.get("pairs", [])
 if not saved_pairs and recovery.is_file():
     pending = json.loads(recovery.read_text())

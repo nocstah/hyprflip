@@ -114,6 +114,10 @@ def restore(snapshot, saved):
         if any(w not in now or any(now[w][key] != saved[w][key] for key in ('pid', 'class', 'workspace', 'floating')) for w in members):
             raise RuntimeError('A card member closed or changed during the update; recovery metadata was retained')
         front, back = card['faces'][0][0], card['faces'][1][0]
+        if card.get('floating'):
+            x, y, width, height = map(round, card['box'])
+            focused((front, f'hl.dispatch(hl.dsp.window.resize({{x={width},y={height}}})); '
+                            f'hl.dispatch(hl.dsp.window.move({{x={x},y={y}}}))'))
         focused((front, 'assert(hl.plugin.hyprflip.mark())'),
                 (back, 'assert(hl.plugin.hyprflip.pair())'))
         for side, face in enumerate(card['faces']):
@@ -160,6 +164,13 @@ def restore(snapshot, saved):
         restored = next((c for c in state()['containers'] if c['faces'] == card['faces']), None)
         if not restored or restored['current'] != card['current'] or bool(restored.get('unfolded')) != bool(card.get('unfolded')):
             raise RuntimeError('Could not restore a card; recovery metadata was retained')
+        if bool(restored.get('floating')) != bool(card.get('floating')):
+            raise RuntimeError('Could not restore the card mode; recovery metadata was retained')
+        if card.get('floating'):
+            x, y, width, height = card['box']
+            rx, ry, rw, rh = restored['box']
+            focused((card['current'], f'hl.dispatch(hl.dsp.window.resize({{x={width-rw},y={height-rh},relative=true}})); '
+                                     f'hl.dispatch(hl.dsp.window.move({{x={x-rx},y={y-ry},relative=true}}))'))
 
 
 for installed, built in libraries:
@@ -167,6 +178,9 @@ for installed, built in libraries:
         raise SystemExit('Build both libraries first; this updater requires an already-enabled container trial')
 if ctl('configerrors'):
     raise SystemExit('Resolve existing configuration errors before updating')
+monitors = json.loads(ctl('-j', 'monitors'))
+if any('LOCK' in monitor.get('solitaryBlockedBy', []) for monitor in monitors):
+    raise SystemExit('Unlock your desktop before updating Hyprflip; restoring cards requires window focus.')
 plugins = {p['name'] for p in json.loads(ctl('-j', 'plugin', 'list'))}
 if not {'hyprflip', 'hy3'} <= plugins:
     raise SystemExit('Both experimental plugins must already be loaded')
@@ -178,14 +192,14 @@ if not args.dry_run:
     snapshot = state()
 saved = clients()
 layouts = {w['id']: w['tiledLayout'] for w in json.loads(ctl('-j', 'workspaces'))}
-if any(w['grouped'] and not w['floating'] and layouts[w['workspace']['id']] == 'hy3' for w in saved.values()):
+native_members = {w for c in snapshot['containers'] if c.get('native_group') for f in c['faces'] for w in f}
+if any(w['grouped'] and not w['floating'] and layouts[w['workspace']['id']] == 'hy3' and a not in native_members for a,w in saved.items()):
     raise SystemExit('Separate native tiled groups on hy3 before updating the experimental layout')
 active = json.loads(ctl('-j', 'activewindow')).get('address')
-monitors = json.loads(ctl('-j', 'monitors'))
 for card in snapshot['containers']:
     for face in card['faces']:
         for w in face:
-            if saved[w]['fullscreen'] or saved[w]['floating'] or saved[w]['grouped']:
+            if saved[w]['fullscreen'] or ((saved[w]['floating'] or saved[w]['grouped']) and not card.get('native_group')):
                 raise SystemExit('Leave fullscreen and complete any grouping changes before updating')
 card_workspaces = {saved[w]['workspace']['id'] for card in snapshot['containers']
                    for face in card['faces'] for w in face}

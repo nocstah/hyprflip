@@ -3,6 +3,7 @@
 import argparse
 import json
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import time
@@ -16,6 +17,7 @@ env = environment(args.session)
 config = args.session.parent / "hyprland.lua"
 original = config.read_bytes()
 library = args.session.parent / "config-upgrade.so"
+version = re.search(r"project\(hyprflip VERSION ([\d.]+)", Path("CMakeLists.txt").read_text()).group(1)
 
 def ctl(*arguments):
     return subprocess.check_output(["hyprctl", *arguments], env=env, text=True, timeout=10).strip()
@@ -48,7 +50,7 @@ try:
     assert ctl("hyprflip", "status") == "unknown request", "Expected Hyprland's cached config plugin list"
     assert ctl("plugin", "load", str(library)) == "ok"
     time.sleep(.3)
-    assert state()["version"] == "0.1.1"
+    assert state()["version"] == version
     assert ctl("hyprflip", "adopt", a, b).startswith("ok:")
     assert state()["pairs"][0] == before
     assert json.loads(ctl("-j", "activewindow"))["address"] == before["current"]
@@ -58,7 +60,7 @@ try:
     ctl("hyprflip", "flip"); time.sleep(.6)
     assert not state()["animating"] and state()["pairs"][0]["current"] == a
     ctl("hyprflip", "unpair")
-    print("PASS config-loaded 0.1.0 → 0.1.1 upgrade, cached-list reload, preserved pair/focus/geometry, animated flip")
+    print(f"PASS config-loaded 0.1.0 → {version} upgrade, cached-list reload, preserved pair/focus/geometry, animated flip")
 finally:
     ctl("plugin", "unload", str(library))
     config.write_bytes(original)

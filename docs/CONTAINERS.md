@@ -161,10 +161,10 @@ the other Hyprflip bindings. It backs up affected files and installs
 and hold-to-peek. No compositor library is replaced or unloaded.
 
 - On an existing card, **O** still unfolds or folds immediately.
-- On an ungrouped tiled window, **O** opens Omarchy's searchable menu. The focused
-  window becomes the front. Choose an app for the back, then choose **Only one
-  app** or **Add [app name]** for a second app. After choosing a second app,
-  choose **Only two apps** or add a third. When only one other window is
+- On an ungrouped app, **O** opens Omarchy's searchable menu. The focused
+  app becomes the front. Choose an app for the back, then choose **Create card**
+  or **Add [app name]** for a second app. After choosing a second app,
+  choose **Create card** or add a third. When only one other window is
   available, one selection is enough.
 - The selected apps group automatically, with the card folded onto the front.
   **Super+Ctrl+Alt+F** flips to the back; **Super+Ctrl+Alt+O** shows both faces
@@ -187,8 +187,10 @@ A third app joins the existing row or column, retaining its direction and the
 relative sizes of its existing panes. Creation
 does not require enough space to show both faces simultaneously.
 
-Floating apps get a final **Tile and create card** choice. Cancelling preserves
-their arrangement. Creating tiles only the selected apps; a failure restores
+Floating apps are fitted into the card automatically after selection, with no
+separate tiling confirmation. Their picker rows say **Resizes to fit card**.
+Cancelling before the final selection preserves their arrangement.
+Creating tiles only the selected apps; a failure restores
 their previous floating positions and returns imported apps to their workspaces.
 For apps managed by Omachill, install the optional
 [Chill integration](TRANSITIONS.md#chill-mode) so Auto Chill respects cards.
@@ -212,7 +214,7 @@ app on the side you want to change, then open the menu:
 
 - **Add an app to this side** opens the familiar app picker. Local apps appear
   first, followed by **Add from workspace X** entries. Choose an ungrouped
-  app; floating apps offer **Tile and add to card**. A remote app moves here
+  app; floating apps are resized to fit automatically. A remote app moves here
   before joining the side and receives focus. The
   first split follows the available space: beside on a wide pane, below on a tall
   pane. Adding a third app keeps that row or column and its existing proportions.
@@ -232,7 +234,7 @@ app on the side you want to change, then open the menu:
 - **Replace an app…** lets you replace any pane, including one that is not
   focused. A side with one app names it directly, for example **Replace Gmail…**.
   Choose an open app locally or under **Add from workspace X**. Floating apps
-  offer **Tile and replace app**. The replacement keeps the pane's position and
+  are resized to fit automatically. The replacement keeps the pane's position and
   share of the side; the previous app stays open separately on the card's
   workspace. Replacing the focused app follows its replacement; replacing
   another pane retains your focus. Full three-app sides are supported.
@@ -330,37 +332,43 @@ from the parent desktop.
 | `workspace 2` | Move all card members to numbered hy3 workspace 2 and follow them |
 | `workspace 2 silent` | Move the card and remain on the source workspace |
 | `move left` / `right` / `up` / `down` | Reorder the entire card toward a neighbor |
-| `unfold` | Toggle showing both faces together in the existing tile |
+| `unfold` | Toggle showing both faces together in the existing card frame |
+| `floating` | Toggle the whole card between floating and tiled placement |
 | `unpair` | Turn both faces into ordinary visible splits |
 | `cancel` | Clear the pending mark |
 | `status` | Report native `pairs` and experimental `containers` separately |
 
 Lua exposes `hl.plugin.hyprflip.attach("horizontal")`, `release()` and
-`workspace(2, follow)`, `move("left")`, `unfold()` and `in_container()` alongside
+`workspace(2, follow)`, `move("left")`, `unfold()`, `floating()` and `in_container()` alongside
 the existing direct action functions. `follow` defaults to true. Bindings are
 installed only by the optional configuration modules. Existing mark/pair/flip shortcuts use containers when
-both tiled windows belong to the experimental hy3 provider.
+both tiled windows belong to the experimental hy3 provider. Floating windows
+form cards backed by a native group with the same two-face API.
 
-Focus, resize and close still act on real applications. Use the navigation module
+Focus and close still act on real applications. Tiled resizing adjusts panes;
+floating movement and resizing adjust the shared frame. Use the navigation module
 or explicit `workspace` action to move a whole card; an unadapted window-move
-command acts on the selected pane. Leave fullscreen before flipping or moving a container.
+command can act on the selected tiled pane. Leave fullscreen before flipping or moving a container.
 New windows open outside the card. Unloading Hyprflip dissolves its containers
 into visible splits; the experimental updater reconstructs them explicitly.
 
 ## Current boundaries
 
 - Hyprland 0.56.2 and the pinned hy3 release only. Dwindle retains native pairs.
-- Tiled windows on one workspace; no floating containers or nested flip cards.
+- Tiled or floating cards on one workspace; no nested flip cards.
 - At most three apps per face, arranged in one row or column. No nested splits
   within a face. Hy3 supports larger trees; this is the supported Hyprflip subset.
 - Unfold places three-app rows above one another and three-app columns beside
   one another. Mixed split directions use the card's proportions. Application
   size limits can select the alternate arrangement or refuse the unfold.
-- Workspace moves currently accept positive numeric IDs and require hy3 at the
-  destination. Named/special workspace moves and whole-card dragging are deferred.
+- Workspace moves accept positive numeric IDs. Tiled hy3 cards require hy3 at
+  the destination; floating cards can move as a native group. Saved-card opening
+  through the helper requires a hy3 destination. Named/special workspace moves
+  are deferred. Floating cards support whole-card dragging and resizing.
 - Layout navigation uses hy3's model. This does not make dwindle support nested
   containers, and does not automatically replace existing movement shortcuts.
-- The tab bar is visible at rest and hidden during a turn. Popups do not rotate;
+- The hy3 tab bar is visible at rest and hidden during a turn; floating cards
+  hide the native group bar. Popups do not rotate;
   unsuitable rendering conditions switch instantly.
 - The compositor does not restore sessions at login or add individual-pane
   capture semantics. The optional Omarchy helper handles saved cards and explicit
@@ -436,3 +444,29 @@ can use hy3, but compatibility does not imply unchanged navigation bindings.
 lifecycle and setup references. They do not replace hy3's nested tab ownership
 for this experiment. No external implementation is being copied into the native
 Hyprflip backend.
+
+## Floating cards and Settings
+
+OmaCards offers **Float card** / **Tile card** on the selected card. Floating
+cards use one native Hyprland group as their outer move/resize target; Hyprflip
+arranges up to three apps on each face inside it. Drag or resize any visible
+app with your usual window-manager mouse bindings. Flip, peek, unfold, pane
+editing and workspace moves keep both faces together. Closing the last app on
+one face releases the remaining apps. Unloading restores native window targets.
+
+Guided creation inherits a floating front app's mode and position. Other apps
+are fitted automatically. The Chill adapter hands those apps to Hyprflip and
+protects the card from automatic rearrangement. Saved definitions remember
+floating mode; they do not promise exact desktop coordinates after restarting.
+
+In OmaCards, **Settings → Motion** chooses transition and speed, including
+Instant for no animation. **Settings → Keyboard shortcuts** shows the actual
+bindings. Choose an action, record a combination, then Save shortcut. Use default
+restores that action's default after the same conflict checks. Preferences are
+plain data in `$XDG_STATE_HOME/hyprflip`; install the updated guided setup to
+load them on every Hyprland configuration parse.
+
+Under a saved card's **Manage → Workspace…**, choose Current workspace or enter
+a fixed workspace number. For example, Comms assigned to 3 always opens there;
+an already-open Comms card moves there without launching another copy. Updating,
+renaming and duplicating the saved setup preserve its workspace preference.

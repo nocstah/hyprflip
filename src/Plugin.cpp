@@ -37,6 +37,7 @@ int workspace(lua_State *L) {
 }
 int move(lua_State *L) { return invoke(L, (std::string("move ") + luaL_checkstring(L, 1)).c_str()); }
 int unfold(lua_State *L) { return invoke(L, "unfold"); }
+int floating(lua_State *L) { return invoke(L, "floating"); }
 int layout(lua_State *L) { return invoke(L, (std::string("layout ") + luaL_checkstring(L, 1)).c_str()); }
 int arrange(lua_State *L) { return invoke(L, (std::string("arrange ") + luaL_checkstring(L, 1)).c_str()); }
 int replace(lua_State *L) { return invoke(L, (std::string("replace ") + luaL_checkstring(L, 1)).c_str()); }
@@ -107,6 +108,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE h) {
                                    {"workspace", workspace},
                                    {"move", move},
                                    {"unfold", unfold},
+                                   {"floating", floating},
                                    {"layout", layout},
                                    {"arrange", arrange},
                                    {"replace", replace},
@@ -129,7 +131,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE h) {
                  }});
     if (!command)
         throw std::runtime_error("Hyprflip: could not register IPC command");
-    return {"hyprflip", "Two real windows, two sides, one rotating card", "Hyprflip contributors", "0.1.1"};
+    return {"hyprflip", "Two real windows, two sides, one rotating card", "Hyprflip contributors", HYPRFLIP_VERSION};
 }
 APICALL EXPORT void PLUGIN_EXIT() {
     controller.reset();

@@ -125,7 +125,7 @@ class LauncherTest(unittest.TestCase):
         self.ipc.clients['0xa']['floating'] = True
         flow, plan = self.flow()
         self.assertEqual(len(flow.menu.prompts), 1)
-        self.assertIn('Tile apps', flow.menu.prompts[0][1][0].detail)
+        self.assertIn('Resize apps to fit', flow.menu.prompts[0][1][0].detail)
         with patch.object(flow, 'apply_reserved') as apply: flow.apply(plan)
         apply.assert_called_once()
 

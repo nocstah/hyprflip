@@ -901,3 +901,49 @@ that five-second allowance. Recovery records are under
 `~/.local/state/hyprflip/transition-install-20260921-135016/`, compositor-library
 backups under `container-update-20260921-135017/`, and picker/config backups under
 `guided-setup-20260921-135345-238757/` in the same state directory.
+
+## Hyprflip 0.2.0 and OmaCards 0.1.0 release (2026-09-22)
+
+Validated on Hyprland 0.56.2 with matching headers/compiler and Omarchy 4.0.4:
+
+- A clean source copy passed `make test`; `scripts/build-containers` fetched
+  the pinned hy3 revision and built both libraries successfully.
+- **142 Python tests** passed, covering shared workflows, panel protocol,
+  workspace destinations, shortcut conflicts/persistence, installation and
+  locked-session update refusal. Python syntax and relative documentation links
+  were checked as well.
+- **9 native floating-card checks** passed: shared movement/resizing, every
+  transition and peek, pane editing, float/tile and fullscreen round trips,
+  workspace destinations, cold launching, close recovery and safe unloading.
+- **8 Chill workflow checks** passed, including preserving cards through a
+  live library update and recovering geometry after failed creation/import.
+- **9 fresh-install checks** passed in a Wayland-nested compositor with an
+  empty private home, isolated runtime and session bus, and the stock Omarchy
+  shell. The documented core installer, provider activation and helper
+  installer all succeeded. `omarchy plugin add` cloned OmaCards from its public
+  GitHub URL, validated it and enabled its bar widget. Native pairing,
+  three-app creation, floating mode, saved workspace destinations and persistent
+  shortcut/motion settings worked. Cards, Edit, Library, Settings, Motion and
+  Keyboard shortcuts opened through the real shell IPC with a responding
+  backend and no configuration errors.
+
+The fresh-install check used the host's installed build/runtime dependencies;
+it was not a fresh operating-system installation. It did not load test
+libraries into the user's compositor. The hyprpm pin is updated for this release,
+but an end-to-end hyprpm-managed installation remains unverified.
+
+Reproduce the automated helper and floating lifecycle checks:
+
+```sh
+python3 -m unittest discover -s tests -p '*_test.py'
+./scripts/build-containers
+python3 tests/nested_session.py --directory /tmp/hf-float
+# In a second terminal, while that disposable session is running:
+python3 tests/floating_workflows.py /tmp/hf-float/session.json
+```
+
+The release-run logs and JSON results were retained under `/tmp/hf-release3/`,
+with build logs at `/tmp/hyprflip-release-build.log` and
+`/tmp/hyprflip-release-containers.log`. Floating and Chill results from feature
+acceptance are under `/tmp/hf-float2/`. These are local run artifacts, not
+repository fixtures or a promise of compatibility with other compositor ABIs.

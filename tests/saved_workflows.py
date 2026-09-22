@@ -20,7 +20,7 @@ args = parser.parse_args()
 assert args.state_dir.resolve().is_relative_to('/tmp')
 root, project = args.session.parent, Path(__file__).resolve().parent.parent
 env = environment(args.session) | {'XDG_STATE_HOME': str(args.state_dir)}
-spec = importlib.util.spec_from_file_location('hf_saved_setup', project / 'scripts/setup.py')
+spec = importlib.util.spec_from_file_location('hf_saved_setup', project / 'scripts/workflow.py')
 setup = importlib.util.module_from_spec(spec); sys.modules[spec.name] = setup; spec.loader.exec_module(setup)
 ipc = setup.Hyprctl(env)
 config = root / 'hyprland.lua'; original = config.read_text()
@@ -141,7 +141,7 @@ try:
             for address in front: ipc.call('dispatch', f'hl.dsp.window.float({{window="address:{address}",action="enable"}})')
         ipc.focus(b); time.sleep(.25)
         original_windows = deepcopy(ipc.windows())
-        flow = setup.Saved(ipc, Menu('0', 'restore', 'restore', 'tile'))
+        flow = setup.Saved(ipc, Menu('0', 'restore', 'restore'))
         plan = flow.prepare_manage()
         real_focused = ipc.focused
         def rejected(*operations):
@@ -164,7 +164,7 @@ try:
         for workspace in (30, 31): assert lua(f'return hl.plugin.hyprflip.protects_workspace({workspace})') == 'false'
         assert ipc.data('-j', 'activewindow')['address'] == b
         passed('a failed restore after partial grouping rolls back remote workspaces, floating geometry, Chill tags and original focus')
-        flow = setup.Saved(ipc, Menu('0', 'restore', 'restore', 'tile'))
+        flow = setup.Saved(ipc, Menu('0', 'restore', 'restore'))
         flow.apply(flow.prepare_manage()); time.sleep(.2)
         assert_shape(before['recipe'])
         assert all(not ipc.windows()[a]['floating'] for a in addresses)

@@ -16,7 +16,7 @@ p.add_argument('session', type=Path); p.add_argument('--engine', type=Path); p.a
 args = p.parse_args()
 root, project = args.session.parent, Path(__file__).resolve().parent.parent
 env = environment(args.session) | {'XDG_STATE_HOME': str(root / 'pane-state')}
-spec = importlib.util.spec_from_file_location('hf_pane_setup', project / 'scripts/setup.py')
+spec = importlib.util.spec_from_file_location('hf_pane_setup', project / 'scripts/workflow.py')
 setup = importlib.util.module_from_spec(spec); sys.modules[spec.name] = setup; spec.loader.exec_module(setup)
 ipc = setup.Hyprctl(env)
 config = root / 'hyprland.lua'; original = config.read_text()
@@ -157,7 +157,7 @@ try:
         wait(lambda: ipc.windows()[remote]['floating'] and 'chillmode' in ipc.windows()[remote].get('tags',[]))
     else: ipc.call('dispatch',f'hl.dsp.window.float({{window="address:{remote}",action="enable"}})')
     ipc.focus(y); before = deepcopy(card()); outgoing = before['faces'][1][-1]
-    edit(y,'replace',outgoing,'workspace:61',remote,'tile')
+    edit(y,'replace',outgoing,'workspace:61',remote)
     assert card()['faces'][1][-1] == remote and card()['id'] == identity and active() == y
     assert card()['unfolded'] == before['unfolded'] and card()['layouts'] == before['layouts']
     assert not ipc.windows()[remote]['floating'] and ipc.windows()[remote]['workspace']['id'] == 60
@@ -169,7 +169,7 @@ try:
     if args.engine: wait(lambda: ipc.windows()[tall]['floating'])
     else: ipc.call('dispatch',f'hl.dsp.window.float({{window="address:{tall}",action="enable"}})')
     original_float = deepcopy(ipc.windows()[tall]); ipc.focus(y); before = deepcopy(card())
-    try: edit(y,'replace',x,'workspace:62',tall,'tile')
+    try: edit(y,'replace',x,'workspace:62',tall)
     except setup.SetupError: pass
     else: raise AssertionError('A remote minimum-size failure should roll back import and tiling')
     assert card() == before and active() == y

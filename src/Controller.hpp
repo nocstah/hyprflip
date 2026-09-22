@@ -34,6 +34,7 @@ class Controller {
     void notify(const Result &result);
 
   private:
+    Result floating();
     struct Pair {
         uint64_t id;
         std::array<PHLWINDOWREF, 2> windows;

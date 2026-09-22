@@ -26,7 +26,7 @@ for key, directory in (('XDG_CONFIG_HOME', 'config'), ('XDG_CACHE_HOME', 'cache'
     (root / directory).mkdir(exist_ok=True)
     env[key] = str(root / directory)
 env.update(XDG_DATA_DIRS=str(root / 'empty-data'), DBUS_SESSION_BUS_ADDRESS='unix:path=' + str(root / 'no-bus'))
-spec = importlib.util.spec_from_file_location('hf_cold_setup', project / 'scripts/setup.py')
+spec = importlib.util.spec_from_file_location('hf_cold_setup', project / 'scripts/workflow.py')
 setup = importlib.util.module_from_spec(spec); sys.modules[spec.name] = setup; spec.loader.exec_module(setup)
 trace = []
 

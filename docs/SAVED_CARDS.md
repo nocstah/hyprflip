@@ -11,7 +11,8 @@ still has two faces, with one to three apps in a row or column on each face.
 4. Type part of the saved name, select it and press Enter. It opens directly.
 
 The launcher shows **Open · Workspace X** for a running card; selecting that
-entry switches to it without changing its arrangement. Otherwise **Open here**
+entry switches to it. A saved workspace assignment also moves the running card
+to that workspace. Otherwise **Open here**
 reuses matching apps and launches missing ones. The row indicates when apps will
 be brought from other workspaces or tiled. There is no second confirmation.
 An empty library offers **Save this card…** when a card is focused.
@@ -20,7 +21,8 @@ Open reuses available apps, including those on other workspaces, and launches
 missing ones using installed desktop entries. If a launcher cannot be identified,
 choose it from the installed app list. Ambiguous window matches still need an
 explicit choice. Successful launcher choices are remembered. Matching floating
-apps, including Chill windows, are tiled as part of opening the saved arrangement.
+apps, including Chill windows, are fitted into the saved arrangement. Cards
+saved as floating reopen as one movable, resizable card; other cards are tiled.
 
 For manual control, choose **Manage saved cards…**, select a name, then use
 **Review apps and launchers…** before opening it. Select a missing app's review
@@ -39,17 +41,23 @@ same launcher as L.
 Focus your card, press **Super+Ctrl+Alt+C**, and choose **Manage card…**:
 
 - **Update saved card** remembers the current apps, split directions, proportions,
-  focused panes and visible face. It preserves remembered launchers. A unique
+  focused panes, visible face and floating mode. It preserves remembered
+  launchers and the assigned workspace. A unique
   matching saved setup is selected automatically, including after moving a pane
   between faces. If multiple saved variants match, or you added/removed apps,
   choose which saved name to update. There is no naming or replacement prompt.
 - **Rename…** changes the saved name; an existing name is never overwritten.
 - **Duplicate…** copies the saved definition under a new name. It does not launch
   another set of app windows or capture unsaved layout changes.
+- **Workspace…** chooses where the card opens. Select **Current workspace** to
+  open wherever you are, or **Always use a workspace…** and enter its number.
+  For example, assign **Comms** to **3** to open it on workspace 3 from anywhere.
+  The library shows this destination. An already open card moves there instead
+  of creating a duplicate. The destination needs the hy3 layout.
 - **Delete saved card** removes the definition after confirmation and keeps
   running apps and cards open.
 
-Rename, Duplicate and Delete are also available through **L → Manage saved
+Rename, Duplicate, Workspace and Delete are also available through **L → Manage saved
 cards…** while a card is closed. Updates are explicit; editing a live layout does
 not silently change its saved definition. Ordinary **Save card…** still asks
 before replacing an existing name.
@@ -93,10 +101,11 @@ not restore browser tabs, documents, or application-internal session state.
 ## Opening behavior
 
 Saved arrangements remember both faces, their split directions and relative
-pane sizes, the last focused pane on each face, and the visible face. Restoration
-finishes folded. It uses the available tile on the destination workspace;
-application size limits still apply. It does not restore the old monitor,
-workspace number, or absolute screen coordinates.
+pane sizes, the last focused pane on each face, the visible face and whether the
+card floats. Restoration finishes folded. By default it opens on the current
+workspace; an explicit assignment uses that workspace instead. Tiled cards use
+the available tile, and application size limits still apply. Saved definitions
+do not restore an old monitor or absolute screen coordinates.
 
 App classes and window titles help match open windows. A unique exact title
 match is preferred; a unique app class can still match after its title changes.
@@ -169,7 +178,7 @@ the optional hy3 container provider.
 
 ## Update an existing container installation
 
-Build the matching libraries with `./scripts/build-containers`, then run
+Unlock the desktop, build the matching libraries with `./scripts/build-containers`, then run
 `python scripts/update-containers.py` and `python scripts/install-setup.py`.
 The updater retains existing cards and the setup installer retains user
 configuration and saved definitions, backing up replaced files. See

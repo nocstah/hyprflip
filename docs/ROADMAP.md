@@ -8,8 +8,9 @@ another kind of group or requiring users to manage a layout tree.
 
 - Normal workspace shortcuts move the entire card. Silent moves keep the user
   on the source workspace; an unsupported destination leaves the card intact.
-- Directional movement reorders the whole card. Resize and close continue to
-  address the focused application; release explicitly removes a pane.
+- Directional movement reorders tiled cards. Tiled resize and close address the
+  focused application; floating move/resize adjusts the whole card's frame.
+  Release explicitly removes a pane.
 - Temporary unfold shows both faces in the card's footprint. Fold restores the
   two-sided view onto the face containing the focused application. Inner splits
   retain their proportions. Applications remain live and usable throughout.
@@ -37,7 +38,7 @@ another kind of group or requiring users to manage a layout tree.
   trying the alternate arrangement when application minimums need it.
 - The transition picker offers Flip, Vertical Flip, Slide, Fade, Instant and
   experimental Dissolve and Portal, with reversible previews. Chill integration
-  protects tiled cards and hands off selected floating apps with rollback.
+  protects card arrangements and hands off selected floating apps with rollback.
 - [Saved cards](SAVED_CARDS.md) remember a named two-face arrangement, pane
   proportions and focus. Open reuses open apps and launches missing ones through
   installed desktop entries. Selecting a saved card opens it directly; an
@@ -65,6 +66,15 @@ another kind of group or requiring users to manage a layout tree.
   Remote/floating choices reuse the guarded workspace handoff and rollback.
 - Hold Super+Ctrl+Alt+Space to peek. Release returns smoothly; input, focus,
   popups, workspace changes and lifecycle interruptions cancel the return.
+- Floating multi-app cards use a native outer group and two sets of live panes.
+  They move and resize as one unit, support the same edits and transitions, and
+  release ordinary windows when dissolved or unloaded.
+- Saved definitions can choose a numbered workspace. Opening launches missing
+  apps there or moves the already open card, and retains the saved floating mode.
+- [OmaCards](https://github.com/nocstah/omacards) exposes the library, pane editor,
+  motion and keyboard settings through an Omarchy bar panel. Both interfaces use
+  one workflow backend and saved library. Shortcut recording inhibits compositor
+  shortcuts temporarily; saved bindings survive configuration reloads.
 
 ## Before a wider container preview
 
@@ -93,7 +103,5 @@ implemented. The next candidates are:
 - Linked flips need a concrete use case before several cards change together.
 - Arbitrary nesting, more faces, and unlimited panes obscure the two-sided
   model. Existing workspaces and hy3 groups already cover larger arrangements.
-- Floating containers require a separate geometry and lifecycle solution; do
-  not make a second compositor layout merely to extend this prototype.
 
 These are proposed directions, not promises or evidence of implementation.

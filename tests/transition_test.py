@@ -8,14 +8,26 @@ from setup_test import IPC, Picker, setup
 
 
 class TransitionsTest(unittest.TestCase):
-    def test_floating_choices_have_a_final_cancel_before_any_mutation(self):
-        for answer in ('cancel', None):
+    def test_cancel_while_selecting_floating_apps_never_mutates_them(self):
+        for answers in ((None,), ('0xb', None)):
             ipc = IPC(); ipc.snapshot['workspace_protection'] = True
             ipc.clients['0xa']['floating'] = True
-            picker = Picker('0xb', 'create', answer)
+            picker = Picker(*answers)
             with self.assertRaises(setup.Cancelled): setup.Setup(ipc, picker).prepare('0xa')
             self.assertEqual(ipc.mutations, [])
-            self.assertEqual(picker.prompts[-1][1][0].label, 'Tile and create card')
+            self.assertTrue(ipc.clients['0xa']['floating'])
+
+    def test_floating_creation_needs_no_extra_confirmation(self):
+        for extra in (False, True):
+            ipc = IPC(); ipc.snapshot['workspace_protection'] = True
+            for window in ipc.clients.values(): window['floating'] = True
+            if not extra: del ipc.clients['0xc']
+            picker = Picker('0xb', *(['create'] if extra else []))
+            selected = setup.Setup(ipc, picker).prepare('0xa')
+            self.assertEqual(list(selected), ['0xa', '0xb'])
+            self.assertEqual(len(picker.prompts), 2 if extra else 1)
+            self.assertEqual(ipc.mutations, [])
+            self.assertTrue(all(w['floating'] for w in ipc.clients.values()))
 
     def test_preview_and_back_do_not_save_the_previewed_mode(self):
         ipc = CardIPC()

@@ -11,6 +11,12 @@ load matching core/provider versions together.
 
 ## Requirements
 
+The optional [OmaCards companion](https://github.com/nocstah/omacards) uses the
+shared helper installed by `scripts/install-setup.py` and provides a native bar panel.
+For native pairs without the container provider, use `--backend-only` to install
+that helper and motion preferences without adding container shortcuts.
+See [the panel interface](PANEL_API.md) for its behavior and compatibility.
+
 | Component | Requirements |
 | --- | --- |
 | Core | Hyprland 0.56.2 and matching development headers; matching C++26-capable compiler; CMake 3.25+; Ninja; pkg-config; Lua 5.4; GLESv2 |
@@ -200,8 +206,10 @@ python3 scripts/install-setup.py --dry-run
 python3 scripts/install-setup.py
 ```
 
-It installs `~/.local/lib/hyprflip/setup.py` and
-`~/.config/hypr/hyprflip-setup.lua`, adds its `require` after the other bindings,
+It installs `setup.py`, `workflow.py`, `control.py` and `shortcuts.py` in
+`~/.local/lib/hyprflip/`, plus `hyprflip-setup.lua` and
+`hyprflip-preferences.lua` and `hyprflip-shortcuts.lua` in `~/.config/hypr/`.
+It adds the setup `require` after the other bindings,
 checks O/C/L/Space for conflicts, backs up changed files and validates reload.
 It does not replace or unload compositor libraries.
 
@@ -221,6 +229,24 @@ The adapter targets Omachill 1.2.0 and is applied separately; the helper install
 does not patch it. The supplied workflow does not require Hyprglass or a shader
 plugin.
 
+### Add the OmaCards panel
+
+After installing the guided helper, install the companion from its public repository:
+
+```sh
+omarchy plugin add https://github.com/nocstah/omacards.git --enable --yes
+```
+
+Click the cards icon in the bar. **Settings** contains Motion and Keyboard
+shortcuts; **Float card / Tile card** changes the whole card's mode. Under a saved
+card, **Manage → Workspace…** chooses a fixed destination or the current workspace.
+Saving a card remembers its floating mode, apps and pane arrangement.
+
+The `--yes` option accepts Omarchy's plugin-installation prompt. The panel uses
+the same helper and saved library as the native menus. It does not install or
+replace compositor libraries. See [OmaCards](https://github.com/nocstah/omacards)
+for the panel's requirements, controls and removal instructions.
+
 ### Enable all normal workspaces
 
 In your installed `hyprflip-containers.lua`, change:
@@ -233,7 +259,8 @@ Keep the container module after saved layout overrides, then reload. It selects
 hy3 for existing and future normal workspaces; special scratchpads retain
 dwindle. **Before switching**, unpair any tiled native pairs while those
 workspaces still use dwindle. Recreate them as containers afterward. Existing
-hy3 cards can stay in place. Floating pairs remain native.
+hy3 cards can stay in place. Existing floating pairs keep their native grouping;
+new floating cards can contain multiple apps per face.
 
 ### Move cards with normal shortcuts
 
@@ -255,13 +282,18 @@ Reload once. Super+Shift+1…0 moves and follows the card;
 Super+Shift+Alt+1…0 moves silently; Super+Shift+arrows reorders the card.
 Destinations must be numbered hy3 workspaces, so all-workspace mode is useful
 here. Ordinary windows retain ordinary workspace movement. This module does not
-add whole-card dragging or special-workspace movement.
+add drag bindings or special-workspace movement. Floating cards already move
+and resize as a unit using the desktop's ordinary mouse bindings.
 
 ## Update
 
 ### Native updates
 
 From a supplied-installer checkout with native pairs only:
+
+Ungroup floating cards first with **Super+Ctrl+Alt+U**; their apps stay open.
+The core-only installer preserves native pairs, while rebuilding floating or
+tiled multi-app cards requires the matching core/provider updater below.
 
 ```sh
 git pull --ff-only
@@ -276,7 +308,7 @@ Customized core settings and native pairs are preserved. For hyprpm, use
 ### Container updates
 
 Use the dedicated updater for an already-enabled container setup using the
-paths above:
+paths above. Unlock the desktop first; restoring the arrangement requires focus:
 
 ```sh
 git pull --ff-only
@@ -290,6 +322,7 @@ python3 scripts/install-setup.py
 The updater backs up both libraries, settles turns, unloads the core before the
 provider, updates both and reconstructs cards. It preserves membership, pane
 order, split proportions, remembered focus, visible face and folded state.
+Floating cards also retain their mode and outer frame.
 The surrounding tiling layout can reflow. No applications are launched or closed.
 A failed load attempts to restore the previous libraries and arrangements.
 
@@ -302,6 +335,16 @@ Backups are under `~/.local/state/hyprflip/container-update-*`. Same-session
 recovery records use live window addresses and cannot recreate a card after a
 compositor restart; use the [saved-card library](SAVED_CARDS.md) for that.
 The guided helper's backups live under `guided-setup-*` in the state directory.
+
+Update an installed public OmaCards checkout separately:
+
+```sh
+omarchy plugin update io.github.nocstah.omacards
+```
+
+If Omarchy keeps showing old controls after a plugin update, close the panel
+and run `omarchy restart shell` while the desktop is unlocked. This reloads the
+shell interface; app windows and Hyprflip cards remain in Hyprland.
 
 ## Troubleshooting
 
@@ -364,3 +407,12 @@ hyprctl reload
 Check `hyprctl configerrors` and `hyprctl -j plugin list`. Unload alone is not
 persistent while the configuration still declares the libraries. Saved
 arrangements remain in `~/.local/state/hyprflip/cards.json` until you remove them.
+
+### OmaCards settings
+
+Rerun `python3 scripts/install-setup.py` after updating this checkout to install
+`shortcuts.py` and the Lua shortcut registry. The installer preserves existing
+Hyprflip configuration values and saved shortcut preferences, backs up changed
+files, reloads the configuration and verifies card membership. It does not
+replace compositor libraries. OmaCards exposes motion and keybindings under
+Settings; saved-card workspace preferences are under Manage → Workspace.

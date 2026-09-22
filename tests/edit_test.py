@@ -119,7 +119,7 @@ class EditTest(unittest.TestCase):
     def test_no_candidates_explains_how_to_add_one_without_mutation(self):
         ipc = CardIPC()
         del ipc.clients['0xc'], ipc.clients['0xd']
-        with self.assertRaisesRegex(setup.SetupError, 'Open another ungrouped, tiled app'):
+        with self.assertRaisesRegex(setup.SetupError, 'Open another app that is not already in a card or group'):
             setup.Edit(ipc, Picker('add')).prepare('0xb')
         self.assertEqual(ipc.mutations, [])
 

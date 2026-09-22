@@ -36,19 +36,21 @@ separately built, pinned hy3 provider; the guided menus use **Omarchy 4**.
 | **Layout controls** | Choose beside, stacked or equal sizes. Swap two apps, reorder three, or move an app to the other face. |
 | **Apps from other workspaces** | Pick local apps first, or open an **Add from workspace X** submenu to bring another app into the card. |
 | **Saved cards** | Name an arrangement and reopen it with its apps, split directions, proportions, remembered focus and visible face. |
+| **Workspace destinations** | Assign a saved card to a workspace. Opening it brings the whole card there, including an existing open card. |
+| **Floating cards** | Float a multi-app card, then move or resize it from any visible pane. Both faces stay together. |
 | **Launch and repair** | Reuse open apps, launch missing apps through installed launchers, or reopen missing panes in a surviving saved card. |
 | **Card library** | Search, open, update, rename, duplicate and delete saved definitions. An already-open card is focused without duplication. |
 | **Move the whole card** | Optional navigation bindings move every member to another workspace or reorder the card beside neighboring tiles. |
 | **Seven transitions** | Flip, Vertical flip, Slide, Fade, Dissolve, Portal and Instant, with preview and a saved preference. |
-| **Omarchy integration** | Native themed menus, existing Super+J split toggling, and an optional Omachill adapter that keeps cards tiled. |
+| **Omarchy integration** | Native themed menus, Super+J split toggling, and an Omachill adapter that protects card arrangements. OmaCards adds motion and shortcut settings. |
 
 ### Choose your setup
 
 | | Native pairs | Experimental cards |
 | --- | --- | --- |
 | Apps per face | One | One to three |
-| Layout | Native Hyprland groups; dwindle tested | Pinned hy3 provider, tiled windows |
-| Floating windows | A pair can be floating | The guided menu can tile selected apps before adding them |
+| Layout | Native Hyprland groups; dwindle tested | Pinned hy3 for tiled cards; native groups for floating cards |
+| Floating windows | A pair can be floating | Whole multi-app cards can float, move and resize together |
 | Flip, transitions and peek | Yes; custom binding for peek | Yes |
 | Unfold, pane editing and whole-card navigation | — | Yes |
 | Guided menus and saved-card library | — | Optional Omarchy 4 helper |
@@ -118,8 +120,9 @@ With the container provider and guided setup enabled:
 1. Open Gmail, WhatsApp and Telegram as separate app windows. A browser tab must
    first be in its own window.
 2. On a hy3 workspace, focus Gmail and press **Super+Ctrl+Alt+O**.
-3. Choose WhatsApp, then **Add Telegram**. Choose **Only two apps** if offered.
+3. Choose WhatsApp, then **Add Telegram**. Choose **Create card** if offered.
    Apps on other workspaces are available under **Add from workspace X**.
+   Floating apps are resized to fit automatically.
 4. The card groups automatically with Gmail in front. Press
    **Super+Ctrl+Alt+F** to turn it over.
 5. Press **Super+Ctrl+Alt+O** to use all three apps together. Focus the side you
@@ -162,6 +165,21 @@ when requested rather than automatically at login. See
 
 ## Shortcuts
 
+The optional [**OmaCards**](https://github.com/nocstah/omacards) Omarchy bar panel adds a visible card library, two-face
+editor, floating-card controls, workspace destinations, and motion/shortcut settings.
+With OmaCards enabled, C and L open its editor and
+library; disabling it restores the original menu routes. Both interfaces use
+the same saved cards and guarded workflows. After installing Hyprflip and its
+guided helper, add the panel with:
+
+```sh
+omarchy plugin add https://github.com/nocstah/omacards.git --enable --yes
+```
+
+Use **Settings** for motion and keyboard shortcuts. Under a saved card, choose
+**Manage → Workspace…** to assign its destination. See
+[installation](docs/INSTALL.md#add-the-omacards-panel) and [the shared helper](docs/PANEL_API.md).
+
 Hold **Super + Ctrl + Alt** for the following keys:
 
 | Key | Action | Required setup |
@@ -186,7 +204,8 @@ Optional [navigation bindings](docs/INSTALL.md#move-cards-with-normal-shortcuts)
 | **Super+Shift+arrows** | Reorder the whole card toward a neighboring tile |
 
 Without that module, ordinary window-move shortcuts may move only the focused
-pane. Card workspace moves require a numbered hy3 destination.
+pane. Workspace destinations must be numbered; tiled hy3 cards also need a
+hy3 destination. Floating cards keep their shared frame on other normal layouts.
 
 ## Transitions
 
@@ -228,12 +247,14 @@ The transition preference saved by the optional menu is reapplied on reload.
 - **Version pin:** Hyprland 0.56.2 only. Rebuild after compositor or ABI changes;
   other versions need adaptation and testing.
 - **Containers:** one workspace, two faces, at most three apps in a row or
-  column per face. Nested flip cards, arbitrary pane trees and floating
-  containers are not implemented. Application minimum sizes can prevent a split
+  column per face, tiled or floating. Nested flip cards and arbitrary pane trees
+  are not implemented. Application minimum sizes can prevent a split
   or unfold; the existing card is kept when a change is refused.
 - **Fullscreen and movement:** native pairs use native group behavior. Leave
   fullscreen before flipping, unfolding or moving an experimental container.
-  Whole-card dragging and named/special-workspace moves are not implemented.
+  Floating cards move and resize as a unit with normal desktop mouse bindings.
+  Tiled card reordering uses the optional navigation bindings. Named/special-workspace
+  card moves are not implemented.
 - **Saved setups:** live card identities do not survive a compositor restart.
   The optional saved-card launcher recreates named arrangements when requested.
 - **Omachill:** integration is optional and targets Omachill 1.2.0. Install the

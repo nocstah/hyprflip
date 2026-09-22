@@ -1,3 +1,7 @@
+-- Share owned shortcut handles with OmaCards when guided setup is installed.
+local ok_shortcuts, shortcuts = pcall(require, "hypr.hyprflip-shortcuts")
+if not ok_shortcuts then shortcuts = hl end
+
 -- Hyprland 0.56.2. Load after your other desktop configuration.
 -- For a hyprpm installation, omit the load call: hyprpm loads the library.
 -- Keep this declaration on every parse: it is Hyprland's desired plugin list,
@@ -25,9 +29,9 @@ if hl.plugin.hyprflip then
             if plugin and plugin[action] then plugin[action]() end
         end
     end
-    hl.bind("SUPER + CTRL + ALT + M", run("mark"), { description = "Hyprflip: mark first side" })
-    hl.bind("SUPER + CTRL + ALT + P", run("pair"), { description = "Hyprflip: attach second side" })
-    hl.bind("SUPER + CTRL + ALT + F", run("flip"), { description = "Hyprflip: turn window over" })
-    hl.bind("SUPER + CTRL + ALT + U", run("unpair"), { description = "Hyprflip: separate windows" })
-    hl.bind("SUPER + CTRL + ALT + Escape", run("cancel"), { description = "Hyprflip: cancel pairing" })
+    shortcuts.bind("SUPER + CTRL + ALT + M", run("mark"), { description = "Hyprflip: mark first side" })
+    shortcuts.bind("SUPER + CTRL + ALT + P", run("pair"), { description = "Hyprflip: attach second side" })
+    shortcuts.bind("SUPER + CTRL + ALT + F", run("flip"), { description = "Hyprflip: turn window over" })
+    shortcuts.bind("SUPER + CTRL + ALT + U", run("unpair"), { description = "Hyprflip: separate windows" })
+    shortcuts.bind("SUPER + CTRL + ALT + Escape", run("cancel"), { description = "Hyprflip: cancel pairing" })
 end

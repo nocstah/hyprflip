@@ -16,7 +16,7 @@ p.add_argument('session', type=Path)
 args = p.parse_args()
 root, project = args.session.parent, Path(__file__).resolve().parent.parent
 env = environment(args.session)
-spec = importlib.util.spec_from_file_location('hf_layout_setup', project / 'scripts/setup.py')
+spec = importlib.util.spec_from_file_location('hf_layout_setup', project / 'scripts/workflow.py')
 setup = importlib.util.module_from_spec(spec); sys.modules[spec.name] = setup; spec.loader.exec_module(setup)
 ipc = setup.Hyprctl(env)
 config = root / 'hyprland.lua'; original = config.read_text()

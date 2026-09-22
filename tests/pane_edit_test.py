@@ -105,12 +105,11 @@ class PaneEditTest(unittest.TestCase):
 
     def test_remote_float_selection_and_cancellation_do_not_mutate_before_apply(self):
         self.ipc.clients['0xe'].update(workspace={'id':8,'name':'8'}, floating=True)
-        for answers in (('replace',None), ('replace','0xc',None), ('replace','0xc','workspace:8',None),
-                        ('replace','0xc','workspace:8','0xe',None)):
+        for answers in (('replace',None), ('replace','0xc',None), ('replace','0xc','workspace:8',None)):
             with self.subTest(answers=answers):
                 with self.assertRaises(setup.Cancelled): self.prepare(*answers)
                 self.assertEqual(self.ipc.mutations, [])
-        flow, plan = self.prepare('replace','0xc','workspace:8','0xe','tile')
+        flow, plan = self.prepare('replace','0xc','workspace:8','0xe')
         self.assertEqual(self.ipc.mutations, [])
         flow.apply(plan)
         self.assertEqual(self.ipc.clients['0xe']['workspace']['id'], 2)
@@ -121,7 +120,7 @@ class PaneEditTest(unittest.TestCase):
         self.ipc.clients['0xe'].update(workspace={'id':8,'name':'8'}, floating=True)
         self.ipc.snapshot['marked'] = '0xe'
         before = deepcopy(self.ipc.card)
-        flow, plan = self.prepare('replace','0xc','workspace:8','0xe','tile')
+        flow, plan = self.prepare('replace','0xc','workspace:8','0xe')
         self.ipc.fail = lambda action: action.startswith('replace ')
         with self.assertRaisesRegex(setup.SetupError, 'Injected layout failure'): flow.apply(plan)
         self.assertEqual(self.ipc.card, before)
@@ -131,7 +130,7 @@ class PaneEditTest(unittest.TestCase):
 
     def test_lost_success_reply_does_not_pull_the_new_member_out_of_the_card(self):
         self.ipc.clients['0xe'].update(workspace={'id':8,'name':'8'}, floating=True)
-        flow, plan = self.prepare('replace','0xb','workspace:8','0xe','tile')
+        flow, plan = self.prepare('replace','0xb','workspace:8','0xe')
         self.ipc.lost_reply = True; flow.apply(plan)
         self.assertEqual(self.ipc.card['faces'][1], ['0xe','0xc','0xd'])
         self.assertEqual(self.ipc.active, '0xe')

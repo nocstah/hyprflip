@@ -4,6 +4,7 @@ import io
 import json
 import os
 from pathlib import Path
+import re
 import runpy
 import shutil
 import subprocess
@@ -14,6 +15,7 @@ from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parent.parent
+VERSION = re.search(r"project\(hyprflip VERSION ([\d.]+)", (ROOT / "CMakeLists.txt").read_text()).group(1)
 PAIR = {"front": "0xa", "back": "0xb"}
 
 
@@ -59,7 +61,7 @@ class InstallerTest(unittest.TestCase):
             reply = [{"name": "hyprflip"}] if self.loaded else []
         elif args == ["hyprflip", "status"]:
             self.assertTrue(self.loaded)
-            version = "0.1.1" if self.library.read_bytes() == b"new plugin" else "0.1.0"
+            version = VERSION if self.library.read_bytes() == b"new plugin" else "0.1.0"
             reply = {"version": version, "pairs": self.pairs, "containers": self.containers}
         elif args == ["hyprflip", "finish"]:
             reply = "ok: settled"

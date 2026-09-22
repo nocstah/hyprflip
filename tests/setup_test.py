@@ -8,7 +8,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-spec = importlib.util.spec_from_file_location('hyprflip_setup', Path(__file__).resolve().parent.parent / 'scripts/setup.py')
+spec = importlib.util.spec_from_file_location('hyprflip_setup', Path(__file__).resolve().parent.parent / 'scripts/workflow.py')
 setup = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = setup
 spec.loader.exec_module(setup)
@@ -92,7 +92,6 @@ class SetupTest(unittest.TestCase):
                 self.assertEqual(list(flow.prepare('0xa')), expected)
             self.assertIn('third app', picker.prompts[2][0])
             self.assertEqual([c.value for c in picker.prompts[2][1]], ['create', '0xd'])
-            self.assertEqual(picker.prompts[2][1][0].label, 'Only two apps')
             self.assertEqual(ipc.mutations, [])
 
     def test_owned_floating_and_special_workspace_windows_are_excluded(self):
@@ -102,7 +101,7 @@ class SetupTest(unittest.TestCase):
                             '0xf': window('0xf', grouped=['0xf', '0x10']),
                             '0x11': window('0x11', fullscreen=2)})
         ipc.snapshot['containers'] = [{'faces': [['0xb'], ['0xc']]}]
-        with self.assertRaisesRegex(setup.SetupError, 'Open another ungrouped, tiled app'):
+        with self.assertRaisesRegex(setup.SetupError, 'Open another app that is not already in a card or group'):
             setup.Setup(ipc, Picker()).prepare('0xa')
         self.assertEqual(ipc.mutations, [])
 
