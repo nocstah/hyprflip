@@ -40,6 +40,12 @@ shortcuts.bind("SUPER + CTRL + ALT + L", function()
     hl.dispatch(hl.dsp.exec_cmd("python3 " .. shell_quote(helper) .. " --launch"))
 end, { description = "Hyprflip: open saved card" })
 
+shortcuts.unbind("SUPER + CTRL + ALT + K")
+shortcuts.bind("SUPER + CTRL + ALT + K", function()
+    local helper = os.getenv("HOME") .. "/.local/lib/hyprflip/setup.py"
+    hl.dispatch(hl.dsp.exec_cmd("python3 " .. shell_quote(helper) .. " --find"))
+end, { description = "Hyprflip: find an app in cards" })
+
 if hl.plugin.hyprflip and hl.plugin.hyprflip.peek then
     shortcuts.unbind("SUPER + CTRL + ALT + SPACE")
     shortcuts.bind("SUPER + CTRL + ALT + SPACE", function()

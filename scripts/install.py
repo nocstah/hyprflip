@@ -94,9 +94,13 @@ try:
                                     lambda m: m[1] + new, module_content)
     atomic(module, module_content.encode())
     content = main.read_text()
+    bootstrap = (project / "examples/module-path.lua").read_text()
+    if bootstrap.splitlines()[0] not in content:
+        content = bootstrap + "\n" + content
     statement = 'require("hypr.hyprflip")'
     if not any(line.strip() == statement for line in content.splitlines()):
-        atomic(main, (content.rstrip() + "\n\n-- Two-sided application windows.\n" + statement + "\n").encode())
+        content = content.rstrip() + "\n\n-- Two-sided application windows.\n" + statement + "\n"
+    atomic(main, content.encode())
     ctl("reload")
     # Hyprland 0.56 caches the desired config plugin list. A manual unload does
     # not invalidate it, so an unchanged declaration alone won't load it again.

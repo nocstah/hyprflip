@@ -22,7 +22,7 @@ class SetupInstallTest(unittest.TestCase):
         self.root = Path(temporary.name)
         self.project, self.home = self.root / 'project', self.root / 'user'
         for relative in ('scripts/install-setup.py', 'scripts/setup.py', 'scripts/workflow.py',
-                         'scripts/control.py', 'scripts/shortcuts.py', 'examples/shortcuts.lua', 'examples/containers-setup.lua', 'examples/preferences.lua'):
+                         'scripts/control.py', 'scripts/shortcuts.py', 'examples/shortcuts.lua', 'examples/containers-setup.lua', 'examples/preferences.lua', 'examples/module-path.lua', 'examples/mouse.lua'):
             target = self.project / relative
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(ROOT / relative, target)
@@ -34,6 +34,8 @@ class SetupInstallTest(unittest.TestCase):
         self.module = self.config / 'hyprflip-setup.lua'
         self.original = self.main.read_bytes()
         self.calls, self.reloads = [], 0
+        self.available = {'python3', 'hyprctl', 'notify-send', 'gio', 'gdbus', 'omarchy-shell'}
+        self.shell_running = True
         self.fail_reload, self.conflict = False, None
         self.state = {'container_provider': True, 'peek_available': True,
                       'containers': [{'faces': [['0xa'], ['0xb', '0xc']]}], 'pairs': []}
@@ -41,7 +43,7 @@ class SetupInstallTest(unittest.TestCase):
     def run_command(self, command, **kwargs):
         self.calls.append(command)
         if command == ['omarchy-shell', 'shell', 'ping']:
-            reply = 'ok'
+            reply = 'ok' if self.shell_running else 'unavailable'
         else:
             self.assertEqual(command[0], 'hyprctl')
             args = command[1:]
@@ -64,6 +66,12 @@ class SetupInstallTest(unittest.TestCase):
                 if self.module.exists() or self.conflict == 'L':
                     reply.append({'modmask': 76, 'key': 'L', 'description':
                                   'Other action' if self.conflict == 'L' else 'Hyprflip: open saved card'})
+                if self.module.exists() or self.conflict == 'K':
+                    reply.append({'modmask': 76, 'key': 'K', 'description':
+                                  'Other action' if self.conflict == 'K' else 'Hyprflip: find an app in cards'})
+                if (self.config / 'hyprflip-mouse.lua').exists() or self.conflict == 'mouse:274':
+                    reply.append({'modmask': 76, 'key': 'mouse:274', 'description':
+                                  'Other action' if self.conflict == 'mouse:274' else 'Hyprflip: flip focused card with mouse'})
             elif args == ['reload']:
                 self.reloads += 1
                 reply = 'ok'
@@ -76,7 +84,7 @@ class SetupInstallTest(unittest.TestCase):
         with patch.object(Path, 'home', return_value=self.home), \
                 patch.dict(os.environ, {'XDG_CONFIG_HOME': str(self.home / 'config'),
                                         'XDG_STATE_HOME': str(self.home / 'state')}), \
-                patch('shutil.which', side_effect=lambda name: '/usr/bin/' + name), \
+                patch('shutil.which', side_effect=lambda name, **kw: '/usr/bin/' + name if name in self.available else None), \
                 patch('subprocess.run', side_effect=self.run_command), \
                 patch.object(sys, 'argv', ['install-setup.py', *args]), \
                 contextlib.redirect_stdout(io.StringIO()):
@@ -95,13 +103,15 @@ class SetupInstallTest(unittest.TestCase):
             with self.assertRaises(SystemExit) as result: self.install()
             self.assertEqual(result.exception.code, 0)
         self.assertEqual(self.main.read_text().count('require("hypr.hyprflip-setup")'), 1)
-        self.assertTrue(self.main.read_text().startswith(self.original.decode()))
+        bootstrap = (ROOT / 'examples/module-path.lua').read_text()
+        self.assertTrue(self.main.read_text().startswith(bootstrap + '\n' + self.original.decode()))
+        self.assertEqual(self.main.read_text().count(bootstrap), 1)
         self.assertEqual(self.helper.read_bytes(), (ROOT / 'scripts/setup.py').read_bytes())
         self.assertTrue(self.module.exists())
         self.assertFalse(any('plugin' in call or 'mark' in call or 'pair' in call for call in self.calls))
 
     def test_conflict_refuses_before_writing(self):
-        for key in ('O', 'C', 'L', 'SPACE'):
+        for key in ('O', 'C', 'L', 'K', 'SPACE'):
             self.conflict = key
             with self.assertRaisesRegex(SystemExit, 'assigned to another action'): self.install()
             self.assertEqual(self.main.read_bytes(), self.original)
@@ -117,6 +127,40 @@ class SetupInstallTest(unittest.TestCase):
         self.assertTrue((self.helper.parent / 'control.py').is_file())
         self.assertTrue((self.config / 'hyprflip-preferences.lua').is_file())
         self.assertIn('require("hypr.hyprflip-preferences")', self.main.read_text())
+
+    def test_install_without_omarchy_uses_available_picker(self):
+        self.available.remove('omarchy-shell')
+        self.available.add('fuzzel')
+        with self.assertRaises(SystemExit) as result: self.install()
+        self.assertEqual(result.exception.code, 0)
+        self.assertTrue(self.module.exists())
+        self.assertFalse(any(command[0] == 'omarchy-shell' for command in self.calls))
+
+    def test_stopped_shell_falls_back_and_missing_picker_refuses_before_writing(self):
+        self.shell_running = False
+        with self.assertRaisesRegex(SystemExit, 'Install Fuzzel'): self.install()
+        self.assertFalse(self.helper.exists())
+        self.assertEqual(self.reloads, 0)
+        self.available.add('wofi')
+        with self.assertRaises(SystemExit) as result: self.install()
+        self.assertEqual(result.exception.code, 0)
+
+    def test_backend_only_does_not_require_a_shell_or_picker(self):
+        self.available.remove('omarchy-shell')
+        with self.assertRaises(SystemExit) as result: self.install('--backend-only')
+        self.assertEqual(result.exception.code, 0)
+        self.assertFalse(any(command[0] == 'omarchy-shell' for command in self.calls))
+
+    def test_mouse_flip_is_optional_and_checks_conflicts(self):
+        self.conflict = 'mouse:274'
+        with self.assertRaisesRegex(SystemExit, 'assigned to another action'): self.install('--mouse-flip')
+        self.assertEqual(self.main.read_bytes(), self.original)
+        self.conflict = None
+        with self.assertRaises(SystemExit) as result: self.install('--mouse-flip')
+        self.assertEqual(result.exception.code, 0)
+        self.assertIn('require("hypr.hyprflip-mouse")', self.main.read_text())
+        with self.assertRaises(SystemExit): self.install()
+        self.assertIn('require("hypr.hyprflip-mouse")', self.main.read_text())
 
     def test_parse_failure_restores_exact_files_and_removes_new_files(self):
         self.fail_reload = True

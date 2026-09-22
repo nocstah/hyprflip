@@ -25,7 +25,7 @@ class InstallerTest(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
         self.project = self.root / "project"
-        for relative in ("scripts/install.py", "CMakeLists.txt", "examples/hyprflip.lua"):
+        for relative in ("scripts/install.py", "CMakeLists.txt", "examples/hyprflip.lua", "examples/module-path.lua"):
             target = self.project / relative
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(ROOT / relative, target)

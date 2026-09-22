@@ -16,6 +16,7 @@ from pathlib import Path
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 import unicodedata
@@ -28,6 +29,53 @@ class SetupError(RuntimeError):
 
 class Cancelled(Exception):
     pass
+
+
+class MenuUnavailable(SetupError):
+    pass
+
+
+MENU_BACKENDS = ('auto', 'omarchy', 'fuzzel', 'rofi', 'wofi')
+
+
+def menu_preference(env=None):
+    env = os.environ if env is None else env
+    value = env.get('HYPRFLIP_MENU', 'auto').strip().lower() or 'auto'
+    if value not in MENU_BACKENDS:
+        raise SetupError('HYPRFLIP_MENU must be auto, omarchy, fuzzel, rofi or wofi.')
+    return value
+
+
+def omarchy_running(env=None):
+    env = os.environ if env is None else env
+    if not shutil.which('omarchy-shell', path=env.get('PATH', os.defpath)):
+        return False
+    try:
+        result = subprocess.run(['omarchy-shell', 'shell', 'ping'], capture_output=True,
+                                text=True, timeout=2, env=env | {'OMARCHY_SHELL_IPC_TIMEOUT': '1s'})
+        return result.returncode == 0 and result.stdout.strip() == 'ok'
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+def select_menu_backend(env=None, omarchy_available=None):
+    env = os.environ if env is None else env
+    preference = menu_preference(env)
+    if preference in ('auto', 'omarchy'):
+        if omarchy_available is None:
+            omarchy_available = omarchy_running(env)
+        if omarchy_available:
+            return 'omarchy'
+        if preference == 'omarchy':
+            raise MenuUnavailable('The Omarchy shell is unavailable. Start it or use HYPRFLIP_MENU=auto.')
+    candidates = MENU_BACKENDS[2:] if preference == 'auto' else (preference,)
+    for name in candidates:
+        if shutil.which(name, path=env.get('PATH', os.defpath)):
+            return name
+    if preference != 'auto':
+        raise MenuUnavailable(f'{preference.capitalize()} is not installed. Install it or use HYPRFLIP_MENU=auto.')
+    raise MenuUnavailable('No card menu is available. Install Fuzzel, Rofi with Wayland support, or Wofi, '
+                          'then open Hyprflip again. A running Omarchy shell also works.')
 
 
 TRANSITIONS = {
@@ -288,8 +336,9 @@ class Request:
 
 
 class OmarchyMenu:
-    def __init__(self, directory, request):
+    def __init__(self, directory, request, env=None):
         self.directory, self.request, self.serial = directory, request, 0
+        self.env = os.environ if env is None else env
 
     def request_value(self, prompt, rows=(), mode='select'):
         self.request.check()
@@ -298,11 +347,14 @@ class OmarchyMenu:
         done = self.directory / f'{self.serial}.done'
         payload = {'mode': mode, 'prompt': prompt, 'options': list(rows), 'width': 560,
                    'maxHeight': 560, 'selectionFile': str(selection), 'doneFile': str(done)}
-        result = subprocess.run(['omarchy-shell', 'shell', 'summon', 'omarchy.menu', json.dumps(payload)],
-                                capture_output=True, text=True, timeout=8,
-                                env=os.environ | {'OMARCHY_SHELL_IPC_TIMEOUT': os.environ.get('OMARCHY_SHELL_IPC_TIMEOUT', '5s')})
+        try:
+            result = subprocess.run(['omarchy-shell', 'shell', 'summon', 'omarchy.menu', json.dumps(payload)],
+                                    capture_output=True, text=True, timeout=8,
+                                    env=self.env | {'OMARCHY_SHELL_IPC_TIMEOUT': self.env.get('OMARCHY_SHELL_IPC_TIMEOUT', '5s')})
+        except (OSError, subprocess.TimeoutExpired) as error:
+            raise MenuUnavailable('The Omarchy menu is unavailable.') from error
         if result.returncode or result.stdout.strip() != 'ok':
-            raise SetupError('The Omarchy menu is unavailable. Start the shell and try again.')
+            raise MenuUnavailable('The Omarchy menu is unavailable.')
         deadline = time.monotonic() + 300
         while not done.exists():
             self.request.check()
@@ -325,6 +377,218 @@ class OmarchyMenu:
             if selected == choice.label + ('\t' + choice.detail if choice.detail else ''):
                 return choice.value
         raise SetupError('That window selection changed. Open setup again.')
+
+
+class DesktopMenu:
+    """Small dmenu adapters: display plain text, return checked row indices."""
+    def __init__(self, backend, request, env=None):
+        self.backend, self.request = backend, request
+        self.env = os.environ if env is None else env
+
+    def command(self, prompt, selecting):
+        prompt = clean(prompt, 240)
+        if self.backend == 'fuzzel':
+            command = ['fuzzel', '--dmenu', '--no-sort', '--no-icons']
+            return command + (['--prompt', prompt + ': ', '--index', '--only-match'] if selecting
+                              else ['--prompt-only', prompt + ': '])
+        if self.backend == 'rofi':
+            command = ['rofi', '-dmenu', '-i', '-no-sort', '-no-markup-rows', '-no-auto-select',
+                       '-sync', '-p', prompt, '-sep', '\n']
+            return command + (['-format', 'i', '-no-custom'] if selecting else ['-format', 'f'])
+        if self.backend == 'wofi':
+            command = ['wofi', '--dmenu', '--insensitive', '--prompt', prompt, '--cache-file', '/dev/null',
+                       '--define=allow_markup=false', '--define=allow_images=false',
+                       '--define=normal_window=false', '--define=fork=false', '--define=sort_order=default',
+                       '--define=dmenu-parse_action=false', r'--define=dmenu-separator=\n']
+            return command + (['--no-custom-entry', '--define=exec_search=false', '--define=dmenu-print_line_num=true']
+                              if selecting else ['--define=no_custom_entry=false', '--exec-search',
+                                                 '--define=dmenu-print_line_num=false'])
+        raise MenuUnavailable('Choose a supported card menu.')
+
+    def run(self, prompt, rows=None):
+        self.request.check()
+        command = self.command(prompt, rows is not None)
+        data = ''.join(row + '\n' for row in rows) if rows is not None else ''
+        try:
+            process = subprocess.Popen(command, env=self.env, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                       stderr=subprocess.PIPE, text=True)
+        except OSError as error:
+            raise MenuUnavailable(f'Could not open {self.backend.capitalize()}. Check its installation.') from error
+        try:
+            deadline = time.monotonic() + 300
+            while True:
+                self.request.check()
+                if time.monotonic() >= deadline:
+                    raise SetupError('Card selection expired. Open Hyprflip again.')
+                try:
+                    output, errors = process.communicate(input=data, timeout=.1)
+                    break
+                except subprocess.TimeoutExpired:
+                    data = None
+            self.request.check()
+            if process.returncode in (1, 2):
+                raise Cancelled()
+            if process.returncode:
+                raise MenuUnavailable(f'{self.backend.capitalize()} could not open the card menu. '
+                                      + clean(errors, 200))
+            return output.rstrip('\n')
+        finally:
+            if process.poll() is None:
+                process.terminate()
+                try:
+                    process.wait(timeout=1)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait(timeout=1)
+            for stream in (process.stdin, process.stdout, process.stderr):
+                stream.close()
+
+    def choose(self, prompt, choices):
+        if not choices:
+            raise Cancelled()
+        rows = [clean(c.label, 120) + (' — ' + clean(c.detail, 240) if c.detail else '') for c in choices]
+        selected = self.run(prompt, rows)
+        if not re.fullmatch(r'[0-9]{1,8}', selected) or int(selected) >= len(choices):
+            raise SetupError('That selection is no longer available. Open Hyprflip again.')
+        return choices[int(selected)].value
+
+    def input(self, prompt):
+        value = self.run(prompt)
+        if len(value) > 512:
+            raise SetupError('Enter a short card name.')
+        return value
+
+
+class AutoMenu:
+    """Prefer the responding shell; never interpret user cancellation as failure."""
+    def __init__(self, directory, request, env=None, omarchy_available=None):
+        self.directory, self.request = directory, request
+        self.env = os.environ if env is None else env
+        self.backend = select_menu_backend(self.env, omarchy_available)
+        self.frontend = self.make_frontend()
+
+    def make_frontend(self):
+        if self.backend == 'omarchy':
+            return OmarchyMenu(self.directory, self.request, self.env)
+        return DesktopMenu(self.backend, self.request, self.env)
+
+    def call(self, method, *arguments):
+        try:
+            return getattr(self.frontend, method)(*arguments)
+        except MenuUnavailable:
+            if self.backend != 'omarchy' or menu_preference(self.env) != 'auto':
+                raise
+            self.backend = select_menu_backend(self.env, omarchy_available=False)
+            self.frontend = self.make_frontend()
+            return getattr(self.frontend, method)(*arguments)
+
+    def choose(self, prompt, choices):
+        return self.call('choose', prompt, choices)
+
+    def input(self, prompt):
+        return self.call('input', prompt)
+
+    def opening(self, name, labels):
+        return Opening(name, labels, self.env,
+                       app_name='omarchy-action' if self.backend == 'omarchy' else 'Hyprflip')
+
+
+@dataclass(frozen=True)
+class FindPlan:
+    kind: str
+    ident: int
+    faces: list
+    windows: dict
+    address: str
+
+
+class Find:
+    """Reveal a selected live app without rebuilding or relocating its card."""
+    def __init__(self, ipc, menu):
+        self.ipc, self.menu = ipc, menu
+
+    @staticmethod
+    def cards(state):
+        for card in state.get('containers', []):
+            yield 'containers', card
+        for pair in state.get('pairs', []):
+            yield 'pairs', pair | {'faces': [[pair['front']], [pair['back']]],
+                                  'active': int(pair['current'] == pair['back']), 'unfolded': False}
+
+    def prepare(self):
+        windows, state = self.ipc.windows(), self.ipc.status()
+        workspace = self.ipc.data('-j', 'activeworkspace')['id']
+        targets = {}
+        for kind, card in self.cards(state):
+            members = {a: windows[a] for face in card['faces'] for a in face if a in windows}
+            if len(members) != sum(map(len, card['faces'])): continue
+            for index, face in enumerate(card['faces']):
+                for address in face:
+                    window = windows[address]
+                    if not window.get('mapped', True) or window['workspace']['id'] < 1: continue
+                    targets[address] = (kind, card, members, index)
+        if not targets:
+            raise SetupError('No cards are open. Open a saved card or create one first.')
+        ordered = sorted(targets, key=lambda a: (windows[a]['workspace']['id'] != workspace,
+                         windows[a]['workspace']['id'], app_name(windows[a]).casefold(),
+                         windows[a].get('focusHistoryID', 1_000_000)))
+        choices = []
+        for choice in window_choices([windows[a] for a in ordered]):
+            _, card, _, side = targets[choice.value]
+            visible = card.get('unfolded') or card['active'] == side
+            detail = (f'Workspace {workspace_name(windows[choice.value])} · '
+                      + ('Front' if side == 0 else 'Back') + (' · Visible' if visible else ' · Hidden')
+                      + ' · ' + choice.detail)
+            choices.append(Choice(choice.value, choice.label, detail))
+        address = self.menu.choose('Find an app in your cards', choices)
+        if address not in targets:
+            raise SetupError('That app is no longer available. Open Find app again.')
+        kind, card, members, _ = targets[address]
+        return FindPlan(kind, card['id'], deepcopy(card['faces']), deepcopy(members), address)
+
+    def check(self, plan):
+        request = getattr(self.menu, 'request', None)
+        if request: request.check()
+        windows, state = self.ipc.windows(), self.ipc.status()
+        card = next((c for kind, c in self.cards(state) if kind == plan.kind and c['id'] == plan.ident), None)
+        if not card or card['faces'] != plan.faces:
+            raise SetupError('That card changed. Open Find app again.')
+        for address, original in plan.windows.items():
+            current = windows.get(address)
+            if (not current or not current.get('mapped', True)
+                    or any(current.get(k) != original.get(k) for k in ('pid', 'class', 'initialClass', 'workspace'))):
+                raise SetupError('An app closed or moved. Open Find app again.')
+        workspace = plan.windows[plan.address]['workspace']['id']
+        if any(w.get('fullscreen') and w['workspace']['id'] == workspace for w in windows.values()):
+            raise SetupError('Leave fullscreen on the card’s workspace, then use Find app again.')
+        return card, state
+
+    def settled(self, plan):
+        deadline = time.monotonic() + 8
+        while True:
+            card, state = self.check(plan)
+            if not state.get('animating'): return card
+            if time.monotonic() >= deadline:
+                raise SetupError('The turn has not finished. Return to the card and try again.')
+            time.sleep(.04)
+
+    def apply(self, plan):
+        request = getattr(self.menu, 'request', None)
+        exclusive = request.exclusive if request else nullcontext
+        self.settled(plan)
+        side = next(i for i, face in enumerate(plan.faces) if plan.address in face)
+        with exclusive():
+            card, state = self.check(plan)
+            if state.get('animating'):
+                raise SetupError('Another turn started. Open Find app again.')
+            if not card.get('unfolded') and card['active'] != side:
+                self.ipc.focused((card['current'], 'flip'))
+        card = self.settled(plan)
+        with exclusive():
+            card, state = self.check(plan)
+            if state.get('animating') or (not card.get('unfolded') and card['active'] != side):
+                raise SetupError('The visible side changed. Open Find app again.')
+            self.ipc.focus(plan.address)
 
 
 class Setup:
@@ -971,30 +1235,30 @@ class DesktopApps:
 
 class Opening:
     """Cancellable native notification, closed by ID without touching another menu."""
-    def __init__(self, name, labels, env):
+    def __init__(self, name, labels, env, app_name='Hyprflip'):
         self.name, self.labels, self.env = name, labels, env
+        self.app_name = app_name
 
     def __enter__(self):
         self.directory = tempfile.TemporaryDirectory(prefix='hyprflip-opening-')
         root = Path(self.directory.name)
-        self.id, self.answer = root / 'id', root / 'answer'
-        with self.id.open('w') as identifier, self.answer.open('w') as answer:
+        self.answer = root / 'answer'
+        with self.answer.open('w') as answer:
             # Omarchy uses this sender for feedback to an explicit user action,
             # so its cancel control stays visible even while chat alerts are silenced.
-            self.process = subprocess.Popen(['notify-send', '--app-name=omarchy-action', '--transient',
-                '--expire-time=22000', '--wait', '--action=default=Cancel', '--id-fd', str(identifier.fileno()),
-                '--selected-action-fd', str(answer.fileno()), f'Opening “{self.name}”…',
+            self.process = subprocess.Popen(['notify-send', '--app-name=' + self.app_name, '--transient',
+                '--expire-time=22000', '--wait', '--print-id', '--action=default=Cancel', f'Opening “{self.name}”…',
                 'Waiting for ' + html.escape(', '.join(self.labels)) + '. Click to cancel; opened apps stay open.'],
-                env=self.env, pass_fds=(identifier.fileno(), answer.fileno()),
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                env=self.env, stdout=answer, stderr=subprocess.DEVNULL)
         return self
 
     def check(self):
-        if self.answer.read_text().strip() == 'default': raise Cancelled()
+        if 'default' in self.answer.read_text().splitlines(): raise Cancelled()
 
     def __exit__(self, *_):
         try:
-            identifier = self.id.read_text().strip()
+            lines = self.answer.read_text().splitlines()
+            identifier = lines[0] if lines else ''
             if identifier.isdecimal():
                 subprocess.run(['gdbus', 'call', '--session', '--dest', 'org.freedesktop.Notifications',
                     '--object-path', '/org/freedesktop/Notifications', '--method',
@@ -1740,24 +2004,48 @@ class Saved(Setup):
         return f'Restored “{plan.name}”.'
 
 
-def main():
+def notify(message):
+    """Feedback must not turn a completed card action into a failed operation."""
+    try:
+        result = subprocess.run(['notify-send', '--app-name=Hyprflip', 'Hyprflip', message],
+                                capture_output=True, timeout=3, check=False)
+        if result.returncode == 0:
+            return
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    try:
+        subprocess.run(['hyprctl', 'notify', '-1', '6000', 'rgb(dddddd)', 'Hyprflip: ' + clean(message, 512)],
+                       capture_output=True, timeout=3, check=False)
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+
+
+def main(omarchy_available=None):
     parser = argparse.ArgumentParser(description=__doc__)
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument('--front', help='Create a card from this window address')
     mode.add_argument('--edit', help='Edit the side containing this window address')
     mode.add_argument('--cards', action='store_true', help='Open the card menu, including saved cards on an empty workspace')
     mode.add_argument('--launch', action='store_true', help='Search saved cards and open or switch to one directly')
+    mode.add_argument('--find', action='store_true', help='Find an open app on either face of any card')
+    mode.add_argument('--check-menu', action='store_true', help='Print the detected menu backend without opening it')
     args = parser.parse_args()
     request = None
     try:
+        if args.check_menu:
+            print(select_menu_backend(omarchy_available=omarchy_available))
+            return 0
         ipc = Hyprctl()
         front = args.front or args.edit or ipc.data('-j', 'activewindow').get('address')
         runtime = Path(os.environ['XDG_RUNTIME_DIR'])
         request = Request(runtime, os.environ['HYPRLAND_INSTANCE_SIGNATURE'])
         request.start()
         with tempfile.TemporaryDirectory(prefix='hyprflip-setup-', dir=runtime) as directory:
-            menu = OmarchyMenu(Path(directory), request)
-            if args.launch:
+            menu = AutoMenu(Path(directory), request, omarchy_available=omarchy_available)
+            if args.find:
+                flow = Find(ipc, menu)
+                selected = flow.prepare()
+            elif args.launch:
                 flow = Saved(ipc, menu)
                 selected = flow.prepare_restore()
             elif args.cards and not any(front in f for c in ipc.status().get('containers', []) for f in c['faces']):
@@ -1771,19 +2059,20 @@ def main():
                 selected = flow.prepare(args.edit or front)
             # Launch waits must not hold the request lock: opening C again can
             # supersede them. apply_open locks only launch and commit sections.
-            opening = isinstance(selected, SavedPlan) and selected.action in ('open', 'repair')
+            opening = isinstance(flow, Find) or isinstance(selected, SavedPlan) and selected.action in ('open', 'repair')
             with nullcontext() if opening else request.exclusive():
                 request.check()
                 message = flow.apply(selected)
                 if message:
-                    subprocess.run(['notify-send', '--app-name=Hyprflip', 'Hyprflip', message], check=False)
+                    notify(message)
         return 0
     except Cancelled:
         return 0
     except (SetupError, OSError, KeyError, subprocess.TimeoutExpired) as error:
         message = str(error)
-        subprocess.run(['notify-send', '--app-name=Hyprflip', 'Hyprflip', message], check=False)
-        print(message)
+        if not args.check_menu:
+            notify(message)
+        print(message, file=sys.stderr)
         return 1
     finally:
         if request:

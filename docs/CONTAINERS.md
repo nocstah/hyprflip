@@ -5,7 +5,7 @@ two-window backend remains available. The regular installer does not enable this
 provider or change workspace layouts.
 
 For a first installation, follow the [installation guide](INSTALL.md#experimental-multi-app-cards),
-including provider activation and optional Omarchy menus. This document covers
+including provider activation and optional guided menus. This document covers
 container behavior, direct commands and compositor acceptance checks.
 
 ## Goal
@@ -147,7 +147,7 @@ before unfolding or moving a card.
 
 ## Guided creation from O
 
-For an enabled container trial on Omarchy 4, install the optional picker:
+For an enabled container trial, install the optional guided picker:
 
 ```sh
 python scripts/install-setup.py --dry-run
@@ -157,11 +157,11 @@ python scripts/install-setup.py
 This adds a small Python helper and
 [`examples/containers-setup.lua`](../examples/containers-setup.lua), loaded after
 the other Hyprflip bindings. It backs up affected files and installs
-**Super+Ctrl+Alt+O/C/L/Space** for guided creation, editing, saved-card launching
-and hold-to-peek. No compositor library is replaced or unloaded.
+**Super+Ctrl+Alt+O/C/L/K/Space** for guided creation, editing, saved-card launching
+finding open card apps and hold-to-peek. No compositor library is replaced or unloaded.
 
 - On an existing card, **O** still unfolds or folds immediately.
-- On an ungrouped app, **O** opens Omarchy's searchable menu. The focused
+- On an ungrouped app, **O** opens the automatically detected searchable menu. The focused
   app becomes the front. Choose an app for the back, then choose **Create card**
   or **Add [app name]** for a second app. After choosing a second app,
   choose **Create card** or add a third. When only one other window is
@@ -196,10 +196,11 @@ For apps managed by Omachill, install the optional
 [Chill integration](TRANSITIONS.md#chill-mode) so Auto Chill respects cards.
 An older core keeps the original tiled-only picker behavior.
 
-The picker uses the running Omarchy menu, including its current theme, filtering,
-arrow keys and Return. It requires Python 3, `omarchy-shell`, `notify-send` and
-GLib's `gio`/`gdbus` tools for saved-card launching and its cancellable notification.
-Other desktops can continue using mark/pair/attach. This is guided creation;
+The picker prefers the running Omarchy menu and otherwise detects Fuzzel, Rofi
+with Wayland support, or Wofi. All support filtering, arrow keys, Return and
+Escape. It requires Python 3, `notify-send` and GLib's `gio`/`gdbus` tools for
+saved-card launching and its cancellable notification. See
+[dependencies and backend overrides](INSTALL.md#add-the-guided-menus). This is guided creation;
 live card identities do not survive compositor restarts. The optional
 [saved-card menu](SAVED_CARDS.md) recreates named arrangements, reuses open apps
 and launches missing ones, including their split directions and proportions.
@@ -371,7 +372,7 @@ into visible splits; the experimental updater reconstructs them explicitly.
   hide the native group bar. Popups do not rotate;
   unsuitable rendering conditions switch instantly.
 - The compositor does not restore sessions at login or add individual-pane
-  capture semantics. The optional Omarchy helper handles saved cards and explicit
+  capture semantics. The optional guided helper handles saved cards and explicit
   missing-app launching separately.
 - This is an optional development experiment. The native installation keeps
   its existing layout unless you explicitly enable the provider and its rules.

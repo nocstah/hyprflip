@@ -1,6 +1,7 @@
 # Saved cards and hold to peek
 
-The optional Omarchy card menu now saves arrangements for later reuse. A card
+The optional guided card menu saves arrangements for later reuse. It prefers
+Omarchy’s running shell and automatically falls back to Fuzzel, Rofi or Wofi. A card
 still has two faces, with one to three apps in a row or column on each face.
 
 ## Save and open

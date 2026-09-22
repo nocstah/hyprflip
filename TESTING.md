@@ -1,5 +1,54 @@
 # Validation
 
+## Portable helpers and app finder (2026-09-22)
+
+Validated with Hyprland 0.56.2 in a disposable compositor with plain Lua
+configuration, private helper/config/state paths and a private D-Bus session.
+The host runs Omarchy; this is isolation evidence, not a fresh-distribution or
+other-Hyprland-version compatibility claim. No renderer or provider code changed.
+
+- **168 Python tests** pass, including backend detection, picker subprocess
+  cancellation, stale app identity, native/container reveal, shortcut conflicts,
+  installation and rollback.
+- **Fuzzel 1.15.0, Rofi 2.0.0 and Wofi 1.5.3** pass real Wayland keyboard
+  selection, free-text card naming and Escape cancellation. A stopped shell
+  automatically selects Fuzzel. Pickers were unpacked under `/tmp` for these
+  checks; no system packages were installed.
+- A private freedesktop notification service verifies early notification-ID
+  delivery, closing only the progress notification and the standard Cancel action.
+- The helper installer successfully imports its modules without Omarchy's Lua
+  bootstrap, registers the new bindings and preserves an existing three-app card.
+  Real Fuzzel menus create and save the card; after all three sample apps close,
+  saved opening launches fresh windows with one front app and two back apps.
+- Find reveals the exact hidden pane, navigates from another workspace without
+  moving the card, preserves unfolded/floating cards, and works with native pairs.
+- Actual virtual-pointer input verifies that ordinary middle-click is untouched,
+  modified middle-click flips once on release, and a drag beyond the configured
+  threshold does not flip.
+
+Reproduce the portable UI checks with Fuzzel, Rofi, Wofi, foot and wtype installed:
+
+```sh
+python3 -m unittest discover -s tests -p '*_test.py'
+python3 tests/nested_session.py --directory /tmp/hf-port --containers
+# In another terminal, with the disposable session still running:
+XDG_RUNTIME_DIR=/tmp/hf-port/runtime dbus-run-session -- \
+  python3 tests/menu_workflows.py /tmp/hf-port/session.json --picker-bin /usr/bin
+XDG_RUNTIME_DIR=/tmp/hf-port/runtime dbus-run-session -- \
+  python3 tests/portable_workflows.py /tmp/hf-port/session.json --picker-bin /usr/bin
+python3 tests/notification_workflows.py
+```
+
+The portable workflow check closes and reopens only the disposable demo's three
+sample apps. Use a fresh demo for each run. The notification fixture additionally
+requires Python GObject (`python-gobject` on Arch); the production helper does not.
+
+The helpers were then installed on the live desktop with a backup at
+`~/.local/state/hyprflip/guided-setup-20260922-174900-660381/`. K and the optional
+mouse shortcut register once, configuration errors are empty, and the exact
+card state, plugin handles, compositor-library hashes and saved-card file hash
+match the pre-installation snapshot.
+
 ## Pane reordering and replacement (2026-09-21)
 
 C → Layout adds a direct two-app swap and directional three-app reordering.

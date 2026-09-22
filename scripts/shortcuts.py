@@ -14,6 +14,7 @@ DEFINITIONS = (
     ('create', 'Create, unfold or fold', 'O', 'unfold, fold or create a card'),
     ('edit', 'Edit card', 'C', 'edit card'),
     ('library', 'Open saved cards', 'L', 'open saved card'),
+    ('find', 'Find an app in cards', 'K', 'find an app in cards'),
     ('peek', 'Hold to peek', 'space', 'hold to peek at the other side'),
     ('unpair', 'Ungroup card', 'U', 'separate windows'),
     ('mark', 'Mark first app', 'M', 'mark first side'),

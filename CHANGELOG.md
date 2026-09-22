@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- Run guided creation, editing and saved-card workflows without Omarchy. Prefer
+  its responding shell; otherwise detect Fuzzel, Rofi or Wofi, with an explicit
+  override and clear feedback when no picker is installed.
+- Make Lua module imports work in plain Hyprland and use portable notification
+  flags for saved-card launch progress and cancellation.
+- Find apps across open cards with Super+Ctrl+Alt+K: show the workspace and face,
+  reveal hidden panes, and focus the exact app without changing membership.
+- Offer an optional Super+Ctrl+Alt+middle-click flip binding through
+  `install-setup.py --mouse-flip`; existing drag bindings remain available.
+
 ## 0.2.0 — 2026-09-22
 
 Two-face workflows and the first public [OmaCards](https://github.com/nocstah/omacards)

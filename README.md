@@ -20,7 +20,8 @@ Actual desktop footage. The multi-app card in the video uses the optional
 
 **Early release:** targets **Hyprland 0.56.2**, with matching development headers
 and compiler ABI. The core is a native C++/GLES plugin. Multi-app cards use a
-separately built, pinned hy3 provider; the guided menus use **Omarchy 4**.
+separately built, pinned hy3 provider. **Omarchy is optional:** menus prefer its
+running shell, then automatically fall back to **Fuzzel, Rofi or Wofi**.
 
 ## Features
 
@@ -39,6 +40,8 @@ separately built, pinned hy3 provider; the guided menus use **Omarchy 4**.
 | **Workspace destinations** | Assign a saved card to a workspace. Opening it brings the whole card there, including an existing open card. |
 | **Floating cards** | Float a multi-app card, then move or resize it from any visible pane. Both faces stay together. |
 | **Launch and repair** | Reuse open apps, launch missing apps through installed launchers, or reopen missing panes in a surviving saved card. |
+| **Find hidden apps** | Search apps across open cards; reveal the right face and focus the exact pane, even on another workspace. |
+| **Optional mouse flip** | Super+Ctrl+Alt+middle-click turns the focused card on release. |
 | **Card library** | Search, open, update, rename, duplicate and delete saved definitions. An already-open card is focused without duplication. |
 | **Move the whole card** | Optional navigation bindings move every member to another workspace or reorder the card beside neighboring tiles. |
 | **Seven transitions** | Flip, Vertical flip, Slide, Fade, Dissolve, Portal and Instant, with preview and a saved preference. |
@@ -53,7 +56,7 @@ separately built, pinned hy3 provider; the guided menus use **Omarchy 4**.
 | Floating windows | A pair can be floating | Whole multi-app cards can float, move and resize together |
 | Flip, transitions and peek | Yes; custom binding for peek | Yes |
 | Unfold, pane editing and whole-card navigation | — | Yes |
-| Guided menus and saved-card library | — | Optional Omarchy 4 helper |
+| Guided menus and saved-card library | — | Optional helper: Omarchy shell, Fuzzel, Rofi or Wofi |
 | Installation | Supplied core installer or hyprpm | Core + matching provider + optional helper |
 
 The default installer and hyprpm install **native pairs**. Follow the
@@ -107,9 +110,25 @@ This demo needs `foot` and a running Wayland session. Click inside it and use
 **demo-only** shortcuts.
 
 Then follow **[first-time container activation](docs/INSTALL.md#first-time-activation)**
-to install the provider, enable workspace 8 and add the Omarchy menus. The guide
+to install the provider, enable workspace 8 and add the guided menus. The guide
 also covers all-workspace operation, navigation bindings, upgrades and removal.
 Building alone does not install or load either library.
+
+### Without Omarchy
+
+Install the same core, provider and guided helper. The helper checks for a
+responding Omarchy shell each time it opens; when unavailable it uses the first
+installed picker in this order: **Fuzzel → Rofi with Wayland support → Wofi**.
+No separate card database or compositor build is needed. Install one picker,
+Python 3, libnotify and GLib; a notification daemon enables launch progress and
+its Cancel action. OmaCards itself remains an optional Omarchy-only panel.
+
+```sh
+python3 scripts/setup.py --check-menu
+HYPRFLIP_MENU=rofi python3 scripts/setup.py --cards
+```
+
+See [menu detection, dependencies and overrides](docs/INSTALL.md#add-the-guided-menus).
 
 ## Make your first card
 
@@ -189,11 +208,16 @@ Hold **Super + Ctrl + Alt** for the following keys:
 | **U** | Ungroup the card; keep its apps open | Core bindings |
 | **Escape** | Cancel a pending mark | Core bindings |
 | **O** | Unfold/fold; on an ungrouped app, open guided creation | Containers; helper for creation |
-| **C** | Edit a card, choose transitions or manage saved cards | Omarchy helper |
-| **L** | Search and open saved cards | Omarchy helper |
+| **C** | Edit a card, choose transitions or manage saved cards | Guided helper |
+| **L** | Search and open saved cards | Guided helper |
+| **K** | Find an app on either face of any open card | Guided helper |
 | **Space**, held | Peek at the other side; release to return | Helper binding, or a custom core binding |
 | **H** / **V** | Attach a marked app beside / below the focused pane | Container bindings |
 | **E** | Release the focused pane | Container bindings |
+
+Use **K** when you remember the app, and **L** when you want a saved arrangement.
+Results in K show the workspace, face and whether the app is hidden.
+[Optional mouse flip and standalone commands](docs/FIND_APPS.md).
 
 Optional [navigation bindings](docs/INSTALL.md#move-cards-with-normal-shortcuts):
 
@@ -285,11 +309,13 @@ CI alone does not establish compositor or GPU compatibility.
 - [Install, update, troubleshoot and remove](docs/INSTALL.md)
 - [Container behavior, direct commands and Lua API](docs/CONTAINERS.md)
 - [Saved cards, launchers and hold to peek](docs/SAVED_CARDS.md)
+- [Find hidden apps and optional mouse flip](docs/FIND_APPS.md)
 - [Transitions and Chill compatibility](docs/TRANSITIONS.md)
 - [Validation and test commands](TESTING.md)
 - [Roadmap](docs/ROADMAP.md) — gestures and other future ideas
 - [Architecture and prior art](docs/DESIGN.md) — Compiz, Project Looking Glass
   and Apple Dashboard
+- [Lessons from WinMux](docs/WINMUX_RESEARCH.md)
 - [Contributing](CONTRIBUTING.md) · [Issues](https://github.com/nocstah/hyprflip/issues)
 
 The core is [MIT licensed](LICENSE). The optional hy3 bridge is

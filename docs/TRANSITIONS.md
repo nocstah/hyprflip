@@ -6,8 +6,9 @@ effect must not change membership, focus rules or the application's resting look
 
 Offer Flip, Vertical flip, Slide, Fade, Dissolve, Portal and Instant through the
 existing card menu, with a reversible preview before saving a global preference.
-Flip remains the default. Respect disabled Hyprland animations. Keep the native
-Omarchy menu and theme; no additional keybinding or shader plugin is required.
+Flip remains the default. Respect disabled Hyprland animations. Use the detected
+menu and its theme: Omarchy shell by default, then Fuzzel, Rofi or Wofi when
+unavailable. No additional keybinding or shader plugin is required.
 
 Flip and Vertical flip transform live panes. The other effects compose snapshots
 of both faces for the short transition, then release them. Capture once per turn,

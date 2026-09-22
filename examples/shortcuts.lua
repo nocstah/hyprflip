@@ -4,6 +4,7 @@ local names = {
     ["turn window over"]="flip", ["unfold, fold or create a card"]="create",
     ["unfold or fold both faces"]="create", ["edit card"]="edit",
     ["open saved card"]="library", ["hold to peek at the other side"]="peek",
+    ["find an app in cards"]="find",
     ["separate windows"]="unpair", ["mark first side"]="mark",
     ["attach second side"]="pair", ["attach pane beside"]="attach_h",
     ["attach pane below"]="attach_v", ["release focused pane"]="release",

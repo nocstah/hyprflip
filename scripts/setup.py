@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Open OmaCards when enabled, with the original menus as a fallback."""
+"""Prefer OmaCards when enabled; otherwise use the detected card menu."""
 import os
 import subprocess
 import sys
 
-from workflow import main as menu_main
+from workflow import main as menu_main, omarchy_running
 
 
 def main():
@@ -13,7 +13,10 @@ def main():
         sys.argv.remove('--legacy')
         return menu_main()
     page = 'edit' if arguments == ['--cards'] else 'library' if arguments == ['--launch'] else None
-    if page:
+    if page and os.environ.get('HYPRFLIP_MENU', 'auto').strip().lower() in ('', 'auto'):
+        available = omarchy_running()
+        if not available:
+            return menu_main(omarchy_available=False)
         try:
             result = subprocess.run(['omarchy-shell', 'omacards', 'open', page], capture_output=True,
                                     text=True, timeout=3, env=os.environ | {'OMARCHY_SHELL_IPC_TIMEOUT': '2s'})
@@ -21,6 +24,7 @@ def main():
                 return 0
         except (OSError, subprocess.TimeoutExpired):
             pass
+        return menu_main(omarchy_available=True)
     return menu_main()
 
 

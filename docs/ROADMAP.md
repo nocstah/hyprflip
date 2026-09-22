@@ -16,7 +16,7 @@ another kind of group or requiring users to manage a layout tree.
   retain their proportions. Applications remain live and usable throughout.
 - An explicit experimental updater restores cards after replacing both libraries
   and rolls back a failed load. The native installer refuses active containers.
-- Optional Omarchy guided setup makes O create a card when the focused window
+- Optional guided setup makes O create a card when the focused window
   has none. Choose one to three back apps in the native menu; cancellation leaves
   the windows unchanged. Creation finishes folded onto the front. Existing cards
   keep immediate unfold/fold behavior.
@@ -24,7 +24,7 @@ another kind of group or requiring users to manage a layout tree.
   reversed. The core requests subsequent render frames using the monitor from
   the frame event. Ordinary turns retain the 420 ms default; no shader plugin
   or global animation preset is required.
-- Edit card uses the same Omarchy picker to add an app to the focused side or
+- Edit card uses the same detected picker to add an app to the focused side or
   release any app. Local choices precede workspace submenus; choosing a remote
   app moves it here, with workspace recovery after a refused attachment. C opens
   editing, while O keeps unfold/fold. A full
@@ -75,6 +75,11 @@ another kind of group or requiring users to manage a layout tree.
   motion and keyboard settings through an Omarchy bar panel. Both interfaces use
   one workflow backend and saved library. Shortcut recording inhibits compositor
   shortcuts temporarily; saved bindings survive configuration reloads.
+
+- Guided workflows prefer Omarchy and automatically fall back to Fuzzel, Rofi
+  or Wofi. The compositor plugin itself has no Omarchy dependency.
+- Find an open app on either face with Super+Ctrl+Alt+K, including cards on other
+  workspaces. Optional modifier + middle-click flips the focused card.
 
 ## Before a wider container preview
 
