@@ -1,4 +1,5 @@
 #include "FloatingCards.hpp"
+#include "SplitLayout.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -122,19 +123,62 @@ struct Card {
     bool preferVerticalUnfold() const {
         bool rows = false, columns = false;
         for (unsigned side = 0; side < 2; ++side)
-            if (faces[side].size() >= 3) (vertical[side] ? columns : rows) = true;
+            if (faces[side].size() >= 3)
+                (vertical[side] ? columns : rows) = true;
         return rows && !columns;
+    }
+    struct FaceLimits {
+        Vector2D minimum{1, 1};
+        Vector2D maximum{1e9, 1e9};
+    };
+    std::array<FaceLimits, 2> faceLimits() const {
+        std::array<FaceLimits, 2> limits;
+        for (unsigned s = 0; s < 2; ++s) {
+            for (unsigned i = 0; i < faces[s].size(); ++i) {
+                if (!faces[s][i])
+                    continue;
+                const double border = 2. * faces[s][i]->getRealBorderSize();
+                auto min = faces[s][i]->minSize().value_or(Vector2D{40, 40}) + Vector2D{border, border};
+                auto max = faces[s][i]->maxSize().value_or(Vector2D{1e9, 1e9}) + Vector2D{border, border};
+                if (vertical[s]) {
+                    min.y /= ratios[s][i];
+                    max.y /= ratios[s][i];
+                } else {
+                    min.x /= ratios[s][i];
+                    max.x /= ratios[s][i];
+                }
+                limits[s].minimum.x = std::max(limits[s].minimum.x, min.x);
+                limits[s].minimum.y = std::max(limits[s].minimum.y, min.y);
+                limits[s].maximum.x = std::min(limits[s].maximum.x, max.x);
+                limits[s].maximum.y = std::min(limits[s].maximum.y, max.y);
+            }
+            const double gaps = gap(vertical[s]) * (faces[s].size() - 1);
+            (vertical[s] ? limits[s].minimum.y : limits[s].minimum.x) += gaps;
+            (vertical[s] ? limits[s].maximum.y : limits[s].maximum.x) += gaps;
+        }
+        return limits;
     }
     CBox faceBox(CBox box, unsigned s) const {
         box.y += header;
         box.h = std::max(1., box.h - header);
         if (unfolded) {
+            const auto limits = faceLimits();
+            const double gutter = gap(unfoldVertical);
+            const double available = std::max(1., (unfoldVertical ? box.h : box.w) - gutter);
+            const auto range = [&](unsigned side) {
+                return ExtentRange{unfoldVertical ? limits[side].minimum.y : limits[side].minimum.x,
+                                   unfoldVertical ? limits[side].maximum.y : limits[side].maximum.x};
+            };
+            const double first = balancedSplit(available, range(0), range(1)).value_or(available / 2);
+            const double extent = s == 0 ? first : available - first;
             if (unfoldVertical) {
-                box.h = std::max(1., (box.h - gap(true)) / 2);
-                box.y += s * (box.h + gap(true));
+                box.h = extent;
+                if (s)
+                    box.y += first + gutter;
             } else {
-                box.w = std::max(1., (box.w - gap(false)) / 2);
-                box.x += s * (box.w + gap(false));
+                box.w = extent;
+                if (s)
+                    box.x += first + gutter;
             }
         }
         return box;
@@ -157,22 +201,13 @@ struct Card {
         return box;
     }
     Vector2D minimum() const {
-        std::array<Vector2D, 2> sizes{};
-        for (unsigned s = 0; s < 2; ++s) {
-            for (unsigned i = 0; i < faces[s].size(); ++i) {
-                if (!faces[s][i])
-                    continue;
-                auto min = faces[s][i]->minSize().value_or(Vector2D{40, 40});
-                const auto border = faces[s][i]->getRealBorderSize();
-                min += Vector2D{2. * border, 2. * border};
-                sizes[s].x = std::max(sizes[s].x, vertical[s] ? min.x : min.x / ratios[s][i]);
-                sizes[s].y = std::max(sizes[s].y, vertical[s] ? min.y / ratios[s][i] : min.y);
-            }
-            (vertical[s] ? sizes[s].y : sizes[s].x) += gap(vertical[s]) * (faces[s].size() - 1);
-        }
-        const double width = std::max(sizes[0].x, sizes[1].x), height = std::max(sizes[0].y, sizes[1].y);
-        return {unfolded && !unfoldVertical ? 2 * width + gap(false) : width,
-                (unfolded && unfoldVertical ? 2 * height + gap(true) : height) + header};
+        const auto limits = faceLimits();
+        const auto first = limits[0].minimum, second = limits[1].minimum;
+        return {unfolded && !unfoldVertical ? std::ceil(first.x) + std::ceil(second.x) + gap(false)
+                                            : std::max(first.x, second.x),
+                (unfolded && unfoldVertical ? std::ceil(first.y) + std::ceil(second.y) + gap(true)
+                                            : std::max(first.y, second.y)) +
+                    header};
     }
     bool fits(CBox box) const {
         for (unsigned s = 0; s < 2; ++s)

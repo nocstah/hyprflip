@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.3.0-rc.2 — 2026-09-23
+
+- Let native dwindle and floating cards allocate unequal space to unfolded
+  faces according to application minimum and maximum sizes. Keep balanced
+  faces when they fit, try both directions, and retain the saved pane layouts.
+  Gmail / WhatsApp + Telegram now unfolds in the existing 1440×900 laptop tile.
+- Add real GTK regressions at 1440×900 and 1280×800, with Classic and Card frame
+  appearance, exact fold restoration and refusal when neither direction fits.
+- Validate the published installers with a fresh home, stock Omarchy 4.0.4
+  configuration and real shell menus: no hy3, no shortcut conflicts, and a
+  saved three-app card cold-launches correctly. This uses existing host
+  packages; a fresh OS install and independent-user beta remain outstanding.
+- Add a reproducible isolated installer test, beta checklist and invitation
+  draft for default-dwindle users.
+
 ## 0.3.0-rc.1 — 2026-09-23
 
 Preview release for Hyprland 0.56.2, focused on Omarchy's default dwindle layout.

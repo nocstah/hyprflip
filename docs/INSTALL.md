@@ -47,7 +47,7 @@ git clone https://github.com/nocstah/hyprflip.git
 cd hyprflip
 ```
 
-## Native pairs with the supplied installer
+## Core installation with the supplied installer
 
 This is also the core-installation step for a **first-time** container setup.
 Use a terminal inside the intended Hyprland session:
@@ -98,6 +98,11 @@ ungrouped app, press **Super+Ctrl+Alt+O**, and choose apps for the back.
 **C** edits the card, **L** opens saved cards, and **O** unfolds or folds it.
 All these keys use Super+Ctrl+Alt. Up to five apps fit on each face, subject
 to application size limits. The same helper also serves OmaCards.
+
+Unfolding keeps the two faces balanced when possible, but gives a face more
+room when its apps require it. This preserves your layouts within each face.
+If neither side-by-side nor stacked faces fit, the card stays folded.
+See the [beta checklist](BETA.md) for a short default-Omarchy trial.
 
 The core manages one native outer group, while dwindle places that group as
 one tile. This path needs no hy3 build, provider loading or workspace-layout

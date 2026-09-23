@@ -1,3 +1,4 @@
+#include "SplitLayout.hpp"
 #include "Timeline.hpp"
 #include <cstdlib>
 #include <iostream>
@@ -11,6 +12,13 @@ static void require(bool condition, const char *message) {
 
 int main() {
     using namespace Hyprflip;
+    require(balancedSplit(840, {200, 2000}, {200, 2000}) == 420, "unfold keeps balanced faces when both fit");
+    require(balancedSplit(840, {200, 2000}, {530, 2000}) == 310, "a tall back face gets enough room on a laptop");
+    require(balancedSplit(1400, {860, 2000}, {450, 2000}) == 860, "a wide front face keeps its minimum width");
+    require(balancedSplit(840, {200, 300}, {200, 2000}) == 300, "unfold respects a face maximum size");
+    require(!balancedSplit(840, {420, 2000}, {430, 2000}), "unfold refuses when the combined minima cannot fit");
+    require(!balancedSplit(840, {200, 300}, {200, 400}), "unfold refuses when both maxima are too small");
+    require(balancedSplit(841, {420.2, 2000}, {419.8, 2000}) == 421, "fractional minima retain whole-pixel boundaries");
     Timeline t(280);
     require(!t.finished() && !t.secondSide() && t.angle() == 0, "initial front");
     t.advance(139);
@@ -103,5 +111,5 @@ int main() {
             }
         }
     }
-    std::cout << "Timeline, reversals, stalls and perspective bounds passed\n";
+    std::cout << "Face size constraints, timeline, reversals, stalls and perspective bounds passed\n";
 }

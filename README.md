@@ -63,8 +63,9 @@ running shell, then automatically fall back to **Fuzzel, Rofi or Wofi**.
 | Guided menus and saved-card library | — | Optional helper: Omarchy shell, Fuzzel, Rofi or Wofi |
 | Installation | Supplied core installer or hyprpm | Core + optional helper; hy3 provider only for hy3 layouts |
 
-Native dwindle cards are available in the **0.3.0-rc.1 preview**. The five-app
-limit is Hyprflip's supported model.
+Native dwindle cards are available in the **0.3.0-rc.2 preview**. The five-app
+limit is Hyprflip's supported model. Try the [short beta checklist](docs/BETA.md)
+on a default Omarchy setup and report how installation and everyday use go.
 
 ## Install
 
@@ -327,8 +328,10 @@ turn off these targets.
   other versions need adaptation and testing.
 - **Containers:** one workspace, two faces, at most five apps in a row or
   column per face, tiled or floating. Nested flip cards and arbitrary pane trees
-  are not implemented. Application minimum sizes can prevent a split
-  or unfold; the existing card is kept when a change is refused.
+  are not implemented. Native dwindle and floating cards give unfolded faces
+  unequal space when their apps need it, while preserving each face's pane
+  proportions. Application size limits can still prevent a split or unfold;
+  the existing card is kept when a change is refused.
 - **Fullscreen and movement:** native pairs use native group behavior. Leave
   fullscreen before flipping, unfolding or moving an experimental container.
   Floating cards move and resize as a unit with normal desktop mouse bindings.

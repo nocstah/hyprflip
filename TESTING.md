@@ -1,5 +1,57 @@
 # Validation
 
+## Stock Omarchy installation and laptop unfolding (2026-09-23)
+
+The published `v0.3.0-rc.1` source was freshly cloned and built, then its actual
+core and helper installers ran in a new home with Omarchy 4.0.4's stock
+configuration and default dwindle layout. Bubblewrap hid the live home and made
+the host filesystem read-only; the test used private D-Bus, PipeWire, Wayland,
+config, cache and state. Omarchy's session startup jobs were omitted and its
+real Quickshell shell was started separately. No compositor plugins were loaded
+initially, and only Hyprflip was loaded afterward.
+
+All five installer workflows pass: stock startup; a non-mutating core dry-run
+and successful installation; real Omarchy menu detection and conflict-free
+helper bindings; guided creation, flip and unfold; naming/saving through real
+menus and cold reopening of three new fixture processes. This validates a
+fresh user configuration with installed host packages. It does **not** establish
+a fresh OS installation or independent-user beta results.
+
+The adaptive-unfold candidate passes the C++ constraint/animation suite,
+179 Python tests, seven existing tiled workflows and nine floating workflows.
+Five new real-compositor checks cover 1440×900 and 1280×800 with both Classic and
+Card frame appearance, plus impossible-size refusal. Real GTK app minima make
+the equal-half layout in `rc.1` fail; the new allocation fits both faces without
+changing their pane proportions, and folding restores the exact geometry.
+Maximum-size and fractional-boundary cases also run in the independent C++ suite.
+
+On the live laptop, the updated core successfully unfolds Gmail / WhatsApp +
+Telegram inside the existing 1420×854 card. Content widths are 586, 399 and 399
+logical pixels, with unchanged gaps. All three apps accept input; folding,
+process identities, saved-definition bytes and the other loaded plugin handles
+are preserved. This replaces the `rc.1` laptop limitation recorded below.
+
+Reproduce using a built source checkout and a fresh disposable session:
+
+```sh
+make test
+python3 tests/nested_session.py --directory /tmp/hf-beta
+# In another terminal, sequentially:
+python3 tests/unfold_workflows.py /tmp/hf-beta/session.json
+python3 tests/omarchy_install.py --directory /tmp/hf-stock \
+  --source /path/to/clean-built-hyprflip --parent-session /tmp/hf-beta/session.json
+```
+
+The installer test additionally needs the installed Omarchy 4 package,
+Bubblewrap, D-Bus, PipeWire, foot and wtype. The unfold test needs GTK4's Python
+bindings and grim. Both tests clean up their own processes and preserve their
+logs/results in the specified temporary directory.
+
+Local evidence: `/tmp/hf-stock3/results.json`, `/tmp/hf-beta/unfold-results.json`,
+`/tmp/hf-unfold-before.log`, `/tmp/hf-unfold-final.log`,
+`/tmp/hf-dwindle-beta.log`, `/tmp/hf-floating-beta.log`, and
+`~/.local/state/hyprflip/adaptive-unfold-20260923-174207/`.
+
 ## Native dwindle cards (2026-09-23)
 
 The current source supports multi-app cards directly on the built-in dwindle
@@ -68,7 +120,7 @@ reopening with unchanged app processes and saved definition. Synthetic keys
 did not reliably trigger this desktop's bindings; the registered callbacks were
 invoked directly. This is not a claim of physical-keyboard validation.
 
-At the laptop's 1440×900 logical size, the real apps' minimum sizes prevent
+In `rc.1`, at the laptop's 1440×900 logical size, the real apps' minimum sizes prevent
 unfolding all three together. The command leaves the folded card intact.
 Unfolding is covered separately with fixtures that fit. Normal desktop resize
 commands operate on the native card's outer tile; inner proportions use the
