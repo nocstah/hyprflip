@@ -17,7 +17,7 @@ menus and cold reopening of three new fixture processes. This validates a
 fresh user configuration with installed host packages. It does **not** establish
 a fresh OS installation or independent-user beta results.
 
-The adaptive-unfold candidate passes the C++ constraint/animation suite,
+The `rc.2` implementation passes the C++ constraint/animation suite,
 179 Python tests, seven existing tiled workflows and nine floating workflows.
 Five new real-compositor checks cover 1440×900 and 1280×800 with both Classic and
 Card frame appearance, plus impossible-size refusal. Real GTK app minima make
