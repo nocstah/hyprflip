@@ -5,18 +5,18 @@ This directory builds `Bridge.cpp` into upstream hy3 **hl0.56.0.1**, commit
 It is an experiment, not a supported interface offered by upstream hy3.
 
 The bridge owns no windows or layout tree. Its registry holds weak references to
-two-child groups; each child is a leaf or a split of at most three leaves.
+two-child groups; each child is a leaf or a split of at most five leaves.
 It calls hy3's existing tree operations. The core accesses a versioned function
 table through `src/ContainerABI.hpp`, resolves live window identifiers, and never
 caches the provider across events. A load epoch prevents IDs from being reused
 across different provider lifetimes.
 
-ABI 6 retains ABI 4's face edits and ABI 5's exact split snapshots and atomic
-face arrangement, and adds atomic pane replacement. Its entry point
-`hyprflip_hy3_bridge_v6`
+ABI 7 expands both snapshot arrays to five apps per face. It retains exact
+split snapshots, atomic face arrangement and pane replacement. Its entry point
+`hyprflip_hy3_bridge_v7`
 is versioned separately so an old core/provider combination cannot call an
 incompatible table. Status advertises `layout_controls` and `container_max_panes`; the
-picker defaults to two when talking to older builds. A third attachment retains
+picker defaults to two when talking to older builds. An additional attachment retains
 the existing split axis and pane weights. This is a Hyprflip limit, not a hy3
 group limit.
 
@@ -37,7 +37,7 @@ parents' focused-child pointers without extracting nodes or collapsing groups.
 Both leaves and all card members must fit their resulting slots; failure
 exchanges them back. The card's ID, root and surrounding groups survive, and
 replacing the remembered pane follows the incoming app. A sole face app and a
-full three-pane face need no special restructuring. Status advertises
+full five-pane face need no special restructuring. Status advertises
 `pane_replacement`; the IPC action is `replace 0xOLD 0xNEW` (also available as a
 single string argument to the Lua `replace` function). The helper imports/tiles
 the incoming app before calling it and restores that handoff on refusal.
@@ -52,7 +52,7 @@ and temporary unfolding. The core and provider must be upgraded together. Unfold
 the same card root from tabs to a split, preserving its children and their size
 ratios; refolding restores tabs on the focused face. It uses Hyprland's geometry
 animation and tries the other split axis if application size constraints require
-it. Three-app rows prefer vertically arranged faces; three-app columns prefer
+it. Rows with three or more apps prefer vertically arranged faces; columns with three or more apps prefer
 horizontally arranged faces, keeping each pane readable when both sides appear.
 Mixed directions retain the footprint-based choice. The provider records the
 unfolded state so unrelated external tree edits are
@@ -65,8 +65,21 @@ late after a real `dlclose`: its plugin-defined deleters would already be
 unmapped. `-fno-gnu-unique` permits actual unload and makes this boundary testable.
 No upstream source file is rewritten.
 
-The card's hy3 tab bar remains usable at rest. It is hidden during animation with
-its space reserved; it is not part of an individual application's framebuffer.
+With the compact frame disabled, the card's hy3 tab bar remains usable at rest.
+It is hidden during animation with its space reserved; it is not part of an
+individual application's framebuffer.
+
+## Optional card frame
+
+The compact card frame uses a separate optional export,
+`hyprflip_hy3_card_frame_v1(id, headerHeight)`. The current container ABI is
+version 7; update core and provider together. A separate optional export,
+`hyprflip_hy3_card_style_v1(id, headerHeight, gap)`, applies the header and empty
+gap override to owned card roots only. A negative gap inherits desktop spacing.
+The original frame export remains available for compatible callers. Only registered Hyprflip roots
+reserve the header and suppress their tab bar, including when unfolded. Core
+rendering and input handling remain in the MIT module. `CardFrame.hpp` and the
+provider-side implementation are GPL-3.0-only, like the bridge.
 
 ## License and provenance
 

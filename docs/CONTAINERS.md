@@ -11,12 +11,42 @@ container behavior, direct commands and compositor acceptance checks.
 ## Goal
 
 Flip one desktop tile between two views of a task. For example, Gmail on the
-front and up to three messaging applications sharing its reverse side.
+front and up to five messaging applications sharing its reverse side.
 
-Two sides, at most three panes per side, one split per face. The card's workspace
+Two sides, at most five panes per side, one split per face. The card's workspace
 command moves its applications together. A flip restores the last focused application on
 the destination face. Closing an application never closes the other applications.
 Releasing a pane and disabling the effect must leave ordinary usable windows.
+
+## Frame and spacing
+
+With `plugin.hyprflip.card_frame = true` (the default), a shared outline and
+compact Flip/Fold control replace the card's full-width hy3 tabs. The label
+identifies the visible side and app count. Other hy3 tab groups keep their tabs.
+Both the core and the provider must support this optional frame extension;
+an older provider falls back to its original tabs.
+
+Inner gaps inherit the workspace's tiling configuration, including directional
+values. `gaps_in = 14` leaves 28 pixels of empty space between adjacent window
+borders, just as it does between ordinary tiles. Floating pane geometry accounts
+for each app's actual border width; it does not consume that gap with borders.
+Unfolding uses the gap for the axis separating the two sides. Layout edits on a tiled
+card recalculate its containing tile before arranging panes, retaining its outer
+and neighboring gaps too.
+
+OmaCards Settings can switch to **Classic tabs** and choose **Desktop spacing**
+or **Compact spacing**. Compact uses 12 logical pixels between card apps; it
+does not change `general:gaps_in` for ordinary tiles. Direct config supports
+`card_gap = -1` (inherit) or `0`–`128` (full visible gap between borders).
+Appearance and spacing chosen through OmaCards persist across reload/restart.
+
+While moving an outside window, a **Drop to add to Front/Back** target appears
+near the visible face’s top. Release over it to add the app; Escape or releasing
+outside leaves ordinary movement intact. Both unfolded faces have their own
+target. Full sides show the five-app limit, and application minimum sizes can
+refuse a drop. Cards and apps must be on the same visible workspace. Native
+one-app pairs do not expose this multi-app target. Use `drag_to_add = false`
+to disable it. Both Classic tabs and Card frame support the interaction.
 
 ## Build and try in isolation
 
@@ -219,17 +249,17 @@ app on the side you want to change, then open the menu:
   before joining the side and receives focus. The
   first split follows the available space: beside on a wide pane, below on a tall
   pane. Adding a third app keeps that row or column and its existing proportions.
-- On a side with two or three apps, **Remove [app] from card** is available for each app.
+- On a side with two to five apps, **Remove [app] from card** is available for each app.
   It releases the chosen app into its own tile and keeps it open. Removing the
   other app keeps focus on the app you were using. The other apps remain paired. The menu
-  states that the side is full at three apps and omits Add until there is room.
+  states that the side is full at five apps and omits Add until there is room.
 - When the focused app is alone on its side, the option is **Ungroup card**.
   This explicitly dissolves the card and leaves all its apps open.
 - **Layout of this side…** offers **Beside**, **Stacked** and **Equal sizes**
   when a side has multiple apps. Changing direction keeps its proportions;
   equalizing keeps its direction. The other face keeps its layout.
 - The same layout menu offers **Swap app positions** for two apps, with no
-  additional chooser, or **Reorder apps…** for three. Moves are labeled
+  additional chooser, or **Reorder apps…** for three or more. Moves are labeled
   left/right for rows and up/down for columns. Split sizes stay with their
   positions, and focus stays on the app you were using.
 - **Replace an app…** lets you replace any pane, including one that is not
@@ -238,7 +268,7 @@ app on the side you want to change, then open the menu:
   are resized to fit automatically. The replacement keeps the pane's position and
   share of the side; the previous app stays open separately on the card's
   workspace. Replacing the focused app follows its replacement; replacing
-  another pane retains your focus. Full three-app sides are supported.
+  another pane retains your focus. Full five-app sides are supported.
 - **Move an app to the other side…** lets you choose any pane and follows it
   onto the opposite face. It is offered when the source has at least two apps
   and the destination has room. The destination keeps its existing direction,
@@ -286,8 +316,8 @@ unload compositor libraries.
 
 ## Updating an enabled trial
 
-The current core and provider use bridge ABI **6**; rebuild both together.
-The updater restores one-, two- and three-app faces, including their split
+The current core and provider use bridge ABI **7**; rebuild both together.
+The updater restores faces with one to five apps, including their split
 proportions. An ABI 2 installation can upgrade without recreating its cards.
 The regular installer refuses to replace the core while experimental cards are
 active. For an already-enabled trial using the documented library paths:
@@ -303,8 +333,13 @@ The updater backs up both libraries and same-session recovery metadata, settles
 turns, unloads the core before the provider while leaving Hyprglass loaded,
 updates both, and reconstructs the cards. It restores face membership, inner
 split direction and proportion, current face, native pairs and application
-focus. The surrounding tiling tree may reflow when hy3 reloads. No applications
-are launched or closed, and no keybindings or layout rules are installed.
+focus. Multi-app provider cards are briefly rebuilt on an empty workspace on
+the same monitor, so loose companion windows cannot make a partial split too
+small. The complete card returns to its original workspace and its outer size
+is restored where the tiling tree permits. Interrupted reconstruction returns
+the apps before rollback. The surrounding tiling tree may reflow when hy3
+reloads. No applications are launched or closed; configured keybindings and
+layout rules are unchanged.
 
 A failed load attempts to restore the previous libraries and cards. Backups live
 under `~/.local/state/hyprflip/container-update-*`. Window addresses in the
@@ -357,9 +392,9 @@ into visible splits; the experimental updater reconstructs them explicitly.
 
 - Hyprland 0.56.2 and the pinned hy3 release only. Dwindle retains native pairs.
 - Tiled or floating cards on one workspace; no nested flip cards.
-- At most three apps per face, arranged in one row or column. No nested splits
+- At most five apps per face, arranged in one row or column. No nested splits
   within a face. Hy3 supports larger trees; this is the supported Hyprflip subset.
-- Unfold places three-app rows above one another and three-app columns beside
+- Unfold places rows of three or more apps above one another and columns beside
   one another. Mixed split directions use the card's proportions. Application
   size limits can select the alternate arrangement or refuse the unfold.
 - Workspace moves accept positive numeric IDs. Tiled hy3 cards require hy3 at
@@ -418,7 +453,7 @@ rebuilding cannot overwrite a mapped file.
 
 - Three real windows, only the active face visible and accepting input.
 - Repeated switches preserve the outer geometry and restore each face's focus.
-- Up to three panes per face share one pivot during animation; reversal and new input settle
+- Up to five panes per face share one pivot during animation; reversal and new input settle
   consistently.
 - Closing/releasing a member, changing workspace, config reload, plugin unload,
   and external tree edits leave surviving applications accessible.
@@ -450,7 +485,7 @@ Hyprflip backend.
 
 OmaCards offers **Float card** / **Tile card** on the selected card. Floating
 cards use one native Hyprland group as their outer move/resize target; Hyprflip
-arranges up to three apps on each face inside it. Drag or resize any visible
+arranges up to five apps on each face inside it. Drag or resize any visible
 app with your usual window-manager mouse bindings. Flip, peek, unfold, pane
 editing and workspace moves keep both faces together. Closing the last app on
 one face releases the remaining apps. Unloading restores native window targets.

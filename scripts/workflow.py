@@ -187,6 +187,65 @@ class Hyprctl:
         finally:
             temporary.unlink(missing_ok=True)
 
+    def save_appearance(self, style):
+        if style not in ('classic', 'frame'):
+            raise SetupError('Choose Classic tabs or Card frame.')
+        current = self.status().get('card_frame')
+        if type(current) is not bool:
+            raise SetupError('Update Hyprflip to change the card appearance here.')
+        env = self.env if self.env is not None else os.environ
+        root = Path(env.get('XDG_STATE_HOME', str(Path.home() / '.local/state'))) / 'hyprflip'
+        root.mkdir(parents=True, exist_ok=True)
+        path = root / 'appearance'
+        previous = path.read_bytes() if path.exists() else None
+        temporary = path.with_name('appearance-' + uuid.uuid4().hex)
+        def apply(frame):
+            self.call('eval', 'hl.config({plugin={hyprflip={card_frame=%s}}})' % ('true' if frame else 'false'))
+        try:
+            temporary.write_text(style + '\n')
+            temporary.replace(path)
+            apply(style == 'frame')
+            if self.status().get('card_frame') != (style == 'frame'):
+                raise SetupError('The card appearance could not be applied.')
+        except Exception:
+            if previous is None: path.unlink(missing_ok=True)
+            else:
+                temporary.write_bytes(previous); temporary.replace(path)
+            try: apply(current)
+            except (SetupError, OSError, subprocess.TimeoutExpired): pass
+            raise
+        finally:
+            temporary.unlink(missing_ok=True)
+
+    def save_spacing(self, value):
+        if type(value) is not int or not -1 <= value <= 128:
+            raise SetupError('Choose Desktop spacing or a gap between 0 and 128 pixels.')
+        old = self.status().get('card_gap')
+        if type(old) is not int or not -1 <= old <= 128:
+            raise SetupError('Update Hyprflip to change app spacing.')
+        env = self.env if self.env is not None else os.environ
+        root = Path(env.get('XDG_STATE_HOME', str(Path.home() / '.local/state'))) / 'hyprflip'
+        root.mkdir(parents=True, exist_ok=True)
+        path = root / 'card_gap'
+        previous = path.read_bytes() if path.exists() else None
+        temporary = path.with_name('gap-' + uuid.uuid4().hex)
+        def apply(gap):
+            self.call('eval', 'hl.config({plugin={hyprflip={card_gap=%d}}})' % gap)
+        try:
+            temporary.write_text(str(value) + '\n'); temporary.replace(path)
+            apply(value)
+            if self.status().get('card_gap') != value:
+                raise SetupError('The app spacing could not be applied.')
+        except Exception:
+            if previous is None: path.unlink(missing_ok=True)
+            else:
+                temporary.write_bytes(previous); temporary.replace(path)
+            try: apply(old)
+            except (SetupError, OSError, subprocess.TimeoutExpired): pass
+            raise
+        finally:
+            temporary.unlink(missing_ok=True)
+
     def focused(self, *operations):
         # Keep focus validation and the action together; a pointer/app focus
         # event can otherwise arrive between separate hyprctl requests.
@@ -200,7 +259,7 @@ class Hyprctl:
                     name == 'other_side' and re.fullmatch(r'0x[0-9a-fA-F]+', argument) or
                     name == 'attach' and argument in ('horizontal', 'vertical') or
                     name == 'layout' and argument in ('horizontal', 'vertical', 'balance') or
-                    name == 'arrange' and re.fullmatch(r'(horizontal|vertical)( 0x[0-9a-fA-F]+:[0-9.eE+-]+){1,3}', argument) or
+                    name == 'arrange' and re.fullmatch(r'(horizontal|vertical)( 0x[0-9a-fA-F]+:[0-9.eE+-]+){1,5}', argument) or
                     name == 'replace' and re.fullmatch(r'0x[0-9a-fA-F]+ 0x[0-9a-fA-F]+', argument) or
                     name == 'preview' and argument in TRANSITIONS):
                 raise SetupError('The card action is unavailable.')
@@ -732,7 +791,7 @@ class Setup:
             if not remaining:
                 break
             names = ', '.join(app_name(windows[a]) for a in selected[1:])
-            ordinal = 'second' if count == 2 else 'third'
+            ordinal = {2: 'second', 3: 'third', 4: 'fourth', 5: 'fifth'}.get(count, f'{count}th')
             extra = self.choose_window(f'Add a {ordinal} app to the back?', remaining, workspace, prefix='Add ',
                                        leading=[Choice('create', 'Create card', clean(names, 90) + ' on the back')])
             if extra == 'create':
@@ -1293,7 +1352,7 @@ class RecipeStore:
         if not isinstance(recipe['faces'], list) or len(recipe['faces']) != 2: raise ValueError()
         for face in recipe['faces']:
             apps, ratios = face['apps'], face['ratios']
-            if not isinstance(apps, list) or not isinstance(ratios, list) or not 1 <= len(apps) <= 3 or len(ratios) != len(apps): raise ValueError()
+            if not isinstance(apps, list) or not isinstance(ratios, list) or not 1 <= len(apps) <= 5 or len(ratios) != len(apps): raise ValueError()
             if face['axis'] not in ('horizontal', 'vertical') or type(face['focus']) is not int or not 0 <= face['focus'] < len(apps):
                 raise ValueError()
             if any(type(r) not in (float, int) or not math.isfinite(r) or not 0 < r <= 1 for r in ratios): raise ValueError()

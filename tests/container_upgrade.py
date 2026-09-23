@@ -24,6 +24,7 @@ config = root / 'hyprland.lua'
 original = config.read_text()
 processes, checks = [], []
 completed = False
+test_monitor = None
 
 
 def ctl(*a):
@@ -45,10 +46,16 @@ def wait(fn):
     raise AssertionError('State did not settle')
 
 
-def spawn(name):
+def spawn(name, minimum=None):
     name='hyprflip-upgrade-'+name
-    proc=subprocess.Popen(['foot','--config','/dev/null','--app-id',name,'sh','-c','exec cat'],
-                          env=env,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+    if minimum:
+        control=root/(name+'.command')
+        control.write_text('minimum '+' '.join(map(str, minimum)))
+        command=['python3',str(project/'tests/gtk_fixture.py'),name,str(control)]
+    else:
+        command=['foot','--config','/dev/null','--app-id',name,'sh','-c','exec cat']
+    proc=subprocess.Popen(command,env=env | {'GDK_BACKEND':'wayland','GSK_RENDERER':'cairo'},
+                          stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
     processes.append(proc)
     wait(lambda:any(w['class']==name for w in clients().values()))
     return next(w['address'] for w in clients().values() if w['class']==name)
@@ -62,7 +69,7 @@ def cards():
     return sorted((tuple(tuple(face) for face in c['faces']),c['current'],bool(c.get('unfolded'))) for c in status()['containers'])
 
 
-def update(script=project/'scripts/update-containers.py', dry=False, fail=False, drift=False):
+def update(script=project/'scripts/update-containers.py', dry=False, fail=False, drift=False, interrupt_stage=False):
     command=['python',str(script),'--library-root',str(installed),'--state-dir',str(state_dir)]
     if dry: command.append('--dry-run')
     update_env = env
@@ -95,6 +102,24 @@ os.execv(real, [real, *args])
         update_env = env | {'PATH': str(wrapper.parent) + ':' + env['PATH'],
                             'HYPRFLIP_REAL_CTL': shutil.which('hyprctl'),
                             'HYPRFLIP_DRIFT_LOG': str(root / 'focus-drift.jsonl')}
+    if interrupt_stage:
+        wrapper=root/'interrupt-stage'/'hyprctl'
+        wrapper.parent.mkdir(exist_ok=True)
+        marker=state_dir/'stage-interrupted'
+        wrapper.write_text('''#!/usr/bin/env python3
+import os, sys
+from pathlib import Path
+marker = Path(os.environ['HYPRFLIP_STAGE_MARKER'])
+if not marker.exists() and sys.argv[1:2] == ['eval'] and 'hl.plugin.hyprflip.attach(' in ' '.join(sys.argv[2:]):
+    marker.touch()
+    print('error: injected interruption while reconstructing a card')
+    sys.exit(1)
+os.execv(os.environ['HYPRFLIP_REAL_CTL'], [os.environ['HYPRFLIP_REAL_CTL'], *sys.argv[1:]])
+''')
+        wrapper.chmod(0o755)
+        update_env=env | {'PATH':str(wrapper.parent)+':'+env['PATH'],
+                         'HYPRFLIP_REAL_CTL':shutil.which('hyprctl'),
+                         'HYPRFLIP_STAGE_MARKER':str(marker)}
     r=subprocess.run(command,env=update_env,capture_output=True,text=True,timeout=50)
     assert (r.returncode != 0) == fail, (r.returncode,r.stdout,r.stderr)
     return r.stdout + r.stderr
@@ -105,6 +130,9 @@ def passed(name): checks.append(name); print('PASS',name,flush=True)
 
 try:
     assert not json.loads(ctl('-j','plugin','list'))
+    names = {m['name'] for m in json.loads(ctl('-j','monitors'))}
+    ctl('output', 'create', 'headless')
+    test_monitor = next(m['name'] for m in json.loads(ctl('-j','monitors')) if m['name'] not in names)
     (installed/'containers').mkdir(parents=True,exist_ok=True)
     for src,dst in ((args.baseline_core,installed/'hyprflip.so'),
                     (args.baseline_provider,installed/'containers/libhy3.so'),
@@ -115,8 +143,11 @@ if hl.plugin.hy3 then hl.config({general={layout="hy3"}}) end
 hl.workspace_rule({workspace="9",layout="dwindle"})
 if hl.plugin.hyprflip then hl.config({plugin={hyprflip={duration_ms=0,notifications=false}}}) end
 '''
+    configured += f'\nhl.monitor({{output="{test_monitor}",mode="3840x2160@60",position="2000x0",scale=1.5}})\n'
+    configured += ''.join(f'hl.workspace_rule({{workspace="{n}",monitor="{test_monitor}"}})\n' for n in range(1, 10))
     config.write_text(configured); ctl('reload'); assert not ctl('configerrors')
     wait(lambda:status()['container_provider'])
+    ctl('dispatch',f'hl.dsp.focus({{monitor="{test_monitor}"}})')
     ctl('dispatch','hl.dsp.focus({workspace=1})')
     a=next(w['address'] for w in clients().values() if w['class']=='hyprflip-front')
     b=next(w['address'] for w in clients().values() if w['class']=='hyprflip-back')
@@ -169,29 +200,30 @@ if hl.plugin.hyprflip then hl.config({plugin={hyprflip={duration_ms=0,notificati
     assert (root / 'focus-drift.jsonl').read_text().splitlines()
     passed('focus changes between IPC commands cannot redirect card restoration to another app')
 
-    # The updated provider must also survive future updates with six-pane cards.
+    # The updated provider must also survive updates at the new ten-app limit.
     action('unfold')
-    for anchor, name in ((a, 'front-second'), (a, 'front-third'), (b, 'back-third')):
+    for anchor, name in ((a, 'front-second'), (a, 'front-third'), (a, 'front-fourth'),
+                         (a, 'front-fifth'), (b, 'back-third'), (b, 'back-fourth'), (b, 'back-fifth')):
         focus(anchor)
         extra = spawn(name)
         focus(extra); action('mark'); focus(anchor); action('attach vertical')
-    six = next(x for x in status()['containers'] if a in x['faces'][0])
-    assert list(map(len, six['faces'])) == [3, 3]
+    ten = next(x for x in status()['containers'] if a in x['faces'][0])
+    assert list(map(len, ten['faces'])) == [5, 5]
     focus(a); ctl('dispatch','hl.dsp.window.resize({x=0,y=35,relative=true})')
     focus(b); ctl('dispatch','hl.dsp.window.resize({x=0,y=-25,relative=true})')
     time.sleep(.4)
     before_sizes = clients()
     before_ratios = [[before_sizes[w]['size'][1] / sum(before_sizes[v]['size'][1] for v in face)
-                     for w in face] for face in six['faces']]
+                     for w in face] for face in ten['faces']]
     before_cards = cards()
     update()
     assert cards() == before_cards
     after_sizes = clients()
-    for face, ratios in zip(six['faces'], before_ratios):
+    for face, ratios in zip(ten['faces'], before_ratios):
         actual = [after_sizes[w]['size'][1] / sum(after_sizes[v]['size'][1] for v in face) for w in face]
         assert max(abs(a-b) for a,b in zip(ratios, actual)) < .025, (ratios, actual)
     focus(b); action('unfold')
-    passed('six-pane cards retain both split proportions, membership and focus across a subsequent update')
+    passed('ten-app cards retain both split proportions, membership and focus across a subsequent update')
 
     # Exercise a load failure after both old libraries have been unloaded.
     broken=root/'broken-build'
@@ -208,6 +240,52 @@ if hl.plugin.hyprflip then hl.config({plugin={hyprflip={duration_ms=0,notificati
     assert cards()==before_cards and digest()==before_hashes
     assert len(status()['pairs'])==1 and not ctl('configerrors')
     passed('failed plugin load rolls back both libraries and restores folded/unfolded cards')
+
+    # Reproduce a real desktop failure: loose windows created by a provider
+    # reload temporarily shrink a card below its apps' minimum sizes.
+    ctl('dispatch','hl.dsp.focus({workspace=5})')
+    wide_front=spawn('wide-front')
+    wide_back=spawn('wide-back', (500,180))
+    companion=spawn('wide-companion', (500,180))
+    focus(wide_front); action('mark'); focus(wide_back); action('pair')
+    focus(companion); action('mark'); focus(wide_back); action('attach horizontal')
+    outside=spawn('wide-neighbor')
+    focus(wide_front)
+    ctl('dispatch','hl.dsp.window.resize({x=400,y=0,relative=true})')
+    focus(companion)
+    before_cards=cards()
+    width=next(c['box'][2] for c in status()['containers'] if wide_front in c['faces'][0])
+    assert all(clients()[w]['size'][0]>=500 for w in (wide_back,companion))
+    update()
+    assert cards()==before_cards
+    restored=next(c for c in status()['containers'] if wide_front in c['faces'][0])
+    assert abs(restored['box'][2]-width)<3,(width,restored['box'])
+    assert all(clients()[w]['size'][0]>=500 for w in (wide_back,companion))
+    assert all(clients()[w]['workspace']['id']==5 for w in (wide_front,wide_back,companion,outside))
+    assert json.loads(ctl('-j','activewindow'))['address']==companion
+    assert not any(w['workspace']['id']>=1000 for w in clients().values())
+    passed('crowded-workspace reconstruction preserves real application minimum sizes, card width and original workspaces')
+
+    output=update(fail=True,interrupt_stage=True)
+    assert 'injected interruption' in output and 'Recovery needs attention' not in output,output
+    assert cards()==before_cards
+    assert all(clients()[w]['size'][0]>=500 for w in (wide_back,companion))
+    assert not any(w['workspace']['id']>=1000 for w in clients().values())
+    passed('interrupted reconstruction returns every app from the temporary workspace before rollback restores the cards')
+
+    ctl('dispatch','hl.dsp.focus({workspace=6})')
+    large_front,large_back=spawn('six-min-front',(300,180)),spawn('six-min-back',(300,180))
+    focus(large_front); action('mark'); focus(large_back); action('pair')
+    for anchor,name in ((large_front,'front-2'),(large_front,'front-3'),(large_back,'back-2'),(large_back,'back-3')):
+        extra=spawn('six-min-'+name,(300,180))
+        focus(extra); action('mark'); focus(anchor); action('attach horizontal')
+    big=next(c for c in status()['containers'] if large_front in c['faces'][0])
+    before_cards=cards()
+    update()
+    assert cards()==before_cards
+    assert all(clients()[w]['size'][0]>=300 and not clients()[w]['floating'] for face in big['faces'] for w in face)
+    assert not any(w['workspace']['id']>=1000 for w in clients().values())
+    passed('six minimum-sized apps reconstruct without unattached companions consuming their temporary tiling space')
     completed=True
 finally:
     try:
@@ -222,6 +300,7 @@ finally:
         ctl('reload'); assert not ctl('configerrors')
         config.write_text(original); ctl('reload'); assert not ctl('configerrors')
         assert not json.loads(ctl('-j','plugin','list'))
+        if test_monitor: ctl('output', 'remove', test_monitor)
     finally:
         for proc in processes:
             if proc.poll() is None: proc.terminate()

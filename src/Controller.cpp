@@ -12,6 +12,7 @@
 #include <hyprland/src/desktop/view/Window.hpp>
 #include <hyprland/src/layout/algorithm/Algorithm.hpp>
 #include <hyprland/src/layout/algorithm/TiledAlgorithm.hpp>
+#include <hyprland/src/layout/LayoutManager.hpp>
 #include <hyprland/src/managers/SeatManager.hpp>
 #include <hyprland/src/managers/SessionLockManager.hpp>
 #include <hyprland/src/managers/fullscreen/FullscreenController.hpp>
@@ -64,6 +65,29 @@ Controller::Controller(HANDLE handle, Settings settings)
         finish();
     }, nullptr);
     g_pEventLoopManager->addTimer(m_timer);
+    m_frames = std::make_unique<CardFrames>([this]() { return frameViews(); }, [this](uint64_t id) {
+        // A button is a click on release. Leave the input dispatch stack before
+        // changing layout/focus, and resolve the card again in case it closed.
+        m_frameLater = g_pEventLoopManager->doLaterLock([this, id]() {
+            if (m_stopping || inputBusy()) return;
+            const auto p = find(id);
+            const auto s = p ? state(*p) : std::nullopt;
+            if (!s) return;
+            if (!s->contains(Desktop::focusState()->window()))
+                Desktop::focusState()->fullWindowFocus(s->focused[s->active], Desktop::FOCUS_REASON_CLICK);
+            const auto result = action(s->unfolded ? "unfold" : "flip");
+            if (!result.ok) notify(result);
+        });
+    });
+    m_drop = std::make_unique<CardDrop>([this](PHLWINDOW w) { return dropOffers(w); },
+        [this](PHLWINDOWREF w, CardDropOffer offer) {
+            m_dropLater = g_pEventLoopManager->doLaterLock([this, w, offer]() {
+                if (m_stopping || inputBusy() || g_layoutManager->dragController()->target()) return;
+                const auto result = dropAttach(w.lock(), offer);
+                reconcile();
+                if (!result.ok) notify(result);
+            });
+        });
     auto &e = Event::bus()->m_events;
     m_listeners.emplace_back(e.render.preChecks.listen([this](PHLMONITOR m) {
         m_renderingMonitor = m;
@@ -115,9 +139,12 @@ Controller::Controller(HANDLE handle, Settings settings)
         finish();
         m_marked.reset();
     }));
+    m_listeners.emplace_back(e.config.reloaded.listen([this]() { deferReconcile(); }));
     m_listeners.emplace_back(g_pSessionLockManager->m_events.lock.listen([this]() { m_peek.reset(); finish(false); }));
     m_listeners.emplace_back(
-        e.input.mouse.button.listen([this](const IPointer::SButtonEvent &, Event::SCallbackInfo &) { settleInput(); }));
+        e.input.mouse.button.listen([this](const IPointer::SButtonEvent &event, Event::SCallbackInfo &info) {
+            if (!m_frames->button(event, info)) settleInput();
+        }));
     m_listeners.emplace_back(
         e.input.mouse.axis.listen([this](const IPointer::SAxisEvent &, Event::SCallbackInfo &) { settleInput(); }));
     m_listeners.emplace_back(
@@ -148,7 +175,11 @@ Controller::~Controller() {
     m_listeners.clear();
     m_reconcileLater.reset();
     m_keyLater.reset();
+    m_frameLater.reset();
+    m_dropLater.reset();
+    m_drop.reset();
     finish();
+    m_frames.reset();
     if (m_timer) {
         m_timer->cancel();
         g_pEventLoopManager->removeTimer(m_timer);
@@ -272,6 +303,153 @@ void Controller::reconcile() {
             discardContainer(p);
         }
     std::erase_if(m_pairs, [this](const Pair &p) { return !valid(p); });
+    syncFrames();
+}
+void Controller::syncFrames() {
+    if (!m_frames || m_mutating || m_stopping) return;
+    m_mutating = true;
+    std::vector<PHLWINDOWREF> native;
+    const double header = m_settings.cardFrame->value() ? CardFrames::headerHeight() : 0;
+    const double gap = m_settings.cardGap->value();
+    for (auto &pair : m_pairs) {
+        bool ready = false;
+        if (!pair.containerID) {
+            ready = true;
+            if (header) for (const auto &window : pair.windows) native.push_back(window);
+        } else if (pair.providerEpoch == FloatingCards::EPOCH) {
+            ready = FloatingCards::setStyle(pair.containerID, header, gap);
+        } else if (provider(pair.providerEpoch)) {
+            for (auto plugin : g_pPluginSystem->getAllPlugins()) {
+                if (plugin->m_name != "hy3") continue;
+                using SetFrame = bool (*)(uint64_t, double);
+                using SetStyle = bool (*)(uint64_t, double, double);
+                const auto style = reinterpret_cast<SetStyle>(dlsym(plugin->m_handle, "hyprflip_hy3_card_style_v1"));
+                const auto set = reinterpret_cast<SetFrame>(dlsym(plugin->m_handle, "hyprflip_hy3_card_frame_v1"));
+                ready = style ? style(pair.containerID, header, gap) : set && set(pair.containerID, header);
+                break;
+            }
+        }
+        pair.frame = header > 0 && ready;
+    }
+    m_frames->nativeHeaders(native);
+    m_mutating = false;
+    m_frames->refresh();
+}
+std::vector<CardFrameView> Controller::frameViews() const {
+    std::vector<CardFrameView> result;
+    for (const auto &pair : m_pairs) {
+        if (!pair.frame) continue;
+        auto s = state(pair);
+        if (!s) continue;
+        CardFrameView view;
+        view.id = pair.id;
+        view.active = s->active;
+        view.unfolded = s->unfolded;
+        view.animating = m_turn && m_turn->pairID == pair.id;
+        for (unsigned side = 0; side < 2; ++side) view.count[side] = s->faces[side].size();
+        view.windows = s->windows();
+        result.push_back(std::move(view));
+    }
+    return result;
+}
+std::vector<CardDropOffer> Controller::dropOffers(PHLWINDOW window) const {
+    std::vector<CardDropOffer> offers;
+    if (m_stopping || m_mutating || m_turn || !m_settings.dragToAdd->value() || !unavailable(window).empty())
+        return offers;
+    for (const auto &p : m_pairs)
+        if (const auto s = state(p); s && s->contains(window)) return offers;
+    for (const auto &p : m_pairs) {
+        if (!p.containerID) continue;
+        const auto s = state(p);
+        if (!s) continue;
+        const auto workspace = s->focused[s->active]->m_workspace;
+        if (!workspace || !workspace->m_visible || workspace->m_isSpecialWorkspace ||
+            Fullscreen::controller()->hasFullscreen(workspace) || window->m_workspace != workspace ||
+            workspace->m_renderOffset->isBeingAnimated()) continue;
+        for (unsigned side = 0; side < 2; ++side) {
+            if (!s->unfolded && side != s->active) continue;
+            CardDropOffer offer;
+            offer.id = p.id;
+            offer.side = side;
+            offer.count = s->faces[side].size();
+            offer.vertical = s->vertical[side];
+            offer.members = s->windows();
+            bool any = false;
+            for (const auto &w : s->faces[side]) {
+                auto box = w->geometricBox(IGeometric::GEOMETRIC_CURRENT).expand(w->getRealBorderSize());
+                if (w->isHidden() || w->alpha(WINDOW_ALPHA_LAYOUT)->value() < .01F) continue;
+                if (!any) offer.box = box;
+                else {
+                    const double x = std::min(offer.box.x, box.x), y = std::min(offer.box.y, box.y);
+                    offer.box = {x, y, std::max(offer.box.x + offer.box.w, box.x + box.w) - x,
+                                      std::max(offer.box.y + offer.box.h, box.y + box.h) - y};
+                }
+                any = true;
+            }
+            if (!any) continue;
+            if (offer.count >= CONTAINER_MAX_PANES) offer.refusal = std::to_string(CONTAINER_MAX_PANES) + " apps already";
+            offers.push_back(std::move(offer));
+        }
+    }
+    return offers;
+}
+Result Controller::dropAttach(PHLWINDOW window, const CardDropOffer &offer) {
+    if (!m_settings.dragToAdd->value() || inputBusy()) return {false, "Adding the app was cancelled."};
+    if (!unavailable(window).empty() || find(window)) return {false, "The app changed during the drag. Try again."};
+    auto p = find(offer.id);
+    auto before = p ? state(*p) : std::nullopt;
+    if (!p || !p->containerID || !before || before->windows() != offer.members || offer.side > 1 ||
+        (!before->unfolded && before->active != offer.side) ||
+        window->m_workspace != before->focused[offer.side]->m_workspace)
+        return {false, "The card changed during the drag. Try again."};
+    if (before->faces[offer.side].size() >= CONTAINER_MAX_PANES)
+        return {false, "This side already has five apps. Remove an app before adding another."};
+    if (Fullscreen::controller()->hasFullscreen(window->m_workspace))
+        return {false, "Leave fullscreen before adding an app."};
+    const auto marked = m_marked;
+    const bool floating = window->m_isFloating;
+    const auto box = window->geometricBox(IGeometric::GEOMETRIC_GOAL);
+    const bool chilled = window->m_ruleApplicator->m_tagKeeper.isTagged("chillmode");
+    // Keep the existing card workspace protected while the incoming app changes
+    // float mode. This is the same public handoff used by the guided picker.
+    if (chilled) {
+        const auto command = "if chillmode and chillmode.handoff then assert(chillmode.handoff(" + address(window) + ")) end";
+        HyprlandAPI::invokeHyprctlCommand("eval", command);
+        window->m_ruleApplicator->m_tagKeeper.applyTag("-chillmode");
+        window->m_ruleApplicator->propertiesChanged(Desktop::Rule::RULE_PROP_TAG);
+    }
+    if (p->providerEpoch != FloatingCards::EPOCH && window->m_isFloating)
+        g_layoutManager->changeFloatingMode(window->layoutTarget());
+    Desktop::focusState()->fullWindowFocus(before->focused[offer.side], Desktop::FOCUS_REASON_CLICK);
+    m_marked = window;
+    const auto result = attach(offer.vertical);
+    m_marked = marked;
+    if (result.ok) return {true, "ok"};
+    // Restore the dropped app to the place where normal dragging left it.
+    // Existing membership, face axis and pane proportions survive refusal.
+    if (window->m_isMapped && !find(window)) {
+        if (window->m_isFloating != floating) g_layoutManager->changeFloatingMode(window->layoutTarget());
+        if (floating) {
+            window->layoutTarget()->setPositionGlobal({.logicalBox = box, .visualBox = {}});
+            window->layoutTarget()->warpPositionSize();
+        }
+        if (chilled) {
+            window->m_ruleApplicator->m_tagKeeper.applyTag("+chillmode");
+            window->m_ruleApplicator->propertiesChanged(Desktop::Rule::RULE_PROP_TAG);
+        }
+        // A provider may have attached then released the candidate while
+        // checking the final geometry. Restore the original split precisely.
+        if (auto api = provider(p->providerEpoch))
+            for (unsigned side = 0; side < 2; ++side) {
+                std::array<uintptr_t, CONTAINER_MAX_PANES> windows{};
+                for (unsigned i = 0; i < before->faces[side].size(); ++i)
+                    windows[i] = reinterpret_cast<uintptr_t>(before->faces[side][i].get());
+                api->arrange(p->containerID, side, before->vertical[side], before->faces[side].size(),
+                             windows.data(), before->ratios[side].data());
+            }
+        Desktop::focusState()->fullWindowFocus(window, Desktop::FOCUS_REASON_CLICK);
+    }
+    return result;
 }
 void Controller::deferReconcile() {
     if (m_stopping)
@@ -740,7 +918,7 @@ Result Controller::attach(bool vertical) {
     if (!s)
         return {false, "This card changed. Pair its windows again."};
     if (s->faces[s->active].size() >= CONTAINER_MAX_PANES)
-        return {false, "This side already has three apps. Remove an app before adding another."};
+        return {false, "This side already has five apps. Remove an app before adding another."};
     for (const auto &member : s->windows())
         if (Fullscreen::controller()->isFullscreen(member.lock()))
             return {false, "Leave fullscreen before attaching to this container."};
@@ -932,7 +1110,7 @@ Result Controller::editContainer(ContainerEdit operation, const std::string &tar
     if (s->faces[s->active].size() < 2)
         return {false, "This side needs at least two apps. Add an app from the card menu first."};
     if (operation == ContainerEdit::OtherSide && s->faces[1 - s->active].size() >= CONTAINER_MAX_PANES)
-        return {false, "The other side already has three apps. Remove an app there first."};
+        return {false, "The other side already has five apps. Remove an app there first."};
     auto api = provider(p->providerEpoch);
     m_mutating = true;
     const bool ok = api && api->edit(p->containerID, reinterpret_cast<uintptr_t>(w.get()), operation);
@@ -1085,6 +1263,11 @@ Result Controller::floating() {
     return {id != 0, id ? "Card floats as one unit. Drag or resize any app." : "These apps cannot fit a floating card. They remain open."};
 }
 Result Controller::action(const std::string &action) {
+    const auto result = dispatch(action);
+    reconcile();
+    return result;
+}
+Result Controller::dispatch(const std::string &action) {
     reconcile();
     if (action == "floating") return floating();
     std::erase_if(m_reservations, [](const auto& entry) { return entry.second.until <= Clock::now(); });
@@ -1196,6 +1379,10 @@ std::string Controller::status() {
                        ",\"transition\":" + quote(std::string(name(transition(m_settings.transition->value()).value_or(Transition::Flip)))) +
                        ",\"transition_modes\":[\"flip\",\"vertical\",\"slide\",\"fade\",\"dissolve\",\"portal\",\"instant\"]" +
                        ",\"capture_ms\":" + std::format("{}", m_captureMs) +
+                       ",\"card_frame\":" + (m_settings.cardFrame->value() ? "true" : "false") +
+                       ",\"card_gap\":" + std::to_string(m_settings.cardGap->value()) +
+                       ",\"drag_to_add\":" + (m_settings.dragToAdd->value() ? "true" : "false") +
+                       ",\"drop_targets\":" + (m_drop ? m_drop->status() : "[]") +
                        ",\"animating\":" + (m_turn ? "true" : "false") +
                        ",\"peek_available\":true,\"peeking\":" + (m_peek ? "true" : "false") +
                        ",\"progress\":" + std::format("{}", m_turn ? m_turn->timeline.progress() : 0) +
@@ -1252,7 +1439,8 @@ std::string Controller::status() {
         json += "]}";
     }
     const bool available = provider();
-    return json + "],\"floating_cards\":true,\"workspace_protection\":true,\"container_provider\":" + (available ? "true" : "false") +
+    return json + "],\"card_frames\":" + (m_frames ? m_frames->status() : "[]") +
+           ",\"floating_cards\":true,\"workspace_protection\":true,\"container_provider\":" + (available ? "true" : "false") +
            ",\"layout_controls\":" + (available ? "true" : "false") +
            ",\"repair_cards\":" + (available ? "true" : "false") +
            ",\"pane_replacement\":" + (available ? "true" : "false") +

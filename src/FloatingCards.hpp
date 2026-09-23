@@ -11,4 +11,5 @@ void closing(PHLWINDOW window);
 void focused(PHLWINDOW window);
 void shutdown();
 bool toggle(uint64_t id);
+bool setStyle(uint64_t id, double header, double gap);
 } // namespace Hyprflip::FloatingCards

@@ -22,6 +22,7 @@ env = environment(args.session) | {'XDG_STATE_HOME': str(root / 'state'), 'XDG_D
 ipc = w.Hyprctl(env)
 config = root / 'hyprland.lua'; original = config.read_text()
 processes, loaded, checks = [], [], []
+output = None
 
 
 class Menu:
@@ -66,12 +67,18 @@ def create(a,b,c):
 
 try:
     assert not ipc.data('-j','plugin','list'), 'Use a fresh nested session without --containers'
+    names = {m['name'] for m in ipc.data('-j','monitors')}
+    ipc.call('output', 'create', 'headless')
+    output = next(m['name'] for m in ipc.data('-j','monitors') if m['name'] not in names)
     for source in (project/'build/containers/provider/upstream/libhy3.so', project/'build/containers/core/hyprflip.so'):
         target=root/('float-'+source.name);shutil.copy2(source,target)
         ipc.call('plugin','load',str(target));loaded.append(target)
-    config.write_text(original.replace('layout="dwindle"','layout="hy3"'))
+    config.write_text(original.replace('layout="dwindle"','layout="hy3"') +
+                     f'\nhl.monitor({{output="{output}",mode="3840x2160@60",position="2000x0",scale=1.5}})\n' +
+                     ''.join(f'hl.workspace_rule({{workspace="{n}",monitor="{output}"}})\n' for n in (41, 43)))
     ipc.call('reload');assert not ipc.call('configerrors')
     ipc.call('eval','hl.config({animations={enabled=false},plugin={hyprflip={duration_ms=0,notifications=false}}})')
+    ipc.call('dispatch',f'hl.dsp.focus({{monitor="{output}"}})')
     ipc.call('dispatch','hl.dsp.focus({workspace=41})')
     a,b,c,d,e = [spawn(n) for n in ('front','back','third','fourth','replacement')]
     create(a,b,c); before=deepcopy(card());ipc.action('floating')
@@ -161,4 +168,5 @@ finally:
         except Exception: pass
     try: config.write_text(original);ipc.call('reload')
     except Exception: pass
+    if output: ipc.call('output','remove',output)
     (root/'floating-results.json').write_text(json.dumps(checks,indent=2))

@@ -28,13 +28,15 @@ running shell, then automatically fall back to **Fuzzel, Rofi or Wofi**.
 | Feature | What it does |
 | --- | --- |
 | **Two faces, one tile** | Switch between related applications without moving to another workspace. |
-| **Up to three apps per face** | Arrange each face in a row or column: up to six apps in one card. |
+| **Up to five apps per face** | Arrange each face in a row or column: up to ten apps in one card. |
 | **Flip and reverse** | Turn the card with perspective, easing and shared lighting. Press flip again mid-turn to smoothly reverse it. |
 | **Hold to peek** | Hold a key to reveal the other side; release to return. Clicking or typing keeps the side you are using. |
 | **Temporary unfold** | Show both faces together in the existing tile. Use any app, then fold onto the face you want. |
+| **Drag to add** | Move an outside app onto a face’s temporary drop target. Escape cancels. |
+| **Appearance and spacing** | Choose Classic tabs or Card frame, with desktop or compact gaps. |
 | **Edit either side** | Add or remove any app, including an unfocused pane. Released apps stay open. |
 | **Replace an app** | Exchange a pane with an open app while retaining its position and share of the side. The previous app stays open. |
-| **Layout controls** | Choose beside, stacked or equal sizes. Swap two apps, reorder three, or move an app to the other face. |
+| **Layout controls** | Choose beside, stacked or equal sizes. Swap two apps, reorder larger faces, or move an app to the other face. |
 | **Apps from other workspaces** | Pick local apps first, or open an **Add from workspace X** submenu to bring another app into the card. |
 | **Saved cards** | Name an arrangement and reopen it with its apps, split directions, proportions, remembered focus and visible face. |
 | **Workspace destinations** | Assign a saved card to a workspace. Opening it brings the whole card there, including an existing open card. |
@@ -51,7 +53,7 @@ running shell, then automatically fall back to **Fuzzel, Rofi or Wofi**.
 
 | | Native pairs | Experimental cards |
 | --- | --- | --- |
-| Apps per face | One | One to three |
+| Apps per face | One | One to five |
 | Layout | Native Hyprland groups; dwindle tested | Pinned hy3 for tiled cards; native groups for floating cards |
 | Floating windows | A pair can be floating | Whole multi-app cards can float, move and resize together |
 | Flip, transitions and peek | Yes; custom binding for peek | Yes |
@@ -61,7 +63,7 @@ running shell, then automatically fall back to **Fuzzel, Rofi or Wofi**.
 
 The default installer and hyprpm install **native pairs**. Follow the
 [container installation guide](docs/INSTALL.md#experimental-multi-app-cards)
-to get the workflow shown in the video. The three-app limit is Hyprflip's
+to get the workflow shown in the video. The five-app limit is Hyprflip's
 supported model; it is not a limit of hy3 itself.
 
 ## Install
@@ -159,7 +161,7 @@ Both apps must share a workspace and both be tiled or both floating.
 Focus the side you want to change and open **Super+Ctrl+Alt+C**:
 
 - **Layout of this side…** changes direction, equalizes sizes, swaps two apps
-  or reorders three. **Super+J** keeps Omarchy's existing split-direction toggle.
+  or reorders larger faces. **Super+J** keeps Omarchy's existing split-direction toggle.
 - **Replace an app…** exchanges any pane with an open app, including one from
   another workspace. This also works on a full side or its only app.
 - **Move an app to the other side…** transfers a pane while keeping at least
@@ -258,6 +260,9 @@ hl.config({ plugin = { hyprflip = {
     transition = "flip", -- flip, vertical, slide, fade, dissolve, portal, instant
     enabled = true,
     notifications = true,
+    card_frame = true,   -- false: classic tabs; true: experimental card frame
+    card_gap = -1,       -- -1: desktop spacing; 12: compact; 0–128: custom empty gap
+    drag_to_add = true,  -- Drop outside windows onto a card’s temporary target
     perspective = 5.0,   -- 2–8; higher means less perspective
     retreat = 0.02,      -- 0–0.2
 } } })
@@ -266,11 +271,43 @@ hl.config({ plugin = { hyprflip = {
 See [transition behavior and Omachill integration](docs/TRANSITIONS.md).
 The transition preference saved by the optional menu is reapplied on reload.
 
+## Recognizing a card
+
+In **OmaCards → Settings**, choose **Classic tabs** or **Card frame**.
+The experimental frame has one outline around its visible apps, a **Front/Back** label and a
+small **Flip** button. When both sides are unfolded, the button says **Fold**.
+The focused app keeps its own focus outline, so you can see which app will
+receive typing. Existing keyboard shortcuts continue to work.
+
+The frame uses your Hyprland border colors and groupbar font settings. It is
+built into Hyprflip; no additional border plugin is required. It replaces tab
+bars only on cards owned by Hyprflip. Set `card_frame = false` to disable it;
+native pairs and hy3 containers then use their original tab bars. Floating
+multi-app cards retain their existing border-only appearance with this setting.
+The hy3 frame needs the matching updated provider; older providers keep their
+tabs until updated.
+
+**Desktop spacing** follows `general:gaps_in` and workspace `gaps_in`
+overrides, including directional gaps. **Compact spacing** leaves 12 logical
+pixels between card apps, without changing ordinary tiles. Both apply to tiled
+and floating cards and persist across restarts when chosen through OmaCards.
+The Lua setting `card_gap` measures the full empty gap between borders; use
+`-1` to follow the desktop, or an integer from `0` to `128` for a custom gap.
+
+To add an outside app, hold your window-move modifier (normally **Super**) and
+drag the app onto **Drop to add to Front/Back** near the card’s top. Release
+there to add it to that side. Escape or releasing elsewhere keeps the normal
+window move. When unfolded, each face has its own target. A full side explains
+its five-app limit; application size limits can also refuse a drop. This works
+with both appearances, for hy3 and floating-container cards. Native one-app
+pairs need to be converted to a container first. Set `drag_to_add = false` to
+turn off these targets.
+
 ## Compatibility and limits
 
 - **Version pin:** Hyprland 0.56.2 only. Rebuild after compositor or ABI changes;
   other versions need adaptation and testing.
-- **Containers:** one workspace, two faces, at most three apps in a row or
+- **Containers:** one workspace, two faces, at most five apps in a row or
   column per face, tiled or floating. Nested flip cards and arbitrary pane trees
   are not implemented. Application minimum sizes can prevent a split
   or unfold; the existing card is kept when a change is refused.

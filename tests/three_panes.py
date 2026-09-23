@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise three-pane cards, size rollback and guided creation in isolation."""
+"""Exercise multi-app cards, five-pane limits, size rollback and guided creation."""
 import argparse
 from copy import deepcopy
 import json
@@ -83,7 +83,7 @@ def spawn(name, minimum=None):
 
 try:
     assert not ipc.data('-j', 'plugin', 'list')
-    libraries = [project / 'build/containers/provider/upstream/libhy3.so', project / 'build/hyprflip.so']
+    libraries = [project / 'build/containers/provider/upstream/libhy3.so', project / 'build/containers/core/hyprflip.so']
     if args.hyprglass: libraries.append(args.hyprglass)
     for source in libraries:
         library = root / ('three-' + source.name)
@@ -91,7 +91,7 @@ try:
         ipc.call('plugin', 'load', str(library)); loaded.append(library)
     config.write_text(original.replace('layout="dwindle"', 'layout="hy3"'))
     ipc.call('reload'); assert not ipc.call('configerrors')
-    assert ipc.status()['container_max_panes'] == 3
+    assert ipc.status()['container_max_panes'] == 5
     names = {m['name'] for m in ipc.data('-j', 'monitors')}
     ipc.call('output', 'create', 'headless')
     output = next(m['name'] for m in ipc.data('-j', 'monitors') if m['name'] not in names)
@@ -102,6 +102,9 @@ try:
     apps = [spawn(name) for name in ('Front', 'Mail', 'Chat', 'Notes', 'Terminal', 'Preview')]
     spare = spawn('Extra')
     ipc.move(spare, 32)
+    ipc.call('dispatch', 'hl.dsp.focus({workspace=32})')
+    extras = [spawn(name) for name in ('Front fourth', 'Front fifth', 'Back fourth', 'Back fifth')]
+    ipc.call('dispatch', 'hl.dsp.focus({workspace=30})')
     a, b, c, d, e, f = apps
     for transform in (0, 1):
         axis = 'horizontal' if transform == 0 else 'vertical'
@@ -122,13 +125,25 @@ try:
         aligned([a, e, f], transform)
         passed(f'rotation {transform}: both faces accept three apps and retain their axis and relative sizes')
 
+        for index, extra in enumerate(extras):
+            anchor = a if index < 2 else b
+            ipc.focus(anchor)
+            edit(anchor, 'add', 'workspace:32', extra)
+        assert [len(face) for face in card()['faces']] == [5, 5]
+        for face in card()['faces']: aligned(face, transform)
+        ipc.focus(b)
         before = deepcopy(card())
-        ipc.focus(spare); ipc.action('mark'); ipc.focus(f)
+        ipc.focus(spare); ipc.action('mark'); ipc.focus(b)
         try: ipc.action('attach')
-        except setup.SetupError as error: assert 'three apps' in str(error)
-        else: raise AssertionError('A fourth pane must be refused')
+        except setup.SetupError as error: assert 'five apps' in str(error)
+        else: raise AssertionError('A sixth pane must be refused')
         assert card() == before and ipc.status()['marked'] == spare
         ipc.action('cancel')
+        for index, extra in enumerate(extras):
+            anchor = a if index < 2 else b
+            ipc.focus(anchor)
+            edit(anchor, 'release:' + extra)
+            ipc.move(extra, 32)
         for side in card()['faces']:
             for app in side:
                 ipc.focus(app); ipc.action('flip'); ipc.action('flip')
@@ -136,7 +151,7 @@ try:
                 visible()
         ipc.focus(a); capture(f'rotation-{transform}-front')
         ipc.focus(b); capture(f'rotation-{transform}-back')
-        passed(f'rotation {transform}: fourth app is refused and all six apps retain per-face focus and input ownership')
+        passed(f'rotation {transform}: both faces accept five, refuse a sixth, release extras and retain focus/input ownership')
 
         ipc.action('workspace 31')
         assert all(ipc.windows()[app]['workspace']['id'] == 31 for app in apps)
@@ -172,7 +187,7 @@ try:
     except setup.Cancelled: pass
     else: raise AssertionError('Cancelling the third picker must abort')
     assert ipc.status() == before and ipc.windows()[spare]['workspace']['id'] == 32
-    flow = setup.Setup(ipc, Picker(b, c, 'workspace:32', spare))
+    flow = setup.Setup(ipc, Picker(b, c, 'workspace:32', spare, 'create'))
     flow.apply(flow.prepare(a))
     assert card()['faces'] == [[a], [b, c, spare]] and active() == a and not card()['unfolded']
     assert ipc.windows()[spare]['workspace']['id'] == 30

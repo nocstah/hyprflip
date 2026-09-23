@@ -2,6 +2,7 @@
 // Compiled into hy3, not into the MIT Hyprflip module. Uses hy3's own tree
 // operations; the registry holds weak references, never a second layout tree.
 #include "ContainerABI.hpp"
+#include "CardFrame.hpp"
 #include "globals.hpp"
 #include <algorithm>
 #include <array>
@@ -17,6 +18,8 @@ using namespace Hyprflip;
 struct Card {
     WP<Hy3Node> node;
     bool unfolded = false;
+    double header = 0;
+    double gap = -1;
 };
 std::map<uint64_t, Card> cards;
 uint64_t nextID = 1;
@@ -181,6 +184,11 @@ bool attach(uint64_t id, uintptr_t child, uint32_t side, bool vertical) {
     return true;
 }
 bool dissolve(uint64_t id) {
+    // Stop reserving our header before the now-ordinary group is recalculated.
+    if (const auto it = cards.find(id); it != cards.end()) {
+        it->second.header = 0;
+        it->second.gap = -1;
+    }
     auto r = root(id);
     if (r && r->parent) {
         auto layout = r->Hy3Node::layout();
@@ -504,19 +512,19 @@ bool unfold(uint64_t id, bool enabled) {
         r->setLayout(Hy3GroupLayout::Tabbed);
         return restoreSelection(id, state, true);
     }
-    // Reuse the faces and their ratios. A three-app row needs room across the
-    // card, so stack faces; for a three-app column, put faces side by side.
+    // Reuse the faces and their ratios. A row with three or more apps needs room across the
+    // card, so stack faces; for a tall app column, put faces side by side.
     // Mixed orientations keep the footprint heuristic. Application limits can
     // still select the alternate axis below.
     auto preferred = state.width >= state.height ? Hy3GroupLayout::SplitH : Hy3GroupLayout::SplitV;
-    bool threeAcross = false, threeDown = false;
+    bool manyAcross = false, manyDown = false;
     for (uint32_t side = 0; side < 2; ++side)
-        if (state.count[side] == 3) {
-            threeAcross |= face(*r, side)->as_group().layout == Hy3GroupLayout::SplitH;
-            threeDown |= face(*r, side)->as_group().layout == Hy3GroupLayout::SplitV;
+        if (state.count[side] >= 3) {
+            manyAcross |= face(*r, side)->as_group().layout == Hy3GroupLayout::SplitH;
+            manyDown |= face(*r, side)->as_group().layout == Hy3GroupLayout::SplitV;
         }
-    if (threeAcross != threeDown)
-        preferred = threeAcross ? Hy3GroupLayout::SplitV : Hy3GroupLayout::SplitH;
+    if (manyAcross != manyDown)
+        preferred = manyAcross ? Hy3GroupLayout::SplitV : Hy3GroupLayout::SplitH;
     const auto alternate = preferred == Hy3GroupLayout::SplitH ? Hy3GroupLayout::SplitV : Hy3GroupLayout::SplitH;
     cards.at(id).unfolded = true;
     for (const auto axis : {preferred, alternate}) {
@@ -561,7 +569,52 @@ const ContainerAPI api{CONTAINER_ABI_VERSION,
                        animating};
 } // namespace
 
-extern "C" __attribute__((visibility("default"))) const Hyprflip::ContainerAPI *hyprflip_hy3_bridge_v6() {
+double hyprflipCardHeader(const Hy3Node *node) {
+    for (const auto &[_, card] : cards)
+        if (card.node && card.node.get() == node)
+            return card.header;
+    return 0;
+}
+
+double hyprflipCardGap(const Hy3Node *node) {
+    for (const auto &[_, card] : cards)
+        if (card.node)
+            for (auto n = node; n; n = n->parent.get())
+                if (n == card.node.get()) return card.gap;
+    return -1;
+}
+
+extern "C" __attribute__((visibility("default"))) bool hyprflip_hy3_card_style_v1(uint64_t id, double header, double gap) {
+    auto r = root(id);
+    if (!r || !std::isfinite(header) || header < 0 || header > 64 || !std::isfinite(gap) || gap < -1 || gap > 128)
+        return false;
+    auto &card = cards.at(id);
+    if (card.header == header && card.gap == gap) return true;
+    card.header = header;
+    card.gap = gap;
+    if (header && r->tab_bar) r->tab_bar->hidden = true;
+    update(r->Hy3Node::layout());
+    return true;
+}
+
+// Optional extension: keep the container ABI usable with older cores and providers.
+// Resolve for the current provider epoch on every call; never retain this
+// function across a provider unload.
+extern "C" __attribute__((visibility("default"))) bool hyprflip_hy3_card_frame_v1(uint64_t id, double header) {
+    auto r = root(id);
+    if (!r || !std::isfinite(header) || header < 0 || header > 64)
+        return false;
+    auto &card = cards.at(id);
+    if (card.header == header)
+        return true;
+    card.header = header;
+    if (header && r->tab_bar)
+        r->tab_bar->hidden = true;
+    update(r->Hy3Node::layout());
+    return true;
+}
+
+extern "C" __attribute__((visibility("default"))) const Hyprflip::ContainerAPI *hyprflip_hy3_bridge_v7() {
     return &api;
 }
 

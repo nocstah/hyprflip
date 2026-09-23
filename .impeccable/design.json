@@ -1,0 +1,149 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-09-23T00:30:49.086Z",
+  "title": "Design System: Hyprflip",
+  "extensions": {
+    "native": {
+      "platform": "Hyprland",
+      "tokenSource": "docs/DESIGN.md frontmatter",
+      "visualAuthority": "The active Hyprland theme and each window's native decorations.",
+      "themeBindings": {
+        "activeBorder": {
+          "config": "general:col.active_border",
+          "sources": [
+            "src/CardFrames.cpp:CardFrames::paint",
+            "src/CardDrop.cpp:CardDrop::paint"
+          ]
+        },
+        "inactiveBorder": {
+          "config": "general:col.inactive_border",
+          "sources": [
+            "src/CardFrames.cpp:CardFrames::paint",
+            "src/CardDrop.cpp:CardDrop::paint"
+          ]
+        },
+        "textColor": {
+          "config": "group:groupbar:text_color",
+          "sources": [
+            "src/CardFrames.cpp:CardFrames::paint",
+            "src/CardDrop.cpp:CardDrop::paint"
+          ]
+        },
+        "fontFamily": {
+          "config": "group:groupbar:font_family",
+          "sources": [
+            "src/CardFrames.cpp:CardFrames::paint",
+            "src/CardDrop.cpp:CardDrop::paint"
+          ]
+        },
+        "fontSize": {
+          "config": "group:groupbar:font_size",
+          "frameClamp": [
+            11,
+            24
+          ],
+          "dropTargetClamp": [
+            12,
+            24
+          ],
+          "unit": "logical px",
+          "sources": [
+            "src/CardFrames.cpp:fontSize",
+            "src/CardDrop.cpp:fontSize"
+          ]
+        },
+        "frameBorderWidth": {
+          "config": "general:border_size",
+          "expression": "clamp(configured border size + 1, 2, 6)",
+          "source": "src/CardFrames.cpp:CardFrames::paint"
+        },
+        "frameRounding": {
+          "source": "src/CardFrames.cpp:CardFrames::paint",
+          "authority": "Anchor window rounding, real border size and rounding power; controls are capped at 6 logical px."
+        }
+      },
+      "spacing": {
+        "setting": "plugin:hyprflip:card_gap",
+        "source": "src/Plugin.cpp:PLUGIN_INIT",
+        "desktop": {
+          "value": -1,
+          "config": "general:gaps_in",
+          "workspaceOverride": "gaps_in",
+          "horizontal": "left + right",
+          "vertical": "top + bottom",
+          "sources": [
+            "src/FloatingCards.cpp:Card::gap",
+            "integrations/hy3/prepare-source.py"
+          ]
+        },
+        "compact": {
+          "ref": "{spacing.card-compact}",
+          "authority": "work/card-interaction-contract.md"
+        },
+        "custom": {
+          "minimum": 0,
+          "maximum": 128,
+          "unit": "full logical px of empty space between pane borders",
+          "scope": "Within and between visible faces, independent of frame appearance.",
+          "hy3Rounding": "floor(gap / 2) + ceil(gap / 2)",
+          "sources": [
+            "src/FloatingCards.cpp:Card::paneBox",
+            "integrations/hy3/Bridge.cpp:hyprflip_hy3_card_style_v1",
+            "integrations/hy3/prepare-source.py"
+          ]
+        }
+      },
+      "capacity": {
+        "appsPerFace": 5,
+        "source": "src/ContainerABI.hpp:CONTAINER_MAX_PANES",
+        "fullTargetLabel": "Front: 5 apps already / Back: 5 apps already",
+        "refusalSource": "src/Controller.cpp:Controller::dropOffers"
+      },
+      "dropTarget": {
+        "inset": "{spacing.drop-target-inset}",
+        "rounding": "{rounded.drop-target}",
+        "maximumWidth": "420 logical px",
+        "minimumWidth": "150 logical px",
+        "height": "clamped groupbar font size + 24 logical px",
+        "previewOpacity": 0.15,
+        "minimumTextContrast": 4.5,
+        "fillRule": "Use opaque black or white according to the configured text luminance.",
+        "borderState": "Active theme border while hovered; inactive theme border otherwise.",
+        "previewRule": "Shade the prospective last slot along the destination face's current orientation without changing layout.",
+        "source": "src/CardDrop.cpp:CardDrop::targets / CardDrop::paint"
+      },
+      "appearance": {
+        "setting": "plugin:hyprflip:card_frame",
+        "classic": false,
+        "cardFrame": true,
+        "classicBehavior": "Native/hy3 tabs; border-only floating multi-app cards.",
+        "providerFallback": "A hy3 provider without the optional frame extension keeps native tabs.",
+        "spacingFallback": "A provider with only the older frame extension keeps native gaps; custom spacing needs the style extension.",
+        "sources": [
+          "src/Controller.cpp:Controller::syncFrames",
+          "scripts/workflow.py:Hyprctl.save_appearance",
+          "examples/preferences.lua"
+        ]
+      },
+      "unfold": {
+        "largeFaceThreshold": 3,
+        "horizontalRows": "Faces above and below each other.",
+        "verticalColumns": "Faces beside each other.",
+        "sizeFallback": "Try the alternate axis; preserve the prior card state if neither fits.",
+        "sources": [
+          "src/FloatingCards.cpp:Card::preferVerticalUnfold",
+          "src/FloatingCards.cpp:unfold",
+          "integrations/hy3/Bridge.cpp:unfold"
+        ]
+      },
+      "verificationCaptures": [
+        ".impeccable/review/interactions/classic-compact.png",
+        ".impeccable/review/interactions/drop-preview-classic.png",
+        ".impeccable/review/interactions/five-apps.png",
+        ".impeccable/review/interactions/full-face.png",
+        ".impeccable/review/interactions/unfolded-drop.png",
+        ".impeccable/review/interactions/floating-unfolded-rows.png"
+      ]
+    }
+  }
+}

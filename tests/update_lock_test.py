@@ -32,7 +32,8 @@ class UpdateLockTest(unittest.TestCase):
                 if args == ['hyprctl', 'configerrors']:
                     output = ''
                 elif args == ['hyprctl', '-j', 'monitors']:
-                    output = json.dumps([{'solitaryBlockedBy': ['WORKSPACE']},
+                    output = json.dumps([{'solitaryBlockedBy': None},
+                                         {'solitaryBlockedBy': ['WORKSPACE']},
                                          {'solitaryBlockedBy': ['LOCK', 'WINDOWED']}])
                 else:
                     self.fail('Updater continued while locked: ' + repr(args))

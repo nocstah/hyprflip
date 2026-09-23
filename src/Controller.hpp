@@ -1,5 +1,7 @@
 #pragma once
 #include "ContainerABI.hpp"
+#include "CardFrames.hpp"
+#include "CardDrop.hpp"
 #include "FlipTransformer.hpp"
 #include "Timeline.hpp"
 #include <array>
@@ -13,8 +15,8 @@
 
 namespace Hyprflip {
 struct Settings {
-    SP<Config::Values::Int> duration;
-    SP<Config::Values::Bool> enabled, notifications;
+    SP<Config::Values::Int> duration, cardGap;
+    SP<Config::Values::Bool> enabled, notifications, cardFrame, dragToAdd;
     SP<Config::Values::Float> perspective, retreat;
     SP<Config::Values::String> transition;
 };
@@ -41,6 +43,7 @@ class Controller {
         WP<Desktop::View::CGroup> group;
         bool previousLock = false;
         uint64_t containerID = 0, providerEpoch = 0;
+        bool frame = false;
     };
     struct State {
         std::array<std::vector<PHLWINDOW>, 2> faces;
@@ -76,6 +79,12 @@ class Controller {
     const ContainerAPI *provider(uint64_t epoch = 0) const;
     void discardContainer(const Pair &pair);
     void reconcile();
+    void syncFrames();
+    std::vector<CardFrameView> frameViews() const;
+    std::vector<CardDropOffer> dropOffers(PHLWINDOW window) const;
+    Result dropAttach(PHLWINDOW window, const CardDropOffer &offer);
+    std::unique_ptr<CardDrop> m_drop;
+    Result dispatch(const std::string &action);
     void deferReconcile();
     void onFrame(PHLMONITOR monitor);
     void finish(bool applyDestination = true);
@@ -121,9 +130,10 @@ class Controller {
     };
     std::optional<Peek> m_peek;
     std::shared_ptr<FlipShader> m_shader;
+    std::unique_ptr<CardFrames> m_frames;
     PHLMONITORREF m_renderingMonitor;
     SP<CEventLoopTimer> m_timer;
-    UP<SEventLoopDoLaterLock> m_reconcileLater, m_keyLater;
+    UP<SEventLoopDoLaterLock> m_reconcileLater, m_keyLater, m_frameLater, m_dropLater;
     std::vector<CHyprSignalListener> m_listeners;
     std::optional<uint32_t> m_eventKey;
     bool m_mutating = false;

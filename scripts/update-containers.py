@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """Update an already-enabled container trial and reconstruct its existing cards.
 
-Keeps Hyprglass loaded. Does not enable layouts, add bindings, or launch apps.
+Keeps Hyprglass loaded. Does not change configured layouts, add bindings, or launch apps.
 Library paths must match the configured installation. Backups include recovery
 metadata for this compositor session; they are not portable saved setups.
 """
 import argparse
+from contextlib import contextmanager
 from datetime import datetime
 import json
 import os
@@ -105,6 +106,68 @@ def load():
     wait(lambda: state()['container_provider'])
 
 
+@contextmanager
+def reconstruction_space(card, saved):
+    # Unloading hy3 flattens its tree. Rebuilding a split among all those loose
+    # tiles can fail an application's minimum size before its former companions
+    # have been collected. Assemble multi-app provider cards on an empty
+    # workspace on the same monitor, then return the complete card as one tile.
+    if card.get('native_group') or card.get('floating') or max(map(len, card['faces'])) < 2:
+        yield
+        return
+    members = [w for face in card['faces'] for w in face]
+    destination = saved[members[0]]['workspace']['id']
+    used = {w['id'] for w in json.loads(ctl('-j', 'workspaces'))}
+    temporary = next(number for number in range(1000, 100000) if number not in used | card_workspaces)
+    token = reservation + '-stage'
+    monitor = clients()[members[0]]['monitor']
+    name = next(m['name'] for m in json.loads(ctl('-j', 'monitors')) if m['id'] == monitor)
+    try:
+        ctl('hyprflip', f'reserve {temporary} {token} 120')
+        ctl('eval', f'hl.workspace_rule({{workspace="{temporary}",layout="hy3"}})')
+        ctl('dispatch', f'hl.dsp.focus({{monitor={json.dumps(name)}}})')
+        ctl('dispatch', f'hl.dsp.focus({{workspace={temporary}}})')
+        for address in members:
+            ctl('dispatch', f'hl.dsp.window.move({{window="address:{address}",workspace="{temporary}",follow=false}})')
+            if address not in (card['faces'][0][0], card['faces'][1][0]):
+                ctl('dispatch', f'hl.dsp.window.float({{window="address:{address}",action="enable"}})')
+        yield
+        focused((card['current'], f'assert(hl.plugin.hyprflip.workspace({destination}, false))'))
+        if any(clients()[w]['workspace']['id'] != destination for w in members):
+            raise RuntimeError('The restored card did not return to its original workspace')
+        # Returning the complete card can give it an equal-sized tile instead
+        # of its previous wider/taller slot. Resize the card root, not an inner
+        # pane, so applications with real minimum sizes still fit. Expansion
+        # and reset run in one event-loop callback: no expanded frame is shown.
+        levels = 1 + (len(card['faces'][card['active']]) > 1)
+        for _ in range(4):
+            current = next(c for c in state()['containers'] if c['faces'] == card['faces'])
+            dx, dy = (card['box'][i] - current['box'][i] for i in (2, 3))
+            if abs(dx) < 2 and abs(dy) < 2:
+                break
+            focused((card['current'],
+                'local expand = hl.plugin.hy3.expand; '
+                + 'expand("expand")(); ' * levels
+                + f'hl.dispatch(hl.dsp.window.resize({{x={dx},y={dy},relative=true}})); '
+                + 'expand("base")()'))
+            after = next(c for c in state()['containers'] if c['faces'] == card['faces'])
+            if after['box'] == current['box']:
+                break
+    finally:
+        # An interrupted reconstruction must not strand apps on the temporary
+        # workspace or prevent the outer rollback from recognizing its snapshot.
+        remaining = clients()
+        staged = [w for w in members if w in remaining and remaining[w]['workspace']['id'] == temporary]
+        if staged:
+            partial = next((c for c in state()['containers'] if any(w in f for f in c['faces'] for w in staged)), None)
+            if partial:
+                focused((partial['current'], 'assert(hl.plugin.hyprflip.unpair())'))
+            for address in staged:
+                ctl('dispatch', f'hl.dsp.window.float({{window="address:{address}",action="disable"}})')
+                ctl('dispatch', f'hl.dsp.window.move({{window="address:{address}",workspace="{destination}",follow=false}})')
+        ctl('hyprflip', f'unreserve {token}', check=False)
+
+
 def restore(snapshot, saved):
     for pair in snapshot['pairs']:
         ctl('hyprflip', 'adopt', pair['front'], pair['back'])
@@ -113,64 +176,71 @@ def restore(snapshot, saved):
         members = [w for face in card['faces'] for w in face]
         if any(w not in now or any(now[w][key] != saved[w][key] for key in ('pid', 'class', 'workspace', 'floating')) for w in members):
             raise RuntimeError('A card member closed or changed during the update; recovery metadata was retained')
-        front, back = card['faces'][0][0], card['faces'][1][0]
-        if card.get('floating'):
-            x, y, width, height = map(round, card['box'])
-            focused((front, f'hl.dispatch(hl.dsp.window.resize({{x={width},y={height}}})); '
-                            f'hl.dispatch(hl.dsp.window.move({{x={x},y={y}}}))'))
-        focused((front, 'assert(hl.plugin.hyprflip.mark())'),
-                (back, 'assert(hl.plugin.hyprflip.pair())'))
-        for side, face in enumerate(card['faces']):
-            layout = card.get('layouts', [None, None])[side]
-            if len(face) >= 2:
-                first, second = face[:2]
-                dx = abs(saved[first]['at'][0] - saved[second]['at'][0])
-                dy = abs(saved[first]['at'][1] - saved[second]['at'][1])
-                axis = 0 if dx > dy else 1
-                if layout: axis = int(layout['axis'] == 'vertical')
-                for companion in face[1:]:
-                    direction = 'horizontal' if axis == 0 else 'vertical'
-                    focused((companion, 'assert(hl.plugin.hyprflip.mark())'),
-                            (first, f'assert(hl.plugin.hyprflip.attach("{direction}"))'))
-                # Restore the inner proportion even if the containing tile was
-                # reflowed when hy3 reloaded. No application content is saved.
-                total = sum(saved[w]['size'][axis] for w in face)
-                ratios = {w: saved[w]['size'][axis] / total for w in face}
-                if layout: ratios = dict(zip(face, layout['ratios']))
-                exact = state().get('repair_cards')
-                if exact:
-                    argument = ('vertical' if axis else 'horizontal') + ''.join(f' {w}:{ratios[w]:.12g}' for w in face)
-                    focused((first, f'assert(hl.plugin.hyprflip.arrange({json.dumps(argument)}))'))
-                for _ in range(0 if exact else 4):
-                    settled = True
-                    # Work from the first pane towards the last: each resize
-                    # adjusts its next neighbor without disturbing earlier panes.
-                    for pane in face[:-1]:
-                        time.sleep(.15)
-                        now = clients()
-                        desired = ratios[pane] * sum(now[w]['size'][axis] for w in face)
-                        delta = round(desired - now[pane]['size'][axis])
-                        if abs(delta) <= 1:
-                            continue
-                        settled = False
-                        x, y = (delta, 0) if axis == 0 else (0, delta)
-                        focused((pane, f'hl.dispatch(hl.dsp.window.resize({{x={x},y={y},relative=true}}))'))
-                    if settled:
-                        break
-            remembered = min(face, key=lambda w: saved[w]['focusHistoryID'] if saved[w]['focusHistoryID'] >= 0 else float('inf'))
-            if layout: remembered = layout['focused']
-            focus(remembered)
-        focused((card['current'], 'assert(hl.plugin.hyprflip.unfold())' if card.get('unfolded') else ''))
-        restored = next((c for c in state()['containers'] if c['faces'] == card['faces']), None)
-        if not restored or restored['current'] != card['current'] or bool(restored.get('unfolded')) != bool(card.get('unfolded')):
-            raise RuntimeError('Could not restore a card; recovery metadata was retained')
-        if bool(restored.get('floating')) != bool(card.get('floating')):
-            raise RuntimeError('Could not restore the card mode; recovery metadata was retained')
-        if card.get('floating'):
-            x, y, width, height = card['box']
-            rx, ry, rw, rh = restored['box']
-            focused((card['current'], f'hl.dispatch(hl.dsp.window.resize({{x={width-rw},y={height-rh},relative=true}})); '
-                                     f'hl.dispatch(hl.dsp.window.move({{x={x-rx},y={y-ry},relative=true}}))'))
+        with reconstruction_space(card, saved):
+            restore_card(card, saved)
+
+
+def restore_card(card, saved):
+    front, back = card['faces'][0][0], card['faces'][1][0]
+    if card.get('floating'):
+        x, y, width, height = map(round, card['box'])
+        focused((front, f'hl.dispatch(hl.dsp.window.resize({{x={width},y={height}}})); '
+                        f'hl.dispatch(hl.dsp.window.move({{x={x},y={y}}}))'))
+    focused((front, 'assert(hl.plugin.hyprflip.mark())'),
+            (back, 'assert(hl.plugin.hyprflip.pair())'))
+    for side, face in enumerate(card['faces']):
+        layout = card.get('layouts', [None, None])[side]
+        if len(face) >= 2:
+            first, second = face[:2]
+            dx = abs(saved[first]['at'][0] - saved[second]['at'][0])
+            dy = abs(saved[first]['at'][1] - saved[second]['at'][1])
+            axis = 0 if dx > dy else 1
+            if layout: axis = int(layout['axis'] == 'vertical')
+            for companion in face[1:]:
+                direction = 'horizontal' if axis == 0 else 'vertical'
+                tile = (f'hl.dispatch(hl.dsp.window.float({{window="address:{companion}",action="disable"}})); '
+                        if not card.get('native_group') and not card.get('floating') else '')
+                focused((companion, tile + 'assert(hl.plugin.hyprflip.mark())'),
+                        (first, f'assert(hl.plugin.hyprflip.attach("{direction}"))'))
+            # Restore the inner proportion even if the containing tile was
+            # reflowed when hy3 reloaded. No application content is saved.
+            total = sum(saved[w]['size'][axis] for w in face)
+            ratios = {w: saved[w]['size'][axis] / total for w in face}
+            if layout: ratios = dict(zip(face, layout['ratios']))
+            exact = state().get('repair_cards')
+            if exact:
+                argument = ('vertical' if axis else 'horizontal') + ''.join(f' {w}:{ratios[w]:.12g}' for w in face)
+                focused((first, f'assert(hl.plugin.hyprflip.arrange({json.dumps(argument)}))'))
+            for _ in range(0 if exact else 4):
+                settled = True
+                # Work from the first pane towards the last: each resize
+                # adjusts its next neighbor without disturbing earlier panes.
+                for pane in face[:-1]:
+                    time.sleep(.15)
+                    now = clients()
+                    desired = ratios[pane] * sum(now[w]['size'][axis] for w in face)
+                    delta = round(desired - now[pane]['size'][axis])
+                    if abs(delta) <= 1:
+                        continue
+                    settled = False
+                    x, y = (delta, 0) if axis == 0 else (0, delta)
+                    focused((pane, f'hl.dispatch(hl.dsp.window.resize({{x={x},y={y},relative=true}}))'))
+                if settled:
+                    break
+        remembered = min(face, key=lambda w: saved[w]['focusHistoryID'] if saved[w]['focusHistoryID'] >= 0 else float('inf'))
+        if layout: remembered = layout['focused']
+        focus(remembered)
+    focused((card['current'], 'assert(hl.plugin.hyprflip.unfold())' if card.get('unfolded') else ''))
+    restored = next((c for c in state()['containers'] if c['faces'] == card['faces']), None)
+    if not restored or restored['current'] != card['current'] or bool(restored.get('unfolded')) != bool(card.get('unfolded')):
+        raise RuntimeError('Could not restore a card; recovery metadata was retained')
+    if bool(restored.get('floating')) != bool(card.get('floating')):
+        raise RuntimeError('Could not restore the card mode; recovery metadata was retained')
+    if card.get('floating'):
+        x, y, width, height = card['box']
+        rx, ry, rw, rh = restored['box']
+        focused((card['current'], f'hl.dispatch(hl.dsp.window.resize({{x={width-rw},y={height-rh},relative=true}})); '
+                                 f'hl.dispatch(hl.dsp.window.move({{x={x-rx},y={y-ry},relative=true}}))'))
 
 
 for installed, built in libraries:
@@ -179,7 +249,7 @@ for installed, built in libraries:
 if ctl('configerrors'):
     raise SystemExit('Resolve existing configuration errors before updating')
 monitors = json.loads(ctl('-j', 'monitors'))
-if any('LOCK' in monitor.get('solitaryBlockedBy', []) for monitor in monitors):
+if any('LOCK' in (monitor.get('solitaryBlockedBy') or []) for monitor in monitors):
     raise SystemExit('Unlock your desktop before updating Hyprflip; restoring cards requires window focus.')
 plugins = {p['name'] for p in json.loads(ctl('-j', 'plugin', 'list'))}
 if not {'hyprflip', 'hy3'} <= plugins:

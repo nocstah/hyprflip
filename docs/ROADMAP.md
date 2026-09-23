@@ -1,6 +1,6 @@
 # Workflow roadmap
 
-Keep the model small: two faces, at most three panes per face, one split per face.
+Keep the model small: two faces, at most five panes per face, one split per face.
 An addition should remove a recurring workflow interruption without introducing
 another kind of group or requiring users to manage a layout tree.
 
@@ -17,7 +17,7 @@ another kind of group or requiring users to manage a layout tree.
 - An explicit experimental updater restores cards after replacing both libraries
   and rolls back a failed load. The native installer refuses active containers.
 - Optional guided setup makes O create a card when the focused window
-  has none. Choose one to three back apps in the native menu; cancellation leaves
+  has none. Choose one to five back apps in the native menu; cancellation leaves
   the windows unchanged. Creation finishes folded onto the front. Existing cards
   keep immediate unfold/fold behavior.
 - Flips use a shared depth light across all panes and smoothly brake when
@@ -28,13 +28,13 @@ another kind of group or requiring users to manage a layout tree.
   release any app. Local choices precede workspace submenus; choosing a remote
   app moves it here, with workspace recovery after a refused attachment. C opens
   editing, while O keeps unfold/fold. A full
-  side explains its three-app limit; removing a side's only app is explicitly
+  side explains its five-app limit; removing a side's only app is explicitly
   labeled Ungroup card.
-- Each side supports three apps in one row or column. A third app keeps the
+- Each side supports up to five apps in one row or column. A third app keeps the
   split direction and relative sizes already chosen. H/V establish the first
   split; no nested layout editor or additional shortcuts are introduced. The
-  matching core/provider and updater handle cards with up to six apps.
-  Unfold keeps three-app rows above one another and columns beside one another,
+  matching core/provider and updater handle cards with up to ten apps.
+  Unfold keeps rows of three or more apps above one another and columns beside one another,
   trying the alternate arrangement when application minimums need it.
 - The transition picker offers Flip, Vertical Flip, Slide, Fade, Instant and
   experimental Dissolve and Portal, with reversible previews. Chill integration
@@ -48,8 +48,9 @@ another kind of group or requiring users to manage a layout tree.
 - Super+Ctrl+Alt+L opens the searchable card launcher, displaying the workspace
   of running cards. C → Manage card updates the saved layout without retyping
   its name; Rename and Duplicate change saved definitions atomically.
-- ABI 4 adds Beside, Stacked and Equal sizes to C, plus moving any pane to the
-  other face. Both faces stay populated, with three apps maximum. Refused changes
+- Beside, Stacked and Equal sizes, plus moving a pane to the other face, were
+  introduced in ABI 4. The current ABI 7 build keeps both faces populated with
+  five apps maximum on each face. Refused changes
   restore the original arrangement in place.
 - C → Reopen missing apps fills a partially intact saved card in place. It
   preserves the current face, remembered focus, unfolded state and surviving
@@ -96,6 +97,10 @@ another kind of group or requiring users to manage a layout tree.
 
 Saved setups, missing-pane recovery, layout controls, pane order/replacement and hold-to-peek are
 implemented. The next candidates are:
+
+Drag-to-add is implemented for multi-app containers: the visible face has an
+explicit temporary target, Escape cancels, and the five-app/size limits remain.
+The hidden face is intentionally reached by flipping or unfolding first.
 
 1. **Undo the last card edit.** Start with membership and layout edits while all
    affected windows are still open and unchanged. Avoid a general desktop history.

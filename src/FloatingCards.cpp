@@ -3,6 +3,7 @@
 #include <array>
 #include <cmath>
 #include <hyprland/src/config/values/types/CssGapValue.hpp>
+#include <hyprland/src/config/shared/workspace/WorkspaceRuleManager.hpp>
 #include <hyprland/src/desktop/state/FocusState.hpp>
 #include <hyprland/src/desktop/state/WindowState.hpp>
 #include <hyprland/src/desktop/view/Group.hpp>
@@ -34,11 +35,6 @@ PHLWINDOW resolve(uintptr_t address) {
     return nullptr;
 }
 uintptr_t addr(PHLWINDOW w) { return reinterpret_cast<uintptr_t>(w.get()); }
-double gap() {
-    static auto value = CConfigValue<Config::IComplexConfigValue>("general:gaps_in");
-    auto g = static_cast<Config::CCssGapData *>(value.ptr());
-    return std::max<int64_t>(0, std::max(g->m_left + g->m_right, g->m_top + g->m_bottom));
-}
 
 // Only the core-owned CGroup target enters a layout. This adapter turns its
 // outer geometry into a pane rectangle, then delegates to the original target.
@@ -92,8 +88,20 @@ struct Card {
     std::map<uintptr_t, SP<PaneTarget>> targets;
     SP<CGroup> group;
     unsigned active = 0;
-    bool unfolded = false, alive = true, adjusting = false, changing = false;
+    bool unfolded = false, unfoldVertical = false, alive = true, adjusting = false, changing = false;
     CBox initial;
+    double header = 0;
+    double gapOverride = -1;
+
+    double gap(bool vertical) const {
+        if (gapOverride >= 0) return gapOverride;
+        static auto value = CConfigValue<Config::IComplexConfigValue>("general:gaps_in");
+        const auto workspace = group ? group->m_target->workspace() : faces[0].empty() || !faces[0][0] ? nullptr : faces[0][0]->m_workspace;
+        auto rule = Config::workspaceRuleMgr()->getWorkspaceRuleFor(workspace);
+        auto g = rule.and_then([](auto r) { return r.m_gapsIn; })
+                     .value_or(*static_cast<Config::CCssGapData *>(value.ptr()));
+        return std::max<int64_t>(0, vertical ? g.m_top + g.m_bottom : g.m_left + g.m_right);
+    }
 
     std::optional<unsigned> side(PHLWINDOW w) const {
         for (unsigned s = 0; s < 2; ++s)
@@ -111,20 +119,33 @@ struct Card {
         }
         return true;
     }
+    bool preferVerticalUnfold() const {
+        bool rows = false, columns = false;
+        for (unsigned side = 0; side < 2; ++side)
+            if (faces[side].size() >= 3) (vertical[side] ? columns : rows) = true;
+        return rows && !columns;
+    }
     CBox faceBox(CBox box, unsigned s) const {
+        box.y += header;
+        box.h = std::max(1., box.h - header);
         if (unfolded) {
-            box.w = std::max(1., (box.w - gap()) / 2);
-            box.x += s * (box.w + gap());
+            if (unfoldVertical) {
+                box.h = std::max(1., (box.h - gap(true)) / 2);
+                box.y += s * (box.h + gap(true));
+            } else {
+                box.w = std::max(1., (box.w - gap(false)) / 2);
+                box.x += s * (box.w + gap(false));
+            }
         }
         return box;
     }
     CBox paneBox(CBox outer, unsigned s, unsigned index) const {
         auto box = faceBox(outer, s);
         const auto n = faces[s].size();
-        const double space = std::max(1., (vertical[s] ? box.h : box.w) - gap() * (n - 1));
+        const double space = std::max(1., (vertical[s] ? box.h : box.w) - gap(vertical[s]) * (n - 1));
         double start = 0;
         for (unsigned i = 0; i < index; ++i)
-            start += ratios[s][i] * space + gap();
+            start += ratios[s][i] * space + gap(vertical[s]);
         const double extent = ratios[s][index] * space;
         if (vertical[s]) {
             box.y += std::round(start);
@@ -142,13 +163,16 @@ struct Card {
                 if (!faces[s][i])
                     continue;
                 auto min = faces[s][i]->minSize().value_or(Vector2D{40, 40});
+                const auto border = faces[s][i]->getRealBorderSize();
+                min += Vector2D{2. * border, 2. * border};
                 sizes[s].x = std::max(sizes[s].x, vertical[s] ? min.x : min.x / ratios[s][i]);
                 sizes[s].y = std::max(sizes[s].y, vertical[s] ? min.y / ratios[s][i] : min.y);
             }
-            (vertical[s] ? sizes[s].y : sizes[s].x) += gap() * (faces[s].size() - 1);
+            (vertical[s] ? sizes[s].y : sizes[s].x) += gap(vertical[s]) * (faces[s].size() - 1);
         }
-        return {unfolded ? 2 * std::max(sizes[0].x, sizes[1].x) + gap() : std::max(sizes[0].x, sizes[1].x),
-                std::max(sizes[0].y, sizes[1].y)};
+        const double width = std::max(sizes[0].x, sizes[1].x), height = std::max(sizes[0].y, sizes[1].y);
+        return {unfolded && !unfoldVertical ? 2 * width + gap(false) : width,
+                (unfolded && unfoldVertical ? 2 * height + gap(true) : height) + header};
     }
     bool fits(CBox box) const {
         for (unsigned s = 0; s < 2; ++s)
@@ -156,6 +180,8 @@ struct Card {
                 if (!faces[s][i])
                     return false;
                 auto size = paneBox(box, s, i).size();
+                const auto border = faces[s][i]->getRealBorderSize();
+                size -= Vector2D{2. * border, 2. * border};
                 auto min = faces[s][i]->minSize().value_or(Vector2D{1, 1});
                 auto max = faces[s][i]->maxSize().value_or(Vector2D{1e9, 1e9});
                 if (size.x < min.x || size.y < min.y || size.x > max.x || size.y > max.y)
@@ -192,7 +218,13 @@ struct Card {
     void refresh() {
         if (!alive || !group || changing)
             return;
-        group->m_target->recalc();
+        // Edits may have updated the group's logical box. Let the tiled
+        // algorithm restore its visual slot (including outer/neighbor gaps)
+        // before splitting it into panes.
+        if (!group->m_target->floating() && group->m_target->space())
+            group->m_target->space()->recalculate();
+        else
+            group->m_target->recalc();
         visibility();
         for (const auto &[_, p] : targets) {
             p->warpPositionSize();
@@ -247,6 +279,11 @@ void PaneTarget::setPositionGlobal(const STargetBox &box, uint8_t flags) {
     }
     auto index = std::ranges::find(c->faces[*side], w) - c->faces[*side].begin();
     auto pane = Fullscreen::controller()->isFullscreen(w) ? outer : c->paneBox(outer, *side, index);
+    // Tiled window targets inset their visual slot by the window's border.
+    // Floating targets accept a content rectangle directly. Use the same slot
+    // interpretation here so the empty gap is identical in both modes.
+    if (floating() && !Fullscreen::controller()->isFullscreen(w))
+        pane.expand(-w->getRealBorderSize());
     m_box = {pane, pane};
     original->setPositionGlobal(m_box, flags);
     c->visibility();
@@ -327,8 +364,10 @@ bool attach(uint64_t id, uintptr_t address, uint32_t side, bool vertical) {
     auto oldRatios = c->ratios[side];
     auto oldVertical = c->vertical[side];
     c->faces[side].push_back(w);
-    c->ratios[side].assign(c->faces[side].size(), 1. / c->faces[side].size());
-    c->vertical[side] = vertical;
+    const double addedShare = 1. / c->faces[side].size();
+    for (auto &weight : c->ratios[side]) weight *= 1. - addedShare;
+    c->ratios[side].push_back(addedShare);
+    if (oldRatios.size() == 1) c->vertical[side] = vertical;
     auto box = c->group->m_target->position();
     auto min = c->minimum();
     if (c->group->m_target->floating()) {
@@ -366,8 +405,12 @@ bool release(uint64_t id, uintptr_t address) {
     c->changing = true;
     c->restore(w);
     c->group->remove(w);
-    std::erase(c->faces[*s], w);
-    c->ratios[*s].assign(c->faces[*s].size(), 1. / c->faces[*s].size());
+    const auto index = std::ranges::find(c->faces[*s], w) - c->faces[*s].begin();
+    c->faces[*s].erase(c->faces[*s].begin() + index);
+    c->ratios[*s].erase(c->ratios[*s].begin() + index);
+    double total = 0;
+    for (const auto weight : c->ratios[*s]) total += weight;
+    for (auto &weight : c->ratios[*s]) weight /= total;
     if (c->focused[*s] == w)
         c->focused[*s] = c->faces[*s][0];
     c->changing = false;
@@ -409,15 +452,26 @@ bool unfold(uint64_t id, bool value) {
     auto c = get(id);
     if (!c || !c->valid())
         return false;
+    const bool previous = c->unfolded, previousAxis = c->unfoldVertical;
     c->unfolded = value;
-    auto box = c->group->m_target->position();
-    auto min = c->minimum();
-    if (c->group->m_target->floating()) {
-        box.w = std::max(box.w, min.x);
-        box.h = std::max(box.h, min.y);
+    if (value) c->unfoldVertical = c->preferVerticalUnfold();
+    auto sizedBox = [&]() {
+        auto box = c->group->m_target->position();
+        const auto min = c->minimum();
+        if (c->group->m_target->floating()) {
+            box.w = std::max(box.w, min.x);
+            box.h = std::max(box.h, min.y);
+        }
+        return box;
+    };
+    auto box = sizedBox();
+    if (value && !c->fits(box)) {
+        c->unfoldVertical = !c->unfoldVertical;
+        box = sizedBox();
     }
     if (!c->fits(box)) {
-        c->unfolded = !value;
+        c->unfolded = previous;
+        c->unfoldVertical = previousAxis;
         return false;
     }
     c->group->m_target->setPositionGlobal({.logicalBox = box, .visualBox = {}});
@@ -582,6 +636,7 @@ bool canCreate(const ContainerSnapshot &snapshot) {
             proposed.ratios[s].push_back(snapshot.ratios[s][i]);
         }
     }
+    proposed.unfoldVertical = proposed.preferVerticalUnfold();
     auto minimum = proposed.minimum();
     return proposed.fits(
         {snapshot.x, snapshot.y, std::max(snapshot.width, minimum.x), std::max(snapshot.height, minimum.y)});
@@ -612,6 +667,7 @@ uint64_t create(const ContainerSnapshot &snapshot) {
         auto w = resolve(snapshot.focused[s]);
         c->focused[s] = c->side(w) == s ? w : c->faces[s][0].lock();
     }
+    c->unfoldVertical = c->preferVerticalUnfold();
     auto min = c->minimum();
     c->initial.w = std::max(c->initial.w, min.x);
     c->initial.h = std::max(c->initial.h, min.y);
@@ -675,6 +731,17 @@ bool toggle(uint64_t id) {
         return false;
     g_layoutManager->changeFloatingMode(c->group->m_target);
     c->refresh();
+    return true;
+}
+bool setStyle(uint64_t id, double header, double gap) {
+    auto c = get(id);
+    if (!c || !c->valid() || !std::isfinite(header) || header < 0 || header > 64 || !std::isfinite(gap) || gap < -1 || gap > 128)
+        return false;
+    if (c->header != header || c->gapOverride != gap) {
+        c->header = header;
+        c->gapOverride = gap;
+        c->refresh();
+    }
     return true;
 }
 void shutdown() {

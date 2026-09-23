@@ -17,4 +17,22 @@ if hl.plugin.hyprflip and hl.plugin.hyprflip.preview then
             hl.config({plugin={hyprflip={duration_ms=duration}}})
         end
     end
+    local appearance_file = io.open(root .. "/hyprflip/appearance", "r")
+    if appearance_file then
+        local style = appearance_file:read("*l")
+        appearance_file:close()
+        if style == "classic" or style == "frame" then
+            -- Older cores can still load the helper's other preferences.
+            pcall(function() hl.config({plugin={hyprflip={card_frame=style == "frame"}}}) end)
+        end
+    end
+    local gap_file = io.open(root .. "/hyprflip/card_gap", "r")
+    if gap_file then
+        local text = gap_file:read("*l") or ""
+        gap_file:close()
+        local gap = text:match("^%-?%d+$") and tonumber(text) or nil
+        if gap and gap >= -1 and gap <= 128 then
+            pcall(function() hl.config({plugin={hyprflip={card_gap=gap}}}) end)
+        end
+    end
 end

@@ -120,7 +120,7 @@ or overwrite a library file while that same file is mapped into Hyprland.
 
 ## Experimental multi-app cards
 
-The current bridge uses ABI **6** and hy3 **hl0.56.0.1**, commit
+The current bridge uses ABI **7** and hy3 **hl0.56.0.1**, commit
 `42b7ed8fd9aefd3f36e5f617afd5071245c67853`. `scripts/build-containers` fetches and
 checks that revision, then builds the provider and the matching Hyprflip core.
 It does not install libraries or modify the desktop.
@@ -399,7 +399,7 @@ shell interface; app windows and Hyprflip cards remain in Hyprland.
 | `Unknown request` from `hyprctl hyprflip status` | The core is not loaded. Check `hyprctl -j plugin list` and the library path; use `hyprpm reload` for a hyprpm installation. |
 | O asks for a card or does nothing on an ordinary window | Install the guided helper after enabling the provider, and confirm that workspace uses hy3. F6/F7/F8 are only for the nested demo. |
 | C/L/K/Space do not work | Check helper installation, `hyprctl -j binds`, `hyprctl configerrors`, and `python3 ~/.local/lib/hyprflip/setup.py --check-menu`. Install one supported picker if no shell is running. |
-| An additional pane or unfold is refused | Check the three-app-per-face limit and application minimum sizes. Enlarge the card or change the split direction. |
+| An additional pane or unfold is refused | Check the five-app-per-face limit and application minimum sizes. Enlarge the card or change the split direction. |
 | A saved app does not launch into the expected window | Use **Manage saved cards → Review apps and launchers**. Web apps need a matching installed desktop entry; a general browser launcher may open a different window. |
 | A card vanished after closing an app | Closing the only app on a face dissolves the card. L can reopen its saved definition. |
 | A flip switches instantly | Read `last_fallback` in status; check disabled animations, popups, fullscreen, geometry changes or unavailable surface buffers. |

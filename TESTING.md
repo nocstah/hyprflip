@@ -996,3 +996,133 @@ with build logs at `/tmp/hyprflip-release-build.log` and
 `/tmp/hyprflip-release-containers.log`. Floating and Chill results from feature
 acceptance are under `/tmp/hf-float2/`. These are local run artifacts, not
 repository fixtures or a promise of compatibility with other compositor ABIs.
+
+## Card frames and tiling gap parity (2026-09-22)
+
+Built against Hyprland 0.56.2 (`efb50993780079460b0cbed1363e2166a2de1d9f`)
+with the pinned hy3 provider. The C++ test and **168 Python tests** pass.
+Disposable-compositor validation covers:
+
+- **9 card-frame checks**: real pointer press/release, canceled drags and
+  modified clicks, Flip/Fold, fullscreen, a covering floating window, classic
+  tabs, and closing/unloading/reloading native group decorations. Status polling
+  produced zero idle frames during 40 polls in the headless output probe.
+- Spacing measured between the window borders: `gaps_in=14` leaves **28 pixels**
+  in both axes, for tiled and floating cards. Directional workspace overrides
+  produced the same 28-pixel horizontal and 20-pixel vertical gaps in both modes.
+  Unfolded faces also use the normal horizontal gap.
+- Dark/light native captures, portrait at scale 1.25, and pixel assertions for
+  the keyboard recipient's outline on both panes after retiling. Independent
+  visual review found a render-order issue with that outline; the corrected
+  captures and covering-window check passed the follow-up review.
+- **9 floating workflow checks**, including shared movement/resizing, pane
+  editing, float/tile/fullscreen round trips, saved-card cold opening and unload.
+- **15 transition checks**: six animated modes with three apps per face in both
+  monitor orientations, reversal/preview, reduced motion, reload, close and
+  unload. Nested-output frame timings are regression evidence, not a physical
+  display performance benchmark.
+- **18 native-pair and 13 provider-container checks** pass, including geometry,
+  focus, input, fullscreen, workspace changes and unload/reload recovery.
+- **9 upgrade checks** pass with Hyprglass loaded: old-provider upgrade,
+  multiple/six-pane cards, focus drift, failed-load rollback, crowded workspaces
+  with real GTK application minimum sizes, interruption during reconstruction,
+  and six minimum-sized apps. Temporary reconstruction returns apps to their
+  original workspace and restores the card root's width before resuming use.
+
+Reproduce the new pointer, geometry and capture checks in a fresh disposable
+session (never target the user's compositor):
+
+```sh
+./scripts/build-containers
+python3 tests/nested_session.py --directory /tmp/hf-frames
+# In a second terminal, while the disposable session runs:
+python3 tests/card_frames.py /tmp/hf-frames/session.json \
+  --protocol /path/to/matching/Hyprland/protocols/wlr-virtual-pointer-unstable-v1.xml \
+  --captures /tmp/hf-frames/captures
+```
+
+The pointer fixture needs `wayland-scanner` and Wayland client development
+headers; captures and outline assertions also need `grim`, `wtype`, `foot` and
+ImageMagick. Local results are retained in `/tmp/hf-fr2/`; current visual-review
+captures are under `.impeccable/review/` and are excluded from Git.
+
+The first live update exposed the crowded-workspace restoration bug and rolled
+back; the current updater fixes it and passed the additional checks above. The
+second update installed both tested libraries and restored the full card, its
+inner proportions and outer size (width difference below 0.05 logical pixels),
+with Hyprglass's loaded handle unchanged and no configuration errors. Backups
+are under `~/.local/state/hyprflip/container-update-20260922-214723/` and
+`container-update-20260922-220505/`.
+
+This live run was not crash-free: Quickshell crashed during the first attempt,
+and Telegram aborted during the second, disconnecting after the updater's
+successful reconstruction. The exact GTK build's debug symbols resolve both
+stacks to `output_handle_name`, GTK 3's Wayland monitor-name callback; Telegram
+logged `free(): invalid pointer`. This matches the path in the existing
+[Omarchy report #10834](https://github.com/omacom/omarchy/issues/10834), without
+proving the original corruption event on this machine. Hyprland remained
+running and Quickshell recovered. These client failures are a remaining integration issue,
+not evidence of a compositor crash or a clean end-to-end live update.
+
+On 23 September, Telegram was reopened after unlock and attached to the
+WhatsApp face, retaining the terminal added there in the meantime. Live checks
+confirmed two 28-pixel internal gaps, the visible card frame, exclusive face
+input, a responding shell and no configuration errors. This completes app
+recovery; it does not claim the upstream GTK crash is fixed.
+
+
+## Card preferences, compact gaps, drag-to-add and five-app faces — 23 September 2026
+
+The matching ABI 7 core/provider build increases face snapshots to five panes.
+Classic tabs and the experimental card frame are selectable independently of
+Desktop or Compact (12 logical px) spacing. Temporary, explicit face targets
+accept ordinary window-move drags; normal movement and resizing stay native.
+
+Validation on the same Hyprland 0.56.2 ABI:
+
+- **172 Python tests** and the **C++ core suite** passed.
+- **9 real-pointer interaction checks** passed in a disposable compositor:
+  Classic/Compact applied to existing hy3 cards; Escape and outside release;
+  floating app dropped into a tiled face; minimum-size refusal restoring both
+  the incoming float and pane proportions; fourth/fifth apps and sixth refusal;
+  targeting either unfolded face; floating layout gaps on both axes and readable
+  unfolded rows; reversible spacing and disabled drag targets; unload mid-drag.
+- **9 pane workflow checks** passed on landscape and portrait outputs: five
+  apps on each face, import from another workspace, sixth refusal, removal,
+  focus/input ownership, movement/unfolding, guided setup, real minimum-size
+  rollback and unfolding-axis fallback.
+- **9 floating lifecycle checks** passed, including six animated transitions,
+  peek, moving/resizing, edits, reload/fullscreen, saved workspace destinations,
+  cold opening, closing panes and safe unload.
+- **9 upgrade/recovery checks** passed with a copy of the installed Hyprglass:
+  ABI 6 to ABI 7, ten-app cards preserving proportions, focus interference,
+  fullscreen refusal, failed-load rollback, crowded workspaces, interrupted
+  reconstruction and six minimum-sized apps.
+- Native settings captures covered narrow/scaled layouts and light/dark themes.
+  The interaction finish review passed after documenting the approved spacing
+  and unfolding changes. No frame redesign was attempted.
+
+Reproduce the new drag checks after `scripts/build-containers` in a fresh nested
+session (never point this at the live compositor):
+
+```sh
+python3 tests/card_interactions.py /tmp/hf-drop/session.json \
+  --protocol /path/to/Hyprland/protocols/wlr-virtual-pointer-unstable-v1.xml \
+  --captures /tmp/hf-drop/captures
+```
+
+The live AORUS update retained every existing card app, process, face and
+workspace. After reloading, measured empty gaps on its three-app reverse face
+were **12 and 12 logical pixels**. Classic appearance, Compact spacing and
+five-app capacity persisted; library hashes matched the tested build,
+Hyprglass's loaded handle was unchanged and configuration errors were empty.
+The installed Settings panel was visually verified with Classic and Compact
+selected after refreshing the shell's cached QML.
+The updater also now accepts Hyprland's nullable `solitaryBlockedBy` field;
+its locked-desktop regression still refuses mutation when any output is locked.
+
+Local recovery backups: `~/.local/state/hyprflip/container-update-20260923-073125`,
+`guided-setup-20260923-073152-966236`, and `omacards-update-20260923-073242`.
+This validation does not resolve the earlier GTK client crashes or the deferred
+secondary-display driver issue. Marketplace publication requires an updated
+immutable dependency pin; no new release was published during this work.

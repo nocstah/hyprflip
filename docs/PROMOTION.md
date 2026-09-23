@@ -15,7 +15,7 @@ sharing the back.
 Flip between the two sides, or temporarily unfold the card to use all three
 apps together. They stay live, and folding brings them back into the same space.
 
-The experimental hy3 integration supports up to three apps per side, saved
+The experimental hy3 integration supports up to five apps per side, saved
 cards, pane reordering and replacing an app without rebuilding the card.
 It currently targets Hyprland 0.56.2 and needs the matching core/provider build.
 

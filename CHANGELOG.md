@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Support up to five apps per face with the matching ABI 7 core and hy3 provider.
+  Preserve pane proportions when adding or removing apps, and unfold large
+  horizontal faces above one another to retain their width.
+- Add temporary Front/Back drop targets for dragging outside windows into
+  containers, with slot previews, Escape cancellation and size-limit rollback.
+- Offer Classic tabs or an experimental shared card frame with Flip/Fold
+  controls. OmaCards saves appearance and Desktop/Compact spacing preferences;
+  compact gaps leave 12 logical pixels between card apps.
+- Preserve application minimum sizes during upgrades by reconstructing cards
+  on a temporary workspace, then restoring their original workspace and size.
+  Failed or interrupted reconstruction rolls back with recovery metadata.
 - Run guided creation, editing and saved-card workflows without Omarchy. Prefer
   its responding shell; otherwise detect Fuzzel, Rofi or Wofi, with an explicit
   override and clear feedback when no picker is installed.

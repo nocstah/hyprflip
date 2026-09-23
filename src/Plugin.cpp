@@ -89,6 +89,9 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE h) {
         }}));
     settings.notifications =
         config(makeConfigValue<Bool>("plugin:hyprflip:notifications", "Show pairing and error notifications", true));
+    settings.cardFrame = config(makeConfigValue<Bool>("plugin:hyprflip:card_frame", "Shared card outline and compact Flip button", true));
+    settings.cardGap = config(makeConfigValue<Int>("plugin:hyprflip:card_gap", "Space between card apps; -1 follows desktop gaps", -1, SIntValueOptions{.min = -1, .max = 128}));
+    settings.dragToAdd = config(makeConfigValue<Bool>("plugin:hyprflip:drag_to_add", "Drop an outside app onto a card's add target", true));
     settings.perspective = config(makeConfigValue<Float>("plugin:hyprflip:perspective", "Perspective camera distance",
                                                          5.F, SFloatValueOptions{.min = 2.F, .max = 8.F}));
     settings.retreat = config(makeConfigValue<Float>("plugin:hyprflip:retreat", "Retreat at the edge of the turn", .02F,

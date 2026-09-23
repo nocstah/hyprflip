@@ -6,6 +6,10 @@
 #include <hyprland/src/event/EventBus.hpp>
 #include <hyprland/src/output/Monitor.hpp>
 #include <hyprland/src/plugins/PluginAPI.hpp>
+#include <hyprland/src/layout/LayoutManager.hpp>
+#include <hyprland/src/managers/input/InputManager.hpp>
+#include <hyprland/src/managers/SeatManager.hpp>
+#include <hyprland/src/protocols/core/DataDevice.hpp>
 #include <stdexcept>
 #include <vector>
 
@@ -51,6 +55,14 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     });
     command = HyprlandAPI::registerHyprCtlCommand(
         handle, {.name = "hf-motion-probe", .exact = false, .fn = [](eHyprCtlOutputFormat, std::string request) {
+                     if (request.ends_with(" input")) {
+                         const auto &drag = g_layoutManager->dragController();
+                         const auto grab = g_pSeatManager->m_seatGrab;
+                         return std::format("{{\"mods\":{},\"drag\":{},\"mode\":{},\"threshold\":{},\"held\":{},\"grab\":{},\"dnd\":{},\"constrained\":{}}}",
+                             g_pInputManager->getModsFromAllKBs(), bool(drag->target()), int(drag->mode()),
+                             drag->dragThresholdReached(), g_pInputManager->hasHeldButtons(),
+                             bool(grab && (grab->m_keyboard || grab->m_pointer)), PROTO::data->dndActive(), g_pInputManager->isConstrained());
+                     }
                      if (request.ends_with(" start")) {
                          samples.clear();
                          pending.clear();

@@ -158,11 +158,12 @@ try:
     assert client(a)["acceptsInput"] and client(b)["acceptsInput"]
     check("unpair exposes both windows")
 
-    # Floating state is native group state; both windows inherit the first footprint.
-    for address in (a, b):
-        focus(address); ctl("dispatch", 'hl.dsp.window.float({action="float"})')
-    time.sleep(.5)
+    # Move an existing native pair into floating mode. Pairing windows that are
+    # already floating intentionally creates a floating container now; that
+    # separate backend is covered by floating_workflows.py.
     pair(a, b)
+    focus(a); ctl("dispatch", 'hl.dsp.window.float({action="float"})')
+    time.sleep(.5)
     action("flip"); action("finish")
     assert client(b)["floating"] and status()["pairs"][0]["current"] == b
     action("unpair")
@@ -184,6 +185,8 @@ try:
     lua("hl.config({plugin={hyprflip={duration_ms=1500,notifications=false}}})")
     check("configuration reload settles safely")
 
+    framed_geometry = client(a)["at"], client(a)["size"]
+    neighbor_geometry = client(neighbor)["at"], client(neighbor)["size"]
     action("flip"); ctl("plugin", "unload", str(library)); loaded = False
     assert len(client(a)["grouped"]) == 2
     assert sum(client(w)["acceptsInput"] for w in (a,b)) == 1
@@ -197,7 +200,9 @@ try:
     assert status()["pairs"] == []
     # Upgrade recovery only adopts the exact two live members. It must not
     # focus a window, rearrange tiles, change the visible side or accept stale
-    # addresses from a previous process.
+    # addresses from a previous process. Restoring the compact header can
+    # resize content compared with the temporary native groupbar; the card
+    # must return to its pre-unload geometry without moving neighboring tiles.
     current = json.loads(ctl("-j", "activewindow"))["address"]
     geometry = client(a)["at"], client(a)["size"]
     assert ctl("hyprflip", "adopt", a, "0x1", success=False).startswith("error:")
@@ -206,7 +211,14 @@ try:
     assert status()["pairs"][0]["front"] == a and status()["pairs"][0]["back"] == b
     assert status()["pairs"][0]["current"] == current
     assert json.loads(ctl("-j", "activewindow"))["address"] == current
+    assert (client(a)["at"], client(a)["size"]) == framed_geometry
+    assert (client(neighbor)["at"], client(neighbor)["size"]) == neighbor_geometry
+    lua("hl.config({plugin={hyprflip={card_frame=false}}})")
+    status()
     assert (client(a)["at"], client(a)["size"]) == geometry
+    lua("hl.config({plugin={hyprflip={card_frame=true}}})")
+    status()
+    assert (client(a)["at"], client(a)["size"]) == framed_geometry
     assert ctl("hyprflip", "adopt", a, b, success=False).startswith("error:")
     action("flip"); action("finish")
     assert status()["pairs"][0]["current"] != current
@@ -214,7 +226,7 @@ try:
     check("upgrade adopts the existing pair without layout or focus changes")
     pair(a, b)
     action("flip")
-    ctl("dispatch", "hl.dsp.focus({workspace=2})")
+    ctl("dispatch", f"hl.dsp.focus({{workspace={source_workspace + 1}}})")
     assert not status()["animating"]
     ctl("dispatch", f"hl.dsp.focus({{workspace={source_workspace}}})")
     time.sleep(1)

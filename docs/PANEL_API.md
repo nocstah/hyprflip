@@ -10,7 +10,8 @@ Install with `python3 scripts/install-setup.py`. Native-pair installations can
 use `--backend-only` to install the helper and preference loader without the
 container bindings. This update changes Python and Lua files, not native
 compositor libraries. The Lua preference loader accepts only known transition
-names and integer durations from 0 to 2000 milliseconds.
+names, integer durations from 0 to 2000 milliseconds, known appearance names,
+and integer card gaps from -1 to 128 logical pixels.
 
 ## Local JSON protocol 1
 
@@ -40,6 +41,8 @@ card. Saved-card operations include `name` and `recipe_token` from its row.
 | `transition` | `mode` from the advertised list |
 | `duration` | Integer `duration_ms`, 0–2000 |
 | `shortcut` | `binding` action ID, integer modifier `mask`, XKB `key` |
+| `appearance` | `style`: `classic` or `frame` |
+| `spacing` | Integer `gap`: -1 for Desktop spacing, or 0–128 logical pixels |
 
 Editor intents are stable IDs: add, replace, remove, other_side, previous, next,
 horizontal, vertical, balance, save, manage, repair, unpair. An empty intent
@@ -85,3 +88,11 @@ The panel uses Wayland's shortcuts inhibitor only while recording a combination.
 mode; `capabilities.floating` gates this control. Saved rows carry optional
 `workspace`; the existing Manage workflow changes it. Missing workspace means
 Current workspace. The usual session/focus/recipe validation precedes navigation.
+
+`capabilities.appearance` and `capabilities.spacing` gate the corresponding
+global preferences. Snapshots expose `appearance` (`classic` or `frame`) and
+`card_gap` (-1 for Desktop spacing; 12 for Compact). The helper persists each
+value atomically and restores the previous value if application fails. These
+preferences apply to existing cards without changing their membership.
+`capabilities.drag_to_add` reports whether the compositor's temporary drop
+targets are enabled; dragging stays a native compositor interaction.

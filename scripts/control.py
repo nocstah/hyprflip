@@ -157,6 +157,11 @@ def snapshot(ipc):
                         'repair': bool(state.get('repair_cards')),
                         'peek': bool(state.get('peek_available'))})
         base['capabilities']['floating'] = bool(state.get('floating_cards'))
+        base['capabilities']['appearance'] = type(state.get('card_frame')) is bool
+        base['appearance'] = ('frame' if state['card_frame'] else 'classic') if base['capabilities']['appearance'] else None
+        base['capabilities']['drag_to_add'] = bool(state.get('drag_to_add'))
+        base['capabilities']['spacing'] = type(state.get('card_gap')) is int
+        base['card_gap'] = state.get('card_gap')
         try:
             base['shortcuts'] = shortcuts.snapshot(ipc)
         except (w.SetupError, OSError, KeyError, subprocess.TimeoutExpired):
@@ -325,7 +330,7 @@ def run_operation(ipc, payload, menu):
     if not isinstance(payload, dict) or type(payload.get('protocol')) is not int or payload['protocol'] != PROTOCOL:
         raise w.SetupError('OmaCards and the Hyprflip helper need matching protocol versions.')
     action, ctx = payload.get('action'), payload.get('context')
-    if action not in ('flip', 'unfold', 'floating', 'edit', 'create', 'open', 'manage', 'transition', 'preview', 'duration', 'shortcut'):
+    if action not in ('flip', 'unfold', 'floating', 'edit', 'create', 'open', 'manage', 'transition', 'preview', 'duration', 'shortcut', 'appearance', 'spacing'):
         raise w.SetupError('Choose an available card action.')
     validate_context(ipc, ctx)
     request = menu.request
@@ -419,6 +424,18 @@ def run_operation(ipc, payload, menu):
         with request.exclusive():
             request.check()
             return shortcuts.save(ipc, payload.get('binding'), payload.get('mask'), payload.get('key'))
+
+    if action == 'appearance':
+        with request.exclusive():
+            request.check()
+            ipc.save_appearance(payload.get('style'))
+        return 'Card appearance updated for all cards.'
+
+    if action == 'spacing':
+        with request.exclusive():
+            request.check()
+            ipc.save_spacing(payload.get('gap'))
+        return 'App spacing updated for all cards.'
 
     if action == 'create':
         flow = w.Setup(ipc, menu)
