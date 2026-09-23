@@ -103,11 +103,11 @@ class PanelControlTest(unittest.TestCase):
             with self.assertRaises(setup.SetupError): self.run_action(payload)
         self.assertEqual(self.ipc.mutations, [])
 
-    def test_native_pair_edits_explain_provider_requirement(self):
+    def test_native_pair_edits_explain_card_requirement(self):
         pair = dict(id=3, front='0xa', back='0xb', current='0xb')
         self.ipc.snapshot['pairs'] = [pair]
         target = dict(id=3, kind='pair', token=control.card_token(pair, 'pair', self.ipc.windows(), self.ctx['instance']))
-        with self.assertRaisesRegex(setup.SetupError, 'tiled card'):
+        with self.assertRaisesRegex(setup.SetupError, 'multi-app card'):
             self.run_action(self.payload('edit') | {'target': target})
         self.assertEqual(self.ipc.mutations, [])
 

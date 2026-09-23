@@ -15,6 +15,13 @@ and integer card gaps from -1 to 128 logical pixels.
 
 ## Local JSON protocol 1
 
+The compositor status advertises `native_cards` for the built-in dwindle backend
+and `hy3_provider` for the optional loaded hy3 bridge. `container_provider` means
+that multi-app cards are available through at least one backend; it no longer
+implies that hy3 is loaded. The shared helper checks the workspace layout and
+these capabilities together, and still accepts older hy3-only status replies.
+No panel protocol change is required.
+
 ```sh
 python3 ~/.local/lib/hyprflip/control.py snapshot
 python3 ~/.local/lib/hyprflip/control.py run --request '<JSON object>'

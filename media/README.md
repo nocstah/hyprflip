@@ -1,4 +1,22 @@
-# Workspace 2 demo
+# Dwindle demo
+
+The [preview video](dwindle-demo.mp4) shows three live terminal windows in one
+native dwindle card: flip to two companion panes, unfold, fold and flip back.
+Only the Hyprflip core is loaded. The windows contain synthetic instructions;
+the clip contains no personal application content.
+
+- [Video](dwindle-demo.mp4): silent H.264, 1600×1088, 60 fps.
+- [Looping preview](dwindle-preview.gif): 960 pixels wide, 20 fps.
+- [Poster](dwindle-poster.png): unedited capture of the unfolded card.
+- [Capture details](dwindle-capture-info.json): environment, actions and exports.
+
+The source is the documented `--native-cards` nested session on Hyprland 0.56.2,
+recorded on a 1600×1000 headless output. An 88-pixel caption band is added above
+the desktop in the video. Motion is recorded from the compositor; no app windows
+or transitions are composited afterward. This demonstrates the native backend,
+not a fresh Omarchy installation.
+
+## Earlier workspace 2 demo
 
 Real desktop footage: Gmail on the front, WhatsApp and Telegram sharing the
 back. The clip shows flipping, temporarily unfolding all three apps, folding

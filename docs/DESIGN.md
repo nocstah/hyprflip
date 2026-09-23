@@ -21,12 +21,29 @@ Hyprflip treats two application windows as two faces of one object. The applicat
 
 Hyprland owns the group and its layout target. Hyprflip stores weak references to exactly two members, locks that group against ordinary automatic insertion, and relinquishes ownership if external commands change its membership. Moving, resizing and fullscreen use native behavior. Unload settles the turn and leaves an accessible ordinary group.
 
+Native multi-app cards use a locked Hyprland outer group as one dwindle layout
+target. The pane adapter in `FloatingCards.cpp` divides its geometry into two
+faces, restores original window targets before removal/unload, and shares the
+same implementation between tiled and floating cards. Guided creation uses the
+`card` action; `pair` keeps the existing two-window native behavior on dwindle.
+
 The optional [container experiment](CONTAINERS.md) uses a separately built hy3
 provider instead. Hy3 owns a two-tab group with one to five leaf windows per tab.
 The controller consumes a bounded face snapshot, selects the visible face, and
 attaches the same temporary transformers to its members with a shared pivot.
 There is one animation controller and no second layout tree. Native pairs keep
 their existing backend and recovery behavior.
+
+### Related grouping plugins
+
+[dwindle-autogroup](https://github.com/ItsDrike/hyprland-dwindle-autogroup)
+collects a dwindle branch into ordinary tabs.
+[hyprdeck](https://github.com/chpock/hyprdeck) uses the native Lua grouping API
+for tab-group workspaces and group-aware movement. Their documented models show
+one group member at a time; neither supplies multi-pane faces. Native Hyprland
+groups already provide the outer layout target needed here, so the dwindle
+backend adds no dependency on either plugin. This comparison was checked on
+23 September 2026; it is not a runtime compatibility claim for those plugins.
 
 ## Layout
 

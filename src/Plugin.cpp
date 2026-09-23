@@ -16,6 +16,7 @@ int invoke(lua_State *L, const char *action) {
 }
 int mark(lua_State *L) { return invoke(L, "mark"); }
 int pair(lua_State *L) { return invoke(L, "pair"); }
+int card(lua_State *L) { return invoke(L, "card"); }
 int flip(lua_State *L) { return invoke(L, "flip"); }
 int peek(lua_State *L) { return invoke(L, "peek"); }
 int endPeek(lua_State *L) { return invoke(L, "peek end"); }
@@ -99,6 +100,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE h) {
     controller = std::make_unique<Hyprflip::Controller>(handle, std::move(settings));
     for (const auto &[name, fn] : {std::pair<const char *, PLUGIN_LUA_FN>{"mark", mark},
                                    {"pair", pair},
+                                   {"card", card},
                                    {"flip", flip},
                                    {"peek", peek},
                                    {"end_peek", endPeek},

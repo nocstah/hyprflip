@@ -1,7 +1,19 @@
 # Changelog
 
-## Unreleased
+## 0.3.0-rc.1 — 2026-09-23
 
+Preview release for Hyprland 0.56.2, focused on Omarchy's default dwindle layout.
+
+- Create, edit, unfold and reopen multi-app cards directly on dwindle using
+  native Hyprland groups. The core alone supplies the card backend; the hy3
+  provider remains optional for hy3 workspaces. Preserve the existing M/P
+  two-window pairing path and use O for editable cards.
+- Add a core-only dwindle demo with `tests/nested_session.py --native-cards`.
+- Check tiled app size limits after the incoming tile releases its space.
+  Saved cards can now group apps whose minimum sizes fit the completed card
+  but exceed the smaller tile available during construction.
+- Restore saved native-card pane proportions through the card layout API;
+  ordinary dwindle resizing operates on the card's outer tile.
 - Support up to five apps per face with the matching ABI 7 core and hy3 provider.
   Preserve pane proportions when adding or removing apps, and unfold large
   horizontal faces above one another to retain their width.

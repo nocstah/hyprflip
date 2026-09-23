@@ -43,9 +43,9 @@ print("Super+Ctrl+Alt with M=mark, P=pair, F=flip, U=unpair, Escape=cancel")
 installed = any(p["name"] == "hyprflip" for p in json.loads(ctl("-j", "plugin", "list")))
 installed_state = json.loads(ctl("hyprflip", "status")) if installed else {}
 if installed_state.get("containers"):
-    raise SystemExit("Experimental containers are active. This installer preserves native pairs only; "
-                     "use the matching core/provider updater in docs/INSTALL.md. "
-                     "For a core-only installation, ungroup floating cards first; their apps stay open.")
+    raise SystemExit("Multi-app cards are active. Save and ungroup them before updating the core; their apps stay open. "
+                     "This installer preserves two-window native pairs. "
+                     "For hy3 cards, use the matching core/provider updater in docs/INSTALL.md.")
 saved_pairs = installed_state.get("pairs", [])
 if not saved_pairs and recovery.is_file():
     pending = json.loads(recovery.read_text())

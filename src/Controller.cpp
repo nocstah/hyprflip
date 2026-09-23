@@ -12,6 +12,7 @@
 #include <hyprland/src/desktop/view/Window.hpp>
 #include <hyprland/src/layout/algorithm/Algorithm.hpp>
 #include <hyprland/src/layout/algorithm/TiledAlgorithm.hpp>
+#include <hyprland/src/layout/algorithm/tiled/dwindle/DwindleAlgorithm.hpp>
 #include <hyprland/src/layout/LayoutManager.hpp>
 #include <hyprland/src/managers/SeatManager.hpp>
 #include <hyprland/src/managers/SessionLockManager.hpp>
@@ -608,7 +609,7 @@ Result Controller::mark() {
     m_marked = w;
     return {true, "Window marked. Focus another window to pair, or a card face to attach."};
 }
-Result Controller::pair() {
+Result Controller::pair(bool multiApp) {
     auto a = m_marked.lock(), b = Desktop::focusState()->window();
     if (!a)
         return {false, "Mark the first window before pairing."};
@@ -633,7 +634,12 @@ Result Controller::pair() {
         return {false, "Resize the first window so the second window fits before pairing."};
     finish();
     m_mutating = true;
-    if (auto api = a->m_isFloating ? FloatingCards::api() : provider(); api && api->supports(reinterpret_cast<uintptr_t>(a.get())) &&
+    const auto &algorithm = a->m_workspace->m_space->algorithm()->tiledAlgo();
+    // Built-in layouts use their concrete type; layoutName() is optional and
+    // identifies generic plugin adapters such as hy3.
+    const bool dwindle = dynamic_cast<Layout::Tiled::CDwindleAlgorithm *>(algorithm.get());
+    const auto api = a->m_isFloating || (multiApp && dwindle) ? FloatingCards::api() : provider();
+    if (api && api->supports(reinterpret_cast<uintptr_t>(a.get())) &&
                                api->supports(reinterpret_cast<uintptr_t>(b.get()))) {
         const auto id = api->create(reinterpret_cast<uintptr_t>(a.get()), reinterpret_cast<uintptr_t>(b.get()));
         if (id) {
@@ -653,12 +659,16 @@ Result Controller::pair() {
         }
         m_mutating = false;
         return {id != 0, id ? "Card created. Flip sides, or mark another window and attach it to a face."
-                            : "Could not create the hy3 card."};
+                            : "Could not create the card."};
     }
     if (!a->m_isFloating && a->m_workspace->m_space->algorithm()->tiledAlgo()->layoutName() == "hy3") {
         m_mutating = false;
         return {false,
                 "The hy3 container provider is unavailable or incompatible. Rebuild both experimental libraries."};
+    }
+    if (multiApp) {
+        m_mutating = false;
+        return {false, "Create cards on a normal dwindle workspace, or use the optional hy3 provider."};
     }
     auto g = CGroup::create({a});
     if (!b->canBeGroupedInto(g)) {
@@ -912,7 +922,7 @@ Result Controller::attach(bool vertical) {
         return {false, "The marked window already belongs to a card."};
     auto p = find(Desktop::focusState()->window());
     if (!p || !p->containerID)
-        return {false, "Focus a card created on the experimental hy3 layout, then attach the marked window."};
+        return {false, "Focus a multi-app card created with O, then attach the marked window."};
     finish();
     auto s = state(*p);
     if (!s)
@@ -1008,7 +1018,7 @@ Result Controller::workspace(uint32_t destination, bool follow) {
         return {false, "Finish the active grab or drag before moving the card."};
     auto p = find(Desktop::focusState()->window());
     if (!p || !p->containerID)
-        return {false, "Focus an experimental hy3 card to move it as a unit."};
+        return {false, "Focus a multi-app card to move it as a unit."};
     finish();
     auto s = state(*p);
     if (!s)
@@ -1029,7 +1039,7 @@ Result Controller::workspace(uint32_t destination, bool follow) {
     m_mutating = false;
     m_movingWorkspace.reset();
     reconcile();
-    return {ok, ok ? "ok" : "The destination workspace must use hy3."};
+    return {ok, ok ? "ok" : "The card could not move to that workspace. Hy3 cards require a hy3 destination."};
 }
 bool Controller::protectsWorkspace(uint32_t workspace) const {
     if (!workspace || m_stopping) return false;
@@ -1299,6 +1309,8 @@ Result Controller::dispatch(const std::string &action) {
         return mark();
     if (action == "pair")
         return pair();
+    if (action == "card")
+        return pair(true);
     if (action.starts_with("adopt ")) {
         std::istringstream arguments(action.substr(6));
         std::string front, back, extra;
@@ -1363,7 +1375,7 @@ Result Controller::dispatch(const std::string &action) {
         finish();
         return {true, "ok"};
     }
-    return {false, "Unknown action. Use mark, pair, attach [horizontal|vertical], replace <old> <new>, release, unfold, "
+    return {false, "Unknown action. Use mark, pair, card, attach [horizontal|vertical], replace <old> <new>, release, unfold, "
                    "layout <horizontal|vertical|balance>, other_side, "
                    "workspace <number> [silent], move <left|right|up|down>, cancel, "
                    "flip, peek [end], unpair, finish, or status."};
@@ -1438,12 +1450,10 @@ std::string Controller::status() {
         }
         json += "]}";
     }
-    const bool available = provider();
     return json + "],\"card_frames\":" + (m_frames ? m_frames->status() : "[]") +
-           ",\"floating_cards\":true,\"workspace_protection\":true,\"container_provider\":" + (available ? "true" : "false") +
-           ",\"layout_controls\":" + (available ? "true" : "false") +
-           ",\"repair_cards\":" + (available ? "true" : "false") +
-           ",\"pane_replacement\":" + (available ? "true" : "false") +
-           ",\"container_max_panes\":" + std::to_string(available ? CONTAINER_MAX_PANES : 0) + "}";
+           ",\"native_cards\":true,\"hy3_provider\":" + (provider() ? "true" : "false") +
+           ",\"floating_cards\":true,\"workspace_protection\":true,\"container_provider\":true" +
+           ",\"layout_controls\":true,\"repair_cards\":true,\"pane_replacement\":true" +
+           ",\"container_max_panes\":" + std::to_string(CONTAINER_MAX_PANES) + "}";
 }
 } // namespace Hyprflip

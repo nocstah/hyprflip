@@ -103,7 +103,7 @@ def load():
     ctl('reload')
     errors = ctl('configerrors')
     if errors: raise RuntimeError(errors)
-    wait(lambda: state()['container_provider'])
+    wait(lambda: (current := state()).get('hy3_provider', current.get('container_provider')))
 
 
 @contextmanager
@@ -255,6 +255,9 @@ plugins = {p['name'] for p in json.loads(ctl('-j', 'plugin', 'list'))}
 if not {'hyprflip', 'hy3'} <= plugins:
     raise SystemExit('Both experimental plugins must already be loaded')
 snapshot = state()
+if any(card.get('native_group') and not card.get('floating') for card in snapshot['containers']):
+    raise SystemExit('Save and ungroup native tiled multi-app cards before using the hy3 updater; '
+                     'their apps stay open. Reopen those saved cards after updating.')
 print(f"Update core and provider; preserve {len(snapshot['containers'])} container(s) and {len(snapshot['pairs'])} native pair(s).")
 print('Applications stay open. Layout reload may rearrange the surrounding tiles.')
 if not args.dry_run:

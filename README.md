@@ -6,21 +6,23 @@ Keep Gmail on the front and WhatsApp + Telegram on the back. Flip to the apps
 you need, briefly peek at the other side, or unfold the whole card to work with
 both faces together. Each app stays a real, live window with its own state.
 
-[![Gmail flips to WhatsApp and Telegram, then unfolds into three apps](media/hyprflip-preview.gif)](media/hyprflip-demo.mp4)
+[![Three live app windows flip and unfold in one dwindle tile](media/dwindle-preview.gif)](media/dwindle-demo.mp4)
 
-**[Watch / download the demo — MP4](media/hyprflip-demo.mp4)** ·
-[Poster](media/hyprflip-poster.png) · [Recording details](media/README.md)
+**[Watch / download the dwindle demo — MP4](media/dwindle-demo.mp4)** ·
+[Poster](media/dwindle-poster.png) · [Recording details](media/README.md)
 
-Actual desktop footage. The multi-app card in the video uses the optional
-**experimental hy3 integration**.
+Actual compositor footage with sample windows, using **dwindle and the core
+plugin alone**. The [earlier Gmail demo](media/hyprflip-demo.mp4) uses the
+optional hy3 integration.
 
 [Features](#features) · [Install](#install) · [First card](#make-your-first-card) ·
 [Shortcuts](#shortcuts) · [Transitions](#transitions) ·
 [Compatibility](#compatibility-and-limits) · [Documentation](#documentation)
 
 **Early release:** targets **Hyprland 0.56.2**, with matching development headers
-and compiler ABI. The core is a native C++/GLES plugin. Multi-app cards use a
-separately built, pinned hy3 provider. **Omarchy is optional:** menus prefer its
+and compiler ABI. The core is a native C++/GLES plugin. **Multi-app cards work on
+dwindle with the core plugin alone.** Existing hy3 setups can use the optional
+pinned provider. **Omarchy is optional:** menus prefer its
 running shell, then automatically fall back to **Fuzzel, Rofi or Wofi**.
 
 ## Features
@@ -51,20 +53,18 @@ running shell, then automatically fall back to **Fuzzel, Rofi or Wofi**.
 
 ### Choose your setup
 
-| | Native pairs | Experimental cards |
+| | Two-window pairs | Multi-app cards |
 | --- | --- | --- |
 | Apps per face | One | One to five |
-| Layout | Native Hyprland groups; dwindle tested | Pinned hy3 for tiled cards; native groups for floating cards |
+| Layout | Native Hyprland groups; dwindle tested | Native groups on dwindle; optional pinned provider on hy3 |
 | Floating windows | A pair can be floating | Whole multi-app cards can float, move and resize together |
 | Flip, transitions and peek | Yes; custom binding for peek | Yes |
 | Unfold, pane editing and whole-card navigation | — | Yes |
 | Guided menus and saved-card library | — | Optional helper: Omarchy shell, Fuzzel, Rofi or Wofi |
-| Installation | Supplied core installer or hyprpm | Core + matching provider + optional helper |
+| Installation | Supplied core installer or hyprpm | Core + optional helper; hy3 provider only for hy3 layouts |
 
-The default installer and hyprpm install **native pairs**. Follow the
-[container installation guide](docs/INSTALL.md#experimental-multi-app-cards)
-to get the workflow shown in the video. The five-app limit is Hyprflip's
-supported model; it is not a limit of hy3 itself.
+Native dwindle cards are available in the **0.3.0-rc.1 preview**. The five-app
+limit is Hyprflip's supported model.
 
 ## Install
 
@@ -72,7 +72,7 @@ You need Hyprland **0.56.2**, its matching development headers, a matching
 C++26-capable compiler, CMake 3.25+, Ninja, pkg-config, Lua 5.4 and GLES libraries.
 The installer also needs Python 3 and an existing Hyprland Lua configuration.
 
-### Native two-window pairs
+### Dwindle cards on Omarchy or Hyprland
 
 Run from a terminal in your Hyprland session:
 
@@ -82,18 +82,36 @@ cd hyprflip
 make test
 python3 scripts/install.py --dry-run
 python3 scripts/install.py
+python3 scripts/install-setup.py
 ```
 
 The installer checks shortcut conflicts, backs up affected files, installs the
 core and Lua bindings, reloads configuration and validates the result. Existing
-native pairs and customized settings are preserved during an update.
+two-window native pairs and customized settings are preserved during an update.
+The helper adds creation, editing and saved-card menus. Keep the workspace on
+**dwindle**; no additional layout plugin is needed.
+
+Before updating a core with active multi-app cards, save and ungroup those cards,
+then reopen them after the update. The installer refuses to unload active cards.
+Existing hy3 users should follow the separate provider update instructions.
 
 Prefer hyprpm? Use the [hyprpm instructions](docs/INSTALL.md#hyprpm).
 For another configuration layout, use the
 [manual loading instructions](docs/INSTALL.md#manual-core-loading).
 Use one installation method for the core.
 
-### Multi-app cards shown in the demo
+### Try dwindle cards in a disposable desktop
+
+After `make test`:
+
+```sh
+python3 tests/nested_session.py --directory /tmp/hf-demo --native-cards
+```
+
+This needs `foot` and a running Wayland session. Click inside and press **F8**
+to flip. Stop the launcher with **Ctrl+C**. Demo shortcuts apply only there.
+
+### Optional hy3 integration
 
 The container build fetches the pinned hy3 source and builds both libraries:
 
@@ -118,7 +136,7 @@ Building alone does not install or load either library.
 
 ### Without Omarchy
 
-Install the same core, provider and guided helper. The helper checks for a
+Install the same core and guided helper. The helper checks for a
 responding Omarchy shell each time it opens; when unavailable it uses the first
 installed picker in this order: **Fuzzel → Rofi with Wayland support → Wofi**.
 No separate card database or compositor build is needed. Install one picker,
@@ -136,11 +154,11 @@ See [menu detection, dependencies and overrides](docs/INSTALL.md#add-the-guided-
 
 ### Gmail in front, WhatsApp + Telegram behind
 
-With the container provider and guided setup enabled:
+With the core and guided setup installed:
 
 1. Open Gmail, WhatsApp and Telegram as separate app windows. A browser tab must
    first be in its own window.
-2. On a hy3 workspace, focus Gmail and press **Super+Ctrl+Alt+O**.
+2. On a dwindle workspace, focus Gmail and press **Super+Ctrl+Alt+O**.
 3. Choose WhatsApp, then **Add Telegram**. Choose **Create card** if offered.
    Apps on other workspaces are available under **Add from workspace X**.
    Floating apps are resized to fit automatically.
@@ -149,7 +167,7 @@ With the container provider and guided setup enabled:
 5. Press **Super+Ctrl+Alt+O** to use all three apps together. Focus the side you
    want to keep and press O again with the same modifiers to fold back.
 
-Already paired Gmail with WhatsApp? Flip to WhatsApp, press
+Already created a two-app card with O? Flip to WhatsApp, press
 **Super+Ctrl+Alt+C → Add an app to this side**, then choose Telegram.
 
 For native pairs, focus the front app and press **Super+Ctrl+Alt+M**, focus the
@@ -283,7 +301,7 @@ The frame uses your Hyprland border colors and groupbar font settings. It is
 built into Hyprflip; no additional border plugin is required. It replaces tab
 bars only on cards owned by Hyprflip. Set `card_frame = false` to disable it;
 native pairs and hy3 containers then use their original tab bars. Floating
-multi-app cards retain their existing border-only appearance with this setting.
+and native dwindle multi-app cards use their border-only appearance with this setting.
 The hy3 frame needs the matching updated provider; older providers keep their
 tabs until updated.
 
@@ -299,7 +317,7 @@ drag the app onto **Drop to add to Front/Back** near the card’s top. Release
 there to add it to that side. Escape or releasing elsewhere keeps the normal
 window move. When unfolded, each face has its own target. A full side explains
 its five-app limit; application size limits can also refuse a drop. This works
-with both appearances, for hy3 and floating-container cards. Native one-app
+with both appearances, for native dwindle, hy3 and floating cards. Native one-app
 pairs need to be converted to a container first. Set `drag_to_add = false` to
 turn off these targets.
 

@@ -13,6 +13,38 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class UpdateLockTest(unittest.TestCase):
+    def test_native_tiled_cards_stop_before_plugin_operations_or_file_changes(self):
+        with tempfile.TemporaryDirectory(prefix='hyprflip-native-update-') as directory:
+            root = Path(directory)
+            script = root / 'scripts/update-containers.py'
+            script.parent.mkdir()
+            shutil.copyfile(ROOT / 'scripts/update-containers.py', script)
+            for relative in ('installed/hyprflip.so', 'installed/containers/libhy3.so',
+                             'build/containers/core/hyprflip.so',
+                             'build/containers/provider/upstream/libhy3.so'):
+                path = root / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(b'original')
+            replies = {('configerrors',): '', ('-j', 'monitors'): '[]',
+                       ('-j', 'plugin', 'list'): json.dumps([{'name':'hyprflip'}, {'name':'hy3'}]),
+                       ('hyprflip', 'status'): json.dumps({'pairs': [], 'containers': [
+                           {'native_group': True, 'floating': False}]})}
+            calls = []
+
+            def command(args, **kwargs):
+                calls.append(args)
+                self.assertIn(tuple(args[1:]), replies, 'Updater attempted a mutation')
+                return subprocess.CompletedProcess(args, 0, replies[tuple(args[1:])], '')
+
+            with patch.object(sys, 'argv', [str(script), '--library-root', str(root / 'installed'),
+                                           '--state-dir', str(root / 'state')]), \
+                    patch('subprocess.run', side_effect=command), \
+                    self.assertRaisesRegex(SystemExit, 'Save and ungroup native tiled'):
+                runpy.run_path(str(script), run_name='__main__')
+            self.assertEqual(len(calls), 4)
+            self.assertFalse((root / 'state').exists())
+            self.assertEqual((root / 'installed/hyprflip.so').read_bytes(), b'original')
+
     def test_lock_stops_before_plugin_operations_or_file_changes(self):
         with tempfile.TemporaryDirectory(prefix='hyprflip-locked-update-') as directory:
             root = Path(directory)

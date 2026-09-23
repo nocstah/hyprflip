@@ -92,7 +92,7 @@ class Controller {
     void damage(const Pair &pair);
     void detach();
     Result mark();
-    Result pair();
+    Result pair(bool multiApp = false);
     Result adopt(const std::string &front, const std::string &back);
     Result flip(std::optional<Transition> preview = std::nullopt);
     Result peek();

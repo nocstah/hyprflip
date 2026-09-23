@@ -342,7 +342,7 @@ def run_operation(ipc, payload, menu):
         if state.get('animating'):
             raise w.SetupError('Wait for the turn to finish, then try again.')
         if action in ('unfold', 'edit') and payload['target']['kind'] != 'container':
-            raise w.SetupError('Multi-app controls need a tiled card and the optional hy3 provider.')
+            raise w.SetupError('Create a multi-app card with O to use these controls.')
         if action == 'preview' and (payload.get('mode') not in w.TRANSITIONS or
                                    payload['mode'] not in state.get('transition_modes', [])):
             raise w.SetupError('Choose an available transition.')

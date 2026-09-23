@@ -1,7 +1,8 @@
 # Install and update Hyprflip
 
-Hyprflip currently targets **Hyprland 0.56.2**. Choose native two-window pairs,
-or add the experimental hy3 provider for multi-app cards. **Omarchy is optional.**
+Hyprflip currently targets **Hyprland 0.56.2**. The current core supports
+multi-app cards on **dwindle**, Omarchy's default layout, without hy3.
+The experimental hy3 provider remains available for hy3 workspaces. **Omarchy is optional.**
 Guided menus and saved cards prefer its running shell and automatically use
 Fuzzel, Rofi or Wofi when it is unavailable. The core and provider also expose
 commands for custom configurations.
@@ -14,7 +15,7 @@ load matching core/provider versions together.
 
 The optional [OmaCards companion](https://github.com/nocstah/omacards) uses the
 shared helper installed by `scripts/install-setup.py` and provides a native bar panel.
-For native pairs without the container provider, use `--backend-only` to install
+For two-window pairs without guided card creation, use `--backend-only` to install
 that helper and motion preferences without adding container shortcuts.
 See [the panel interface](PANEL_API.md) for its behavior and compatibility.
 
@@ -74,16 +75,51 @@ Hyprland Lua configuration does not need Omarchy’s Lua bootstrap.
 It respects `XDG_CONFIG_HOME` for the configuration directory, backs up replaced
 files, preserves customized core settings and native pairs, and validates the
 reload. A failed installation restores the previous files. An existing
-container installation must use the [container updater](#container-updates).
+hy3 installation must use the [container updater](#container-updates).
+Before a core-only update, save and ungroup any active native multi-app cards;
+their apps stay open. Reopen the saved definitions after installing. This
+installer refuses active cards before changing files or unloading the core.
 
 Hold **Super+Ctrl+Alt**: M marks the front, P pairs the focused app as the back,
 F flips and U ungroups. Both windows must share a workspace and both be tiled or
 both floating. Leave fullscreen while creating the pair.
 
+## Dwindle multi-app cards
+
+Build and install the current core as above, then add the guided helper:
+
+```sh
+python3 scripts/install-setup.py --dry-run
+python3 scripts/install-setup.py
+```
+
+Keep `general.layout` and your workspace layout on **dwindle**. Focus an
+ungrouped app, press **Super+Ctrl+Alt+O**, and choose apps for the back.
+**C** edits the card, **L** opens saved cards, and **O** unfolds or folds it.
+All these keys use Super+Ctrl+Alt. Up to five apps fit on each face, subject
+to application size limits. The same helper also serves OmaCards.
+
+The core manages one native outer group, while dwindle places that group as
+one tile. This path needs no hy3 build, provider loading or workspace-layout
+changes. Existing two-window M/P pairs remain available; ungroup one before
+creating its editable replacement with O.
+
+Try it without changing your desktop configuration:
+
+```sh
+make test
+python3 tests/nested_session.py --directory /tmp/hf-demo --native-cards
+```
+
+Click inside the demo and press F8. Stop its launcher with Ctrl+C.
+Existing hy3 cards stay on their current backend; this does not migrate live
+hy3 groups or switch an installed desktop's layout.
+
 ## hyprpm
 
-This alternative installs the core for **native pairs**. Its manifest maps the
-supported Hyprland commit to a matching implementation commit.
+This alternative installs the core for **native pairs and dwindle multi-app
+cards**. Its manifest maps the supported Hyprland commit to the matching
+0.3.0 preview implementation.
 
 ```sh
 hyprpm add https://github.com/nocstah/hyprflip
@@ -96,6 +132,9 @@ to your Lua configuration, **omitting its `hl.plugin.load(...)` line**: hyprpm
 owns the library load. Run `hyprpm reload` at session startup, following the
 [Hyprland plugin documentation](https://wiki.hypr.land/Plugins/Using-Plugins/).
 Do not also run the supplied core installer against a hyprpm-managed instance.
+For guided creation, editing and saved cards, install the helper from the
+matching source revision using `python3 scripts/install-setup.py` after the
+core is loaded. The helper does not replace or unload compositor libraries.
 
 The build command and pin are supplied; end-to-end hyprpm installation is not
 part of the recorded desktop validation. The first-time container procedure
@@ -196,7 +235,7 @@ hyprctl hyprflip status
 ```
 
 Configuration errors should be empty. Status should report
-`"container_provider": true` and `"container_max_panes": 3`.
+`"hy3_provider": true` and `"container_max_panes": 5`.
 Both `hyprflip` and `hy3` should appear in `hyprctl -j plugin list`.
 The example enables hy3 on workspace 8 and adds H/V/E/O to the core bindings.
 On that workspace, M/P now create container cards for tiled apps.
@@ -243,7 +282,8 @@ It does not replace or unload compositor libraries.
 - **Super+Ctrl+Alt+K:** find and reveal an app across open cards.
 - **Super+Ctrl+Alt+Space:** hold to peek; release to return.
 
-Move your separate app windows to workspace 8, focus the desired front and use O
+Use a normal dwindle workspace (or workspace 8 for the optional hy3 trial),
+focus the desired front and use O
 for the [Gmail / WhatsApp + Telegram walkthrough](../README.md#make-your-first-card).
 The picker can also bring apps from other normal workspaces. Custom desktops can
 use the [direct commands and Lua API](CONTAINERS.md#interaction) without this helper.
@@ -317,7 +357,7 @@ install -m644 examples/containers-navigation.lua \
   "${XDG_CONFIG_HOME:-$HOME/.config}/hypr/hyprflip-navigation.lua"
 ```
 
-Load it after your normal keybindings and the container module:
+Load it after your normal keybindings and Hyprflip modules:
 
 ```lua
 require("hypr.hyprflip-navigation")
@@ -325,8 +365,9 @@ require("hypr.hyprflip-navigation")
 
 Reload once. Super+Shift+1…0 moves and follows the card;
 Super+Shift+Alt+1…0 moves silently; Super+Shift+arrows reorders the card.
-Destinations must be numbered hy3 workspaces, so all-workspace mode is useful
-here. Ordinary windows retain ordinary workspace movement. This module does not
+Destinations must be numbered normal workspaces. Native dwindle cards move as
+one group; hy3 cards require a hy3 destination. Ordinary windows retain ordinary
+workspace movement. This module does not
 add drag bindings or special-workspace movement. Floating cards already move
 and resize as a unit using the desktop's ordinary mouse bindings.
 
@@ -336,9 +377,10 @@ and resize as a unit using the desktop's ordinary mouse bindings.
 
 From a supplied-installer checkout with native pairs only:
 
-Ungroup floating cards first with **Super+Ctrl+Alt+U**; their apps stay open.
-The core-only installer preserves native pairs, while rebuilding floating or
-tiled multi-app cards requires the matching core/provider updater below.
+Save and ungroup any multi-app cards first with **Super+Ctrl+Alt+U**; their apps
+stay open. The core-only installer preserves native two-window pairs. Reopen
+saved dwindle cards after the update. For active hy3 cards, use the matching
+core/provider updater below.
 
 ```sh
 git pull --ff-only
@@ -354,6 +396,10 @@ Customized core settings and native pairs are preserved. For hyprpm, use
 
 Use the dedicated updater for an already-enabled container setup using the
 paths above. Unlock the desktop first; restoring the arrangement requires focus:
+
+If native tiled multi-app cards are also open, save and ungroup those first,
+then reopen them after the update. This updater refuses them before unloading
+either plugin; automatic reconstruction here is for the hy3 provider path.
 
 ```sh
 git pull --ff-only
@@ -397,7 +443,7 @@ shell interface; app windows and Hyprflip cards remain in Hyprland.
 | --- | --- |
 | Plugin reports an ABI/version mismatch | Compare `hyprctl version` with the headers and compiler used to build. Rebuild both experimental libraries together. |
 | `Unknown request` from `hyprctl hyprflip status` | The core is not loaded. Check `hyprctl -j plugin list` and the library path; use `hyprpm reload` for a hyprpm installation. |
-| O asks for a card or does nothing on an ordinary window | Install the guided helper after enabling the provider, and confirm that workspace uses hy3. F6/F7/F8 are only for the nested demo. |
+| O asks for a card or does nothing on an ordinary window | Install the guided helper after the current core, and use dwindle (or hy3 with its matching provider). F6/F7/F8 are only for the nested demo. |
 | C/L/K/Space do not work | Check helper installation, `hyprctl -j binds`, `hyprctl configerrors`, and `python3 ~/.local/lib/hyprflip/setup.py --check-menu`. Install one supported picker if no shell is running. |
 | An additional pane or unfold is refused | Check the five-app-per-face limit and application minimum sizes. Enlarge the card or change the split direction. |
 | A saved app does not launch into the expected window | Use **Manage saved cards → Review apps and launchers**. Web apps need a matching installed desktop entry; a general browser launcher may open a different window. |

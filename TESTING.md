@@ -1,5 +1,82 @@
 # Validation
 
+## Native dwindle cards (2026-09-23)
+
+The current source supports multi-app cards directly on the built-in dwindle
+layout. Validation used Hyprland 0.56.2 with matching headers/compiler, private
+nested-compositor configuration and test windows. The dwindle runs loaded only
+Hyprflip, plus a test-only input probe for the pointer suite; no hy3 provider was
+loaded. These automated suites use disposable windows and configuration.
+
+- The **C++ core suite** and **179 Python tests** pass. New helper regressions
+  cover native creation/editing, saved definitions, optional-provider detection,
+  older hy3-only status, and a layout change between choosing and applying.
+- **7 tiled workflows** pass: a real GTK minimum-size regression where adding
+  a tile frees the space needed by the finished card; guided creation beside a neighboring tile;
+  all transitions, peek and unfold without moving that neighbor; five apps on
+  both faces and sixth-app refusal; workspace moves, edits, float/tile,
+  fullscreen and reload; reopening a saved ten-app card with the same apps and
+  unequal pane proportions;
+  closing a hidden pane and releasing the remaining apps on unload.
+- **9 floating workflows** pass on dwindle, including movement/resizing from
+  either pane, edits, saved workspace destinations, cold launching and unload.
+- **9 real-pointer checks** pass on dwindle: classic/frame appearance, compact
+  and desktop gaps, drag cancellation, adding floating apps, actual GTK minimum
+  size refusal with rollback, full-face refusal, unfolded targets and unload
+  during a drag. Captures of tiled, unfolded and floating cards were inspected.
+- Existing **18 native-pair** and **13 hy3-container** checks pass with the new
+  core. The older container test now checks the advertised five-pane capacity
+  instead of assuming three, and checks `hy3_provider` after provider unload.
+- The documented `--native-cards` demo starts with three apps, dwindle, the
+  core plugin alone and no configuration errors.
+- **7 OmaCards native panel workflows** pass with the core alone on dwindle:
+  flip, unfold/fold, naming/saving, hidden-face editing, persisted motion and
+  preview return, opening an existing saved card, and cold reopening all three
+  fixture apps. The preview panel also passes its offscreen rendering checks.
+
+Reproduce in a fresh disposable session:
+
+```sh
+make test
+python3 -m unittest discover -s tests -p '*_test.py'
+python3 tests/nested_session.py --directory /tmp/hf-dw
+# In another terminal, sequentially:
+python3 tests/dwindle_workflows.py /tmp/hf-dw/session.json
+python3 tests/floating_workflows.py /tmp/hf-dw/session.json --dwindle
+python3 tests/card_interactions.py /tmp/hf-dw/session.json --dwindle \
+  --protocol /path/to/wlr-virtual-pointer-unstable-v1.xml \
+  --captures /tmp/hf-dw/captures
+```
+
+Local evidence is under `/tmp/hf-dw2/`, `/tmp/hf-dwdemo/` and `/tmp/hf-livefix/`,
+with build and suite logs at `/tmp/hyprflip-dwindle-*.log` and
+`/tmp/hyprflip-live-dwindle/`. This does not establish fresh OS installation or
+automatic migration of live hy3 cards. Core-only updates require saving and
+ungrouping active multi-app cards before installation.
+
+### Live Omarchy trial
+
+The preview core and helper were installed on the existing Hyprland 0.56.2
+desktop with backups. Only workspace 8 was assigned to dwindle; the other
+workspaces retained hy3, and the hy3 and Hyprglass libraries stayed loaded.
+The saved Gmail / WhatsApp + Telegram card reopened as a native tiled group.
+
+Eight checks cover the installed flip and peek callbacks, focus memory,
+application size guards, pane proportions, whole-card floating resize/movement,
+workspace moves and reload, the live OmaCards editor/library, and saved-card
+reopening with unchanged app processes and saved definition. Synthetic keys
+did not reliably trigger this desktop's bindings; the registered callbacks were
+invoked directly. This is not a claim of physical-keyboard validation.
+
+At the laptop's 1440×900 logical size, the real apps' minimum sizes prevent
+unfolding all three together. The command leaves the folded card intact.
+Unfolding is covered separately with fixtures that fit. Normal desktop resize
+commands operate on the native card's outer tile; inner proportions use the
+card layout API, including saved-card restoration.
+
+Evidence and installer backups are recorded under
+`/tmp/hyprflip-live-dwindle/` and `~/.local/state/hyprflip/dwindle-trial-20260923-153143/`.
+
 ## Portable helpers and app finder (2026-09-22)
 
 Validated with Hyprland 0.56.2 in a disposable compositor with plain Lua

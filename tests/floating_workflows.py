@@ -16,6 +16,7 @@ import workflow as w
 
 p = argparse.ArgumentParser(description=__doc__)
 p.add_argument('session', type=Path)
+p.add_argument('--dwindle', action='store_true', help='Use only the core plugin and the native dwindle card backend')
 args = p.parse_args()
 root = args.session.parent
 env = environment(args.session) | {'XDG_STATE_HOME': str(root / 'state'), 'XDG_DATA_HOME': str(root / 'data')}
@@ -62,7 +63,7 @@ def edit(anchor, *answers):
     ipc.focus(anchor)
     flow=w.Edit(ipc, Menu(*answers)); flow.apply(flow.prepare(anchor))
 def create(a,b,c):
-    ipc.focused((a,'mark'),(b,'pair'),(c,'mark'),(b,'attach horizontal'))
+    ipc.focused((a,'mark'),(b,'card' if args.dwindle else 'pair'),(c,'mark'),(b,'attach horizontal'))
 
 
 try:
@@ -70,10 +71,12 @@ try:
     names = {m['name'] for m in ipc.data('-j','monitors')}
     ipc.call('output', 'create', 'headless')
     output = next(m['name'] for m in ipc.data('-j','monitors') if m['name'] not in names)
-    for source in (project/'build/containers/provider/upstream/libhy3.so', project/'build/containers/core/hyprflip.so'):
+    libraries = [project/'build/hyprflip.so'] if args.dwindle else [
+        project/'build/containers/provider/upstream/libhy3.so', project/'build/containers/core/hyprflip.so']
+    for source in libraries:
         target=root/('float-'+source.name);shutil.copy2(source,target)
         ipc.call('plugin','load',str(target));loaded.append(target)
-    config.write_text(original.replace('layout="dwindle"','layout="hy3"') +
+    config.write_text((original if args.dwindle else original.replace('layout="dwindle"','layout="hy3"')) +
                      f'\nhl.monitor({{output="{output}",mode="3840x2160@60",position="2000x0",scale=1.5}})\n' +
                      ''.join(f'hl.workspace_rule({{workspace="{n}",monitor="{output}"}})\n' for n in (41, 43)))
     ipc.call('reload');assert not ipc.call('configerrors')

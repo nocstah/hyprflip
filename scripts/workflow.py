@@ -35,6 +35,15 @@ class MenuUnavailable(SetupError):
     pass
 
 
+def card_layout_available(state, layout):
+    """New cores own dwindle cards; older cores require their hy3 provider."""
+    if not state.get('container_provider'):
+        return False
+    if layout == 'dwindle':
+        return bool(state.get('native_cards'))
+    return layout == 'hy3' and state.get('hy3_provider', True)
+
+
 MENU_BACKENDS = ('auto', 'omarchy', 'fuzzel', 'rofi', 'wofi')
 
 
@@ -254,7 +263,7 @@ class Hyprctl:
             if not re.fullmatch(r'0x[0-9a-fA-F]+', address):
                 raise SetupError('The selected window is no longer available.')
             name, _, argument = action.partition(' ')
-            if not (name in ('mark', 'pair', 'release', 'unpair', 'other_side', 'flip', 'unfold', 'floating') and not argument or
+            if not (name in ('mark', 'pair', 'card', 'release', 'unpair', 'other_side', 'flip', 'unfold', 'floating') and not argument or
                     name == 'workspace' and re.fullmatch(r'[1-9][0-9]{0,9}', argument) and int(argument) <= 2147483647 or
                     name == 'other_side' and re.fullmatch(r'0x[0-9a-fA-F]+', argument) or
                     name == 'attach' and argument in ('horizontal', 'vertical') or
@@ -765,16 +774,16 @@ class Setup:
         if not source:
             raise SetupError('Focus the window you want on the front, then press Super+Ctrl+Alt+O.')
         if not state.get('container_provider'):
-            raise SetupError('The container provider is unavailable. Load the matching Hyprflip and hy3 plugins.')
+            raise SetupError('Card support is unavailable. Load the Hyprflip plugin first.')
         workspace = source['workspace']['id']
         layouts = {w['id']: w['tiledLayout'] for w in self.ipc.data('-j', 'workspaces')}
-        if workspace < 1 or layouts.get(workspace) != 'hy3':
-            raise SetupError('Use a normal workspace with the hy3 container layout, then open setup again.')
+        if workspace < 1 or not card_layout_available(state, layouts.get(workspace)):
+            raise SetupError('Use a normal dwindle workspace, or enable the optional hy3 provider, then open setup again.')
         eligible = self.eligible(windows, state)
         if front not in eligible:
             if source.get('floating') and not state.get('workspace_protection'):
                 raise SetupError('This Hyprflip version cannot arrange floating apps automatically. '
-                                 'Update Hyprflip and its hy3 provider, then try again.')
+                                 'Update Hyprflip, then try again.')
             if source.get('fullscreen'):
                 raise SetupError('Leave fullscreen, then open setup again.')
             raise SetupError('Choose an app that is not already in a card or group for the front.')
@@ -820,15 +829,15 @@ class Setup:
         if any(w.get('fullscreen') and w['workspace']['id'] == workspace for w in now.values()):
             raise SetupError('Close the fullscreen overlay on this workspace, then open setup again.')
         layouts = {w['id']: w['tiledLayout'] for w in self.ipc.data('-j', 'workspaces')}
-        if not state.get('container_provider') or layouts.get(workspace) != 'hy3':
-            raise SetupError('The container layout changed. Open setup again on a hy3 workspace.')
+        if not card_layout_available(state, layouts.get(workspace)):
+            raise SetupError('The card layout changed. Open setup again on a supported workspace.')
         created = None
         moved = []
         tiled = []
         try:
             self.tile_selected(selected, tiled)
             self.import_windows(selected, workspace, moved)
-            self.ipc.focused((front, 'mark'), (back, 'pair'))
+            self.ipc.focused((front, 'mark'), (back, 'card' if state.get('native_cards') else 'pair'))
             created = next((c for c in self.ipc.status()['containers'] if c['faces'] == [[front], [back]]), None)
             if not created:
                 raise SetupError('The card could not be created. Open setup again.')
@@ -884,6 +893,15 @@ class Setup:
     def restore_ratios(self, face):
         panes = face['windows']
         if len(panes) == 1: return
+        state = self.ipc.status()
+        if state.get('native_cards') and any(
+                card.get('native_group') and any(set(members) == set(panes) for members in card['faces'])
+                for card in state.get('containers', [])):
+            # Native groups expose one outer resize target to the compositor.
+            # Restore their inner proportions through the card API instead.
+            arguments = ' '.join(f'{address}:{ratio:.12g}' for address, ratio in zip(panes, face['ratios']))
+            self.ipc.focused((panes[0], 'arrange ' + face['axis'] + ' ' + arguments))
+            return
         axis = int(face['axis'] == 'vertical')
         for _ in range(2):
             # Move split boundaries, not individual target widths. First pass
@@ -961,8 +979,8 @@ class Edit(Setup):
             raise SetupError('The split changed. Open Edit card again to use its current layout.')
         workspace = plan.windows[plan.anchor]['workspace']['id']
         layouts = {w['id']: w['tiledLayout'] for w in self.ipc.data('-j', 'workspaces')}
-        if workspace < 1 or layouts.get(workspace) != 'hy3':
-            raise SetupError('Edit card needs a normal workspace with the hy3 container layout.')
+        if workspace < 1 or not card_layout_available(state, layouts.get(workspace)):
+            raise SetupError('Edit card needs a normal workspace with a supported card layout.')
         for address, original in plan.windows.items():
             current = windows.get(address)
             if (not current or not current.get('mapped', True)
@@ -987,7 +1005,7 @@ class Edit(Setup):
         if not card:
             if any(anchor in (p['front'], p['back']) for p in state.get('pairs', [])):
                 raise SetupError('This is a native window group. Use Super+Ctrl+Alt+U to ungroup it, '
-                                 'then create a tiled card with O on a hy3 workspace to edit its apps.')
+                                 'then create a card with O to edit its apps.')
             raise SetupError('Focus an app in a Hyprflip card first. Use Super+Ctrl+Alt+O to create one.')
         members = {a: windows[a] for face in card['faces'] for a in face if a in windows}
         if anchor not in members or len(members) != sum(map(len, card['faces'])):
@@ -1643,8 +1661,8 @@ class Saved(Setup):
         destination = recipe.get('workspace', workspace)
         layout = layouts.get(destination)
         if (not state.get('container_provider') or destination < 1 or
-                (layout != 'hy3' and not (layout is None and recipe.get('workspace') == destination))):
-            raise SetupError('Open a card on a normal workspace with the hy3 container layout.')
+                (not card_layout_available(state, layout) and not (layout is None and recipe.get('workspace') == destination))):
+            raise SetupError('Open a card on a normal dwindle workspace, or enable the optional hy3 provider.')
         if any(len(face['apps']) > state.get('container_max_panes', 2) for face in recipe['faces']):
             raise SetupError('Update the container plugins before opening this card; it needs more apps per side.')
 
@@ -2003,8 +2021,8 @@ class Saved(Setup):
         if destination == plan.workspace: return plan
         self.ipc.call('dispatch', f'hl.dsp.focus({{workspace={destination}}})')
         layouts = {w['id']: w['tiledLayout'] for w in self.ipc.data('-j', 'workspaces')}
-        if layouts.get(destination) != 'hy3':
-            raise SetupError(f'Workspace {destination} needs the hy3 layout to open this card.')
+        if not card_layout_available(self.ipc.status(), layouts.get(destination)):
+            raise SetupError(f'Workspace {destination} needs a supported card layout (dwindle or optional hy3).')
         return replace(plan, workspace=destination, focus=self.ipc.data('-j', 'activewindow').get('address'))
 
     def apply(self, plan):

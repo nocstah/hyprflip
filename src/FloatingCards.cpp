@@ -369,12 +369,16 @@ bool attach(uint64_t id, uintptr_t address, uint32_t side, bool vertical) {
     c->ratios[side].push_back(addedShare);
     if (oldRatios.size() == 1) c->vertical[side] = vertical;
     auto box = c->group->m_target->position();
-    auto min = c->minimum();
-    if (c->group->m_target->floating()) {
+    const bool floating = c->group->m_target->floating();
+    if (floating) {
+        auto min = c->minimum();
         box.w = std::max(box.w, min.x);
         box.h = std::max(box.h, min.y);
     }
-    if (!c->fits(box)) {
+    // A tiled incoming window still occupies its own layout slot. Grouping
+    // removes that slot and can enlarge the card, so Controller::attach checks
+    // the resulting pane sizes and rolls back if they do not fit.
+    if (floating && !c->fits(box)) {
         c->faces[side].pop_back();
         c->ratios[side] = oldRatios;
         c->vertical[side] = oldVertical;
@@ -389,7 +393,8 @@ bool attach(uint64_t id, uintptr_t address, uint32_t side, bool vertical) {
     c->active = side;
     c->changing = false;
     c->decos();
-    c->group->m_target->setPositionGlobal({.logicalBox = box, .visualBox = {}});
+    if (floating)
+        c->group->m_target->setPositionGlobal({.logicalBox = box, .visualBox = {}});
     c->refresh();
     select(id, side, true);
     return true;
@@ -599,7 +604,7 @@ uint64_t pair(uintptr_t a, uintptr_t b) {
     s.y = box.y;
     s.width = box.w;
     s.height = box.h;
-    return create(s);
+    return create(s, w->m_isFloating);
 }
 void animating(uint64_t, bool) {}
 const ContainerAPI API{CONTAINER_ABI_VERSION,
@@ -641,7 +646,7 @@ bool canCreate(const ContainerSnapshot &snapshot) {
     return proposed.fits(
         {snapshot.x, snapshot.y, std::max(snapshot.width, minimum.x), std::max(snapshot.height, minimum.y)});
 }
-uint64_t create(const ContainerSnapshot &snapshot) {
+uint64_t create(const ContainerSnapshot &snapshot, bool floating) {
     if (!canCreate(snapshot))
         return 0;
     auto c = std::make_shared<Card>();
@@ -675,14 +680,19 @@ uint64_t create(const ContainerSnapshot &snapshot) {
         return 0;
     c->changing = true;
     auto front = c->faces[0][0].lock();
-    if (!front->m_isFloating)
+    if (front->m_isFloating != floating)
         g_layoutManager->changeFloatingMode(front->layoutTarget());
     c->group = CGroup::create({front});
     for (auto &face : c->faces)
         for (auto &ref : face) {
             auto w = ref.lock();
-            if (w != front)
+            if (w != front) {
+                if (!w->canBeGroupedInto(c->group)) {
+                    c->dissolve();
+                    return 0;
+                }
                 c->group->add(w);
+            }
             auto p = PaneTarget::create(w->m_target, c);
             c->targets[addr(w)] = p;
             w->m_target = p;
@@ -692,7 +702,8 @@ uint64_t create(const ContainerSnapshot &snapshot) {
     c->decos();
     auto id = nextID++;
     cards.emplace(id, c);
-    c->group->m_target->setPositionGlobal({.logicalBox = c->initial, .visualBox = {}});
+    if (floating)
+        c->group->m_target->setPositionGlobal({.logicalBox = c->initial, .visualBox = {}});
     select(id, c->active, true);
     c->refresh();
     return id;

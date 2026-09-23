@@ -1,0 +1,32 @@
+{
+  "date": "2026-09-23",
+  "hyprland": "0.56.2",
+  "hyprflip": "0.3.0-rc.1",
+  "layout": "dwindle",
+  "plugins": [
+    "hyprflip"
+  ],
+  "source": "Disposable nested compositor with three synthetic terminal fixtures; no private app content.",
+  "recorder": "wf-recorder 0.6.0, software libx264, no DMA-BUF; local compatibility fix for FFmpeg 9 codec pixel-format query.",
+  "video": "1600x1088 H.264, 60 fps, silent. Original 1600x1000 desktop frame with an 88px caption band.",
+  "preview": "960px wide, 20 fps GIF.",
+  "editing": "No composited app windows or simulated motion; original compositor footage at recorded speed, with a static caption band.",
+  "actions": [
+    {
+      "seconds": 2.05,
+      "action": "flip"
+    },
+    {
+      "seconds": 4.535,
+      "action": "unfold"
+    },
+    {
+      "seconds": 7.53,
+      "action": "unfold"
+    },
+    {
+      "seconds": 9.535,
+      "action": "flip"
+    }
+  ]
+}

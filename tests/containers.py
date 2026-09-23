@@ -172,19 +172,27 @@ try:
     fifth = spawn("outside")
     attach(fifth, a, "horizontal")
     assert card()["faces"] == [[a, neighbor, fifth], [b, c]]
+    extra_panes = []
+    for index in range(3, status()["container_max_panes"]):
+        extra = spawn("capacity-" + str(index))
+        attach(extra, a, "vertical")
+        extra_panes.append(extra)
+    assert card()["faces"][0] == [a, neighbor, fifth, *extra_panes]
     sixth = spawn("over-capacity")
     focus(sixth); action("mark"); focus(a)
     assert ctl("hyprflip", "attach", success=False).startswith("error:")
     assert status()["marked"] == sixth
     action("cancel")
     close(sixth)
+    for extra in reversed(extra_panes):
+        focus(extra); action("release"); close(extra)
     focus(fifth); action("release")
     assert card()["faces"] == [[a, neighbor], [b, c]]
     focus(neighbor); action("release")
     assert card()["faces"] == [[a], [b, c]]
     assert active() == neighbor and not client(neighbor)["hidden"]
     close(fifth)
-    check("both split axes, three-pane limit, outside opens and focused release")
+    check("both split axes, advertised pane limit, outside opens and focused release")
 
     focus(c)
     action("workspace 101")
@@ -307,7 +315,7 @@ try:
     # immediate successful IPC reply alone cannot prove unload safety.
     time.sleep(.6)
     wait(lambda: status()["containers"] == [])
-    assert not status()["animating"] and not status()["container_provider"]
+    assert not status()["animating"] and not status().get("hy3_provider", status()["container_provider"])
     assert all(not client(w)["hidden"] for w in (a, b))
     check("either plugin can unload during a turn without stranding windows")
 

@@ -15,6 +15,7 @@ parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('session', type=Path)
 parser.add_argument('--protocol', type=Path, required=True)
 parser.add_argument('--captures', type=Path, required=True)
+parser.add_argument('--dwindle', action='store_true', help='Exercise native cards with only the core on dwindle')
 args = parser.parse_args()
 project, root = Path(__file__).resolve().parents[1], args.session.parent
 env = environment(args.session)
@@ -127,13 +128,15 @@ try:
     flags = shlex.split(subprocess.check_output(['pkg-config', '--cflags', '--libs', 'wayland-client'], text=True))
     subprocess.run(['cc', '-o', str(root / 'interaction-pointer'), '-I' + str(root),
                     str(project / 'tests/frame_pointer.c'), str(root / 'frame-pointer-protocol.c'), *flags], check=True)
-    for source in (project / 'build/containers/provider/upstream/libhy3.so', project / 'build/containers/core/hyprflip.so'):
+    libraries = [project / 'build/hyprflip.so'] if args.dwindle else [
+        project / 'build/containers/provider/upstream/libhy3.so', project / 'build/containers/core/hyprflip.so']
+    for source in libraries:
         target = root / ('interaction-' + source.name)
         shutil.copy2(source, target); ipc.call('plugin', 'load', str(target)); loaded.append(target)
     probe = root / 'interaction-probe.so'
-    shutil.copy2(project / 'build/containers/core/motion_probe.so', probe)
+    shutil.copy2(project / ('build/motion_probe.so' if args.dwindle else 'build/containers/core/motion_probe.so'), probe)
     ipc.call('plugin', 'load', str(probe))
-    base = original.replace('layout="dwindle"', 'layout="hy3"') + '''
+    base = (original if args.dwindle else original.replace('layout="dwindle"', 'layout="hy3"')) + '''
 hl.config({animations={enabled=false},general={gaps_in=14,gaps_out=24}})
 -- The nested backend can retain a modifier when its parent loses focus.
 -- Use only the fixture's virtual keyboard, never the user's real keyboard.
@@ -149,14 +152,16 @@ if hl.plugin.hyprflip then hl.config({plugin={hyprflip={duration_ms=0,notificati
     ipc.call('dispatch', f'hl.dsp.focus({{monitor="{output}"}})')
     ipc.call('dispatch', 'hl.dsp.focus({workspace=81})')
     a, b, c = [spawn(name) for name in ('Mail', 'Messages', 'Notes')]
-    assert gap([b, c]) == [28]
-    ipc.focused((a, 'mark'), (b, 'pair'), (c, 'mark'), (b, 'attach horizontal'))
+    windows = ipc.windows()
+    ordinary_axis = int(windows[b]['at'][0] == windows[c]['at'][0])
+    assert gap([b, c], ordinary_axis) == [28]
+    ipc.focused((a, 'mark'), (b, 'card' if args.dwindle else 'pair'), (c, 'mark'), (b, 'attach horizontal'))
     assert gap([b, c]) == [28]
     assert ipc.status()['container_max_panes'] == 5
     setting('card_frame=false,card_gap=12')
     assert not ipc.status()['card_frames'] and gap([b, c]) == [12]
     capture('classic-compact')
-    passed('classic tabs and compact spacing apply to existing hy3 cards')
+    passed('classic appearance and compact spacing apply to existing cards')
 
     outsider = spawn('Drag this app'); floating(outsider)
     before = deepcopy(card()['faces'])

@@ -50,10 +50,10 @@ def main():
         raise SystemExit('Resolve existing Hyprland configuration errors before installing.')
     state = json.loads(ctl('hyprflip', 'status'))
     if not args.backend_only and not state.get('container_provider'):
-        raise SystemExit('Enable the matching Hyprflip container core and hy3 provider first.')
+        raise SystemExit('Load a Hyprflip build with card support first. Dwindle needs only the core plugin.')
     available = ctl('repl', 'return hl.plugin.hyprflip.unfold ~= nil and hl.plugin.hyprflip.in_container ~= nil')
     if not args.backend_only and available != 'true':
-        raise SystemExit('Update the container trial to the unfold build first.')
+        raise SystemExit('Update Hyprflip to a build with card controls first.')
     preferences = shortcuts.read(workflow.Hyprctl())
     expected_chords = set() if args.backend_only else {preferences.get(i, (76, k)) for i, k in
         (('create', 'O'), ('edit', 'C'), ('library', 'L'), ('find', 'K'), ('peek', 'space'))}

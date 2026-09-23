@@ -1,5 +1,9 @@
 # Container experiment
 
+For native multi-app cards on dwindle, start with the
+[dwindle installation guide](INSTALL.md#dwindle-multi-app-cards). This document
+primarily describes the optional hy3 provider and its separate update path.
+
 Status: opt-in development experiment for Hyprland 0.56.2. The native
 two-window backend remains available. The regular installer does not enable this
 provider or change workspace layouts.
@@ -349,6 +353,12 @@ and dismiss screensavers covering a card workspace so restoration can focus its
 applications. The dry run checks these conditions before any library changes.
 
 ## Interaction
+
+On the current core, `hyprctl hyprflip card` creates a native multi-app card on
+dwindle from the marked and focused windows. Its Lua equivalent is
+`hl.plugin.hyprflip.card()`. Use `card` in step 2 below for dwindle; `pair`
+retains the simpler two-window native group there. Both actions use the optional
+provider on a hy3 workspace. The remaining card actions apply to either backend.
 
 Use the following actions through `hyprctl hyprflip` in the experiment, or prefix
 them with `python tests/control.py /tmp/hf-card/session.json` when controlling it

@@ -6,6 +6,9 @@ another kind of group or requiring users to manage a layout tree.
 
 ## Current milestone
 
+- Native multi-app cards work directly on dwindle with the core and guided
+  helper. Hy3 is an optional backend for existing hy3 workspaces. A separate
+  `card` action enables editable cards while M/P keeps two-window pairing.
 - Normal workspace shortcuts move the entire card. Silent moves keep the user
   on the source workspace; an unsupported destination leaves the card intact.
 - Directional movement reorders tiled cards. Tiled resize and close address the
