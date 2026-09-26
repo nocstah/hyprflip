@@ -97,6 +97,11 @@ TRANSITIONS = {
     'instant': ('Instant', 'Switch without motion'),
 }
 
+# Chromium-based browsers name --app windows <browser>-<host>__<path>-<profile>.
+# Helium reports the chrome- prefix. Saved cards compare the part after the
+# prefix so a web app still matches after the default browser changes.
+WEB_APP_CLASS = re.compile(r'(?:brave|chrome|chromium|google-chrome|msedge|microsoft-edge|vivaldi|opera|helium)-(.+__.*)')
+
 
 class Hyprctl:
     def __init__(self, env=None):
@@ -1490,8 +1495,13 @@ class Saved(Setup):
 
     @staticmethod
     def same_app(app, window):
-        return bool((app['class'] and window.get('class') == app['class']) or
-                    (app['initial_class'] and window.get('initialClass') == app['initial_class']))
+        if ((app['class'] and window.get('class') == app['class']) or
+                (app['initial_class'] and window.get('initialClass') == app['initial_class'])):
+            return True
+        def sites(*classes):
+            return {m.group(1) for c in classes if c and (m := WEB_APP_CLASS.fullmatch(c))}
+        return bool(sites(app['class'], app['initial_class']) &
+                    sites(window.get('class'), window.get('initialClass')))
 
     @staticmethod
     def open_cards(recipe, windows, state):

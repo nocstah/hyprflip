@@ -105,6 +105,25 @@ class SavedTest(unittest.TestCase):
         self.assertEqual(plan.arrangement['faces'][1]['windows'], ['0x11', '0x12'])
         self.assertEqual(self.ipc.mutations, [])
 
+    def test_web_app_matches_after_default_browser_changes(self):
+        front = self.recipe['faces'][0]['apps'][0]
+        front.update({'class': 'brave-gmail.com__-Default', 'initial_class': 'brave-gmail.com__-Default'})
+        self.ungrouped()
+        self.ipc.clients['0xa'].update({'class': 'chrome-gmail.com__-Default',
+                                        'initialClass': 'chrome-gmail.com__-Default', 'title': 'Inbox'})
+        plan = self.saved('0', 'restore', 'restore').prepare_manage()
+        self.assertEqual(plan.arrangement['faces'][0]['windows'], ['0xa'])
+        self.assertEqual(self.ipc.mutations, [])
+
+    def test_web_app_match_needs_the_same_site_and_profile(self):
+        app = {'class': 'brave-gmail.com__-Default', 'initial_class': 'brave-gmail.com__-Default'}
+        same = lambda cls: setup.Saved.same_app(app, {'class': cls, 'initialClass': cls})
+        self.assertTrue(same('msedge-gmail.com__-Default'))
+        self.assertFalse(same('chrome-web.whatsapp.com__-Default'))
+        self.assertFalse(same('chrome-gmail.com__-Profile_1'))
+        self.assertFalse(same('firefox-gmail.com__-Default'))
+        self.assertFalse(same('chrome'))
+
     def test_ambiguous_browser_match_is_a_choice_and_review_can_cancel(self):
         self.ungrouped()
         self.ipc.clients['0xd'].update(self.ipc.clients['0xa'] | {'address': '0xd', 'pid': 4})

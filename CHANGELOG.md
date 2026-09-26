@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Recognise Chromium web apps in saved cards after the default browser
+  changes. A card saved with Brave's `brave-gmail.com__-Default` now reopens
+  with Helium's or Chrome's `chrome-gmail.com__-Default` instead of waiting
+  for a window that never appears. The site and browser profile must still
+  match.
+
 ## 0.3.0-rc.2 — 2026-09-23
 
 - Let native dwindle and floating cards allocate unequal space to unfolded
