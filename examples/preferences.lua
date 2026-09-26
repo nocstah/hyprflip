@@ -35,4 +35,20 @@ if hl.plugin.hyprflip and hl.plugin.hyprflip.preview then
             pcall(function() hl.config({plugin={hyprflip={card_gap=gap}}}) end)
         end
     end
+    local color_file = io.open(root .. "/hyprflip/accent_color", "r")
+    if color_file then
+        local color = (color_file:read("*l") or ""):match("^#%x%x%x%x%x%x$")
+        color_file:close()
+        if color then
+            pcall(function() hl.config({plugin={hyprflip={accent_color=color}}}) end)
+        end
+    end
+    local ring_file = io.open(root .. "/hyprflip/accent_ring", "r")
+    if ring_file then
+        local ring = ring_file:read("*l")
+        ring_file:close()
+        if ring == "on" or ring == "off" then
+            pcall(function() hl.config({plugin={hyprflip={accent_ring=ring == "on"}}}) end)
+        end
+    end
 end

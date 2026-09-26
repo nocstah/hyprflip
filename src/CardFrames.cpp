@@ -24,6 +24,8 @@ namespace Hyprflip {
 namespace {
 using namespace Desktop::View;
 constexpr auto HEADER_NAME = "Hyprflip card header";
+// The accent ring sits just outside the card's window borders.
+constexpr int RING_GAP = 2, RING_MAX = 4, DAMAGE_MARGIN = RING_GAP + RING_MAX + 2;
 bool shown(PHLWINDOW w) {
     return w && w->m_isMapped && !w->isHidden() && w->m_workspace && w->m_workspace->m_visible &&
            w->alpha(WINDOW_ALPHA_LAYOUT)->value() > .01F && !Fullscreen::controller()->hasFullscreen(w->m_workspace);
@@ -80,8 +82,10 @@ class FrameGroupBar final : public CHyprGroupBarDecoration {
     double previousHeight = -1;
 };
 struct PaintData {
-    CBox box, label, button, labelText, buttonText, focusPane;
-    Config::CGradientValueData border;
+    bool frame = false;
+    CBox box, label, button, labelText, buttonText, focusPane, ring;
+    Config::CGradientValueData border, ringColor;
+    int ringWidth = 0, ringRound = 0;
     CHyprColor fill, buttonFill;
     SP<Render::ITexture> labelTexture, buttonTexture;
     float alpha = 1;
@@ -96,6 +100,14 @@ class CardFramePass final : public IPassElement {
     explicit CardFramePass(PaintData data, CBox bounds) : data(std::move(data)), bounds(bounds) {}
     std::vector<UP<IPassElement>> draw() override {
         auto &gl = Render::GL::g_pHyprOpenGL;
+        if (!data.ring.empty())
+            gl->renderBorder(data.ring, data.ringColor,
+                             {.round = data.ringRound,
+                              .roundingPower = data.roundingPower,
+                              .borderSize = data.ringWidth,
+                              .a = data.alpha});
+        if (!data.frame)
+            return {};
         if (!data.focusPane.empty() && data.focusWidth)
             gl->renderBorder(data.focusPane, data.border,
                              {.round = data.focusRound,
@@ -171,7 +183,7 @@ CardFrames::~CardFrames() {
     g_pHyprRenderer->m_renderPass.removeAllOfType("HyprflipCardFramePass");
     nativeHeaders({});
     for (const auto &[_, previous] : m_last)
-        g_pHyprRenderer->damageBox(previous.box.copy().expand(2));
+        g_pHyprRenderer->damageBox(previous.box.copy().expand(DAMAGE_MARGIN));
     g_pHyprRenderer->glBackend()->makeEGLCurrent();
     m_textures.clear();
 }
@@ -251,6 +263,10 @@ std::vector<CardFrames::Layout> CardFrames::layouts() const {
         // so its group border cannot overwrite the pane's focus outline.
         if (layout.focused && focused && !focused->m_isFloating && shown(focused))
             layout.anchor = focused;
+        if (!layout.view.frame) {
+            result.push_back(std::move(layout));
+            continue;
+        }
         if (layout.focused && focused && focused->m_group && !layout.view.animating &&
             (layout.view.unfolded || layout.view.count[layout.view.active] > 1)) {
             layout.focusPane =
@@ -292,16 +308,18 @@ void CardFrames::refresh(bool force) {
                                 layout.focused,
                                 m_hovered == layout.view.id,
                                 m_pressed == layout.view.id,
+                                layout.view.frame,
+                                layout.view.ring ? std::optional(layout.view.ring->getAsHex()) : std::nullopt,
                                 layout.alpha};
     for (const auto &[id, previous] : m_last) {
         const auto current = next.find(id);
         if (force || current == next.end() || current->second != previous)
-            g_pHyprRenderer->damageBox(previous.box.copy().expand(2));
+            g_pHyprRenderer->damageBox(previous.box.copy().expand(DAMAGE_MARGIN));
     }
     for (const auto &[id, current] : next) {
         const auto previous = m_last.find(id);
         if (force || previous == m_last.end() || previous->second != current)
-            g_pHyprRenderer->damageBox(current.box.copy().expand(2));
+            g_pHyprRenderer->damageBox(current.box.copy().expand(DAMAGE_MARGIN));
     }
     m_last = std::move(next);
 }
@@ -333,12 +351,29 @@ void CardFrames::paint(const Layout &layout) {
     const auto scale = monitor->m_scale;
     const auto local = [&](CBox box) { return box.translate(-monitor->m_position).scale(scale).round(); };
     PaintData data;
+    data.frame = layout.view.frame;
+    data.roundingPower = layout.anchor->roundingPower();
+    data.alpha = layout.alpha;
+    if (layout.view.ring) {
+        // Full strength on the focused card, quieter elsewhere, so the ring
+        // marks card membership without competing with the focus border.
+        data.ringColor = Config::CGradientValueData(
+            layout.view.ring->modifyA(layout.focused ? 1.F : .55F));
+        data.ringWidth = std::clamp<int>(*width, 2, RING_MAX);
+        data.ring = local(layout.box.copy().expand(RING_GAP));
+        data.ringRound = std::lround(
+            (layout.anchor->rounding() + layout.anchor->getRealBorderSize() + RING_GAP) * scale);
+    }
+    if (!data.frame) {
+        g_pHyprRenderer->m_renderPass.add(makeUnique<CardFramePass>(
+            std::move(data), layout.box.copy().expand(DAMAGE_MARGIN).translate(-monitor->m_position)));
+        return;
+    }
     data.width = std::clamp<int>(*width + 1, 2, 6);
     data.round =
         std::lround(std::max(0.F, layout.anchor->rounding() + layout.anchor->getRealBorderSize() - data.width) * scale);
     data.controlRound = std::lround(std::min(6. * scale, double(data.round)));
     data.controlInset = std::lround(scale);
-    data.roundingPower = layout.anchor->roundingPower();
     data.box = local(layout.box.copy().expand(-data.width));
     data.border = *static_cast<Config::CGradientValueData *>((layout.focused ? active : inactive).ptr());
     data.label = layout.label.empty() ? CBox{} : local(layout.label);
@@ -346,7 +381,6 @@ void CardFrames::paint(const Layout &layout) {
     data.focusPane = layout.focusPane.empty() ? CBox{} : local(layout.focusPane);
     data.focusWidth = layout.focusWidth;
     data.focusRound = std::lround(layout.focusRound * scale);
-    data.alpha = layout.alpha;
     data.fill = fill;
     data.buttonFill = fill;
     if (m_hovered == layout.view.id || m_pressed == layout.view.id) {
@@ -382,7 +416,7 @@ void CardFrames::paint(const Layout &layout) {
         data.labelTexture = text(layout.text, data.label, data.labelText);
     data.buttonTexture = text(layout.view.unfolded ? "Fold" : "Flip", data.button, data.buttonText);
     g_pHyprRenderer->m_renderPass.add(
-        makeUnique<CardFramePass>(std::move(data), layout.box.copy().translate(-monitor->m_position)));
+        makeUnique<CardFramePass>(std::move(data), layout.box.copy().expand(DAMAGE_MARGIN).translate(-monitor->m_position)));
 }
 std::optional<uint64_t> CardFrames::hit(Vector2D pos) const {
     // Layer menus, popups and locks retain priority over compositor controls.
@@ -456,12 +490,28 @@ void CardFrames::clearInput() {
 std::string CardFrames::status() {
     std::string result = "[";
     for (const auto &layout : layouts()) {
+        if (!layout.view.frame)
+            continue;
         if (result.size() > 1)
             result += ',';
         result += std::format(
             "{{\"id\":{},\"box\":[{},{},{},{}],\"button\":[{},{},{},{}],\"active\":{},\"unfolded\":{}}}",
             layout.view.id, layout.box.x, layout.box.y, layout.box.w, layout.box.h, layout.button.x, layout.button.y,
             layout.button.w, layout.button.h, layout.view.active, layout.view.unfolded ? "true" : "false");
+    }
+    return result + ']';
+}
+std::string CardFrames::rings() {
+    std::string result = "[";
+    for (const auto &layout : layouts()) {
+        if (!layout.view.ring)
+            continue;
+        if (result.size() > 1)
+            result += ',';
+        const auto box = layout.box.copy().expand(RING_GAP);
+        result += std::format("{{\"id\":{},\"box\":[{},{},{},{}],\"color\":\"#{:06X}\",\"focused\":{}}}",
+                              layout.view.id, box.x, box.y, box.w, box.h, layout.view.ring->getAsHex() & 0xffffff,
+                              layout.focused ? "true" : "false");
     }
     return result + ']';
 }

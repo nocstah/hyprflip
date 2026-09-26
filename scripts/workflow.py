@@ -201,55 +201,21 @@ class Hyprctl:
         finally:
             temporary.unlink(missing_ok=True)
 
-    def save_appearance(self, style):
-        if style not in ('classic', 'frame'):
-            raise SetupError('Choose Classic tabs or Card frame.')
-        current = self.status().get('card_frame')
-        if type(current) is not bool:
-            raise SetupError('Update Hyprflip to change the card appearance here.')
+    def _save_preference(self, filename, text, field, value, old, lua, failure):
+        # Persist first so the next login matches; restore both on any failure.
         env = self.env if self.env is not None else os.environ
         root = Path(env.get('XDG_STATE_HOME', str(Path.home() / '.local/state'))) / 'hyprflip'
         root.mkdir(parents=True, exist_ok=True)
-        path = root / 'appearance'
+        path = root / filename
         previous = path.read_bytes() if path.exists() else None
-        temporary = path.with_name('appearance-' + uuid.uuid4().hex)
-        def apply(frame):
-            self.call('eval', 'hl.config({plugin={hyprflip={card_frame=%s}}})' % ('true' if frame else 'false'))
+        temporary = path.with_name(filename + '-' + uuid.uuid4().hex)
+        def apply(current):
+            self.call('eval', 'hl.config({plugin={hyprflip={%s=%s}}})' % (field, lua(current)))
         try:
-            temporary.write_text(style + '\n')
-            temporary.replace(path)
-            apply(style == 'frame')
-            if self.status().get('card_frame') != (style == 'frame'):
-                raise SetupError('The card appearance could not be applied.')
-        except Exception:
-            if previous is None: path.unlink(missing_ok=True)
-            else:
-                temporary.write_bytes(previous); temporary.replace(path)
-            try: apply(current)
-            except (SetupError, OSError, subprocess.TimeoutExpired): pass
-            raise
-        finally:
-            temporary.unlink(missing_ok=True)
-
-    def save_spacing(self, value):
-        if type(value) is not int or not -1 <= value <= 128:
-            raise SetupError('Choose Desktop spacing or a gap between 0 and 128 pixels.')
-        old = self.status().get('card_gap')
-        if type(old) is not int or not -1 <= old <= 128:
-            raise SetupError('Update Hyprflip to change app spacing.')
-        env = self.env if self.env is not None else os.environ
-        root = Path(env.get('XDG_STATE_HOME', str(Path.home() / '.local/state'))) / 'hyprflip'
-        root.mkdir(parents=True, exist_ok=True)
-        path = root / 'card_gap'
-        previous = path.read_bytes() if path.exists() else None
-        temporary = path.with_name('gap-' + uuid.uuid4().hex)
-        def apply(gap):
-            self.call('eval', 'hl.config({plugin={hyprflip={card_gap=%d}}})' % gap)
-        try:
-            temporary.write_text(str(value) + '\n'); temporary.replace(path)
+            temporary.write_text(text + '\n'); temporary.replace(path)
             apply(value)
-            if self.status().get('card_gap') != value:
-                raise SetupError('The app spacing could not be applied.')
+            if self.status().get(field) != value:
+                raise SetupError(failure)
         except Exception:
             if previous is None: path.unlink(missing_ok=True)
             else:
@@ -259,6 +225,45 @@ class Hyprctl:
             raise
         finally:
             temporary.unlink(missing_ok=True)
+
+    def save_appearance(self, style):
+        if style not in ('classic', 'frame'):
+            raise SetupError('Choose Classic tabs or Card frame.')
+        current = self.status().get('card_frame')
+        if type(current) is not bool:
+            raise SetupError('Update Hyprflip to change the card appearance here.')
+        self._save_preference('appearance', style, 'card_frame', style == 'frame', current,
+                              lambda frame: 'true' if frame else 'false', 'The card appearance could not be applied.')
+
+    def save_spacing(self, value):
+        if type(value) is not int or not -1 <= value <= 128:
+            raise SetupError('Choose Desktop spacing or a gap between 0 and 128 pixels.')
+        old = self.status().get('card_gap')
+        if type(old) is not int or not -1 <= old <= 128:
+            raise SetupError('Update Hyprflip to change app spacing.')
+        self._save_preference('card_gap', str(value), 'card_gap', value, old, lambda gap: '%d' % gap,
+                              'The app spacing could not be applied.')
+
+    def save_accent_ring(self, enabled):
+        if type(enabled) is not bool:
+            raise SetupError('Turn the accent ring on or off.')
+        current = self.status().get('accent_ring')
+        if type(current) is not bool:
+            raise SetupError('Update Hyprflip to use the accent ring.')
+        self._save_preference('accent_ring', 'on' if enabled else 'off', 'accent_ring', enabled, current,
+                              lambda on: 'true' if on else 'false', 'The accent ring could not be applied.')
+
+    def save_accent_color(self, color):
+        if not isinstance(color, str) or not re.fullmatch(r'#[0-9A-Fa-f]{6}', color):
+            raise SetupError('Use an accent color like #F78DBB.')
+        color = color.upper()
+        current = self.status().get('accent_color')
+        if not isinstance(current, str) or not re.fullmatch(r'(#[0-9A-Fa-f]{6})?', current):
+            raise SetupError('Update Hyprflip to use the accent ring.')
+        if current == color:
+            return
+        self._save_preference('accent_color', color, 'accent_color', color, current, lambda c: '"%s"' % c,
+                              'The accent color could not be applied.')
 
     def focused(self, *operations):
         # Keep focus validation and the action together; a pointer/app focus

@@ -1,3 +1,4 @@
+#include "AccentColor.hpp"
 #include "SplitLayout.hpp"
 #include "Timeline.hpp"
 #include <cstdlib>
@@ -19,6 +20,10 @@ int main() {
     require(!balancedSplit(840, {420, 2000}, {430, 2000}), "unfold refuses when the combined minima cannot fit");
     require(!balancedSplit(840, {200, 300}, {200, 400}), "unfold refuses when both maxima are too small");
     require(balancedSplit(841, {420.2, 2000}, {419.8, 2000}) == 421, "fractional minima retain whole-pixel boundaries");
+    require(parseAccent("#F78DBB") == 0xfff78dbbu && parseAccent("#00aa11") == 0xff00aa11u, "accent parses #RRGGBB");
+    require(!parseAccent("") && !parseAccent("F78DBB") && !parseAccent("#F78DB") && !parseAccent("#F78DBBAA") &&
+                !parseAccent("#G78DBB"),
+            "accent rejects anything but #RRGGBB");
     Timeline t(280);
     require(!t.finished() && !t.secondSide() && t.angle() == 0, "initial front");
     t.advance(139);

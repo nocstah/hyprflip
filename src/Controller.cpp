@@ -1,3 +1,4 @@
+#include "AccentColor.hpp"
 #include "Controller.hpp"
 #include "FloatingCards.hpp"
 #include <algorithm>
@@ -338,12 +339,21 @@ void Controller::syncFrames() {
 }
 std::vector<CardFrameView> Controller::frameViews() const {
     std::vector<CardFrameView> result;
+    std::optional<CHyprColor> ring;
+    if (m_settings.accentRing->value()) {
+        static auto activeBorder = CConfigValue<Config::IComplexConfigValue>("general:col.active_border");
+        const auto border = static_cast<Config::CGradientValueData *>(activeBorder.ptr());
+        const auto accent = parseAccent(m_settings.accentColor->value());
+        ring = accent ? CHyprColor(*accent) : border->m_colors.empty() ? CHyprColor(0xffffffff) : border->m_colors.front();
+    }
     for (const auto &pair : m_pairs) {
-        if (!pair.frame) continue;
+        if (!pair.frame && !ring) continue;
         auto s = state(pair);
         if (!s) continue;
         CardFrameView view;
         view.id = pair.id;
+        view.frame = pair.frame;
+        view.ring = ring;
         view.active = s->active;
         view.unfolded = s->unfolded;
         view.animating = m_turn && m_turn->pairID == pair.id;
@@ -1393,6 +1403,8 @@ std::string Controller::status() {
                        ",\"capture_ms\":" + std::format("{}", m_captureMs) +
                        ",\"card_frame\":" + (m_settings.cardFrame->value() ? "true" : "false") +
                        ",\"card_gap\":" + std::to_string(m_settings.cardGap->value()) +
+                       ",\"accent_ring\":" + (m_settings.accentRing->value() ? "true" : "false") +
+                       ",\"accent_color\":" + quote(parseAccent(m_settings.accentColor->value()) ? m_settings.accentColor->value() : "") +
                        ",\"drag_to_add\":" + (m_settings.dragToAdd->value() ? "true" : "false") +
                        ",\"drop_targets\":" + (m_drop ? m_drop->status() : "[]") +
                        ",\"animating\":" + (m_turn ? "true" : "false") +
@@ -1451,6 +1463,7 @@ std::string Controller::status() {
         json += "]}";
     }
     return json + "],\"card_frames\":" + (m_frames ? m_frames->status() : "[]") +
+           ",\"card_rings\":" + (m_frames ? m_frames->rings() : "[]") +
            ",\"native_cards\":true,\"hy3_provider\":" + (provider() ? "true" : "false") +
            ",\"floating_cards\":true,\"workspace_protection\":true,\"container_provider\":true" +
            ",\"layout_controls\":true,\"repair_cards\":true,\"pane_replacement\":true" +

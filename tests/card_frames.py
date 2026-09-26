@@ -81,6 +81,23 @@ def focused_outline(address, name):
     assert max(abs(a-b) for a,b in zip(pixel, (36,93,168))) < 12, (name, pixel, x, y)
 
 
+def ring(): return ipc.status()['card_rings'][0]
+
+
+def accent_ring(name):
+    # The reported box is the ring's inner edge; its stroke lies just outside.
+    wait(lambda: ipc.status()['card_rings'])
+    assert ring()['color'] == '#F78DBB' and ring()['focused'], ring()
+    capture(name)
+    x, y, w, h = ring()['box']
+    monitor = next(m for m in ipc.data('-j', 'monitors') if m['name'] == output)
+    px = round((x - 1 - monitor['x']) * monitor['scale'])
+    py = round((y + h / 2 - monitor['y']) * monitor['scale'])
+    pixel = subprocess.check_output(['magick', str(args.captures / (name + '.png')),
+                                     '-crop', f'1x1+{px}+{py}', '-depth', '8', 'rgb:-'], timeout=8)
+    assert max(abs(a-b) for a,b in zip(pixel, (247,141,187))) < 12, (name, pixel, px, py)
+
+
 def gap(a, b, axis=0):
     windows = ipc.windows()
     left, right = sorted((windows[a], windows[b]), key=lambda w: w['at'][axis])
@@ -140,7 +157,14 @@ if hl.plugin.hyprflip then hl.config({plugin={hyprflip={duration_ms=0,notificati
     capture('tiled-dark')
     setting('card_frame=false'); assert not ipc.status()['card_frames']
     capture('classic-tabs')
+    assert not ipc.status()['card_rings']
+    setting('accent_ring=true,accent_color="#F78DBB"')
+    accent_ring('classic-accent-ring')
     setting('card_frame=true'); assert len(ipc.status()['card_frames']) == 1
+    accent_ring('frame-accent-ring')
+    assert ring()['box'][1] < frame()['box'][1], 'the ring surrounds the frame header'
+    setting('accent_ring=false'); assert not ipc.status()['card_rings']
+    passed('accent ring surrounds Classic and framed cards in the theme accent and turns off cleanly')
     click(); click()
     for kwargs in ({'drag': True}, {'button': 273}, {'modified': True}): click(False, **kwargs)
     passed('compact frame clicks flip once on release; right-click, modifiers and drag-out do not flip')

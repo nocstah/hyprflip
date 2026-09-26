@@ -16,9 +16,9 @@
 namespace Hyprflip {
 struct Settings {
     SP<Config::Values::Int> duration, cardGap;
-    SP<Config::Values::Bool> enabled, notifications, cardFrame, dragToAdd;
+    SP<Config::Values::Bool> enabled, notifications, cardFrame, dragToAdd, accentRing;
     SP<Config::Values::Float> perspective, retreat;
-    SP<Config::Values::String> transition;
+    SP<Config::Values::String> transition, accentColor;
 };
 struct Result {
     bool ok;

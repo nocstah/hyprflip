@@ -14,6 +14,10 @@ struct CardFrameView {
     unsigned active = 0;
     bool unfolded = false;
     bool animating = false;
+    // Frame draws the shared outline and controls; the accent ring surrounds
+    // the card in either appearance. A card with neither is not listed.
+    bool frame = false;
+    std::optional<CHyprColor> ring;
     unsigned count[2]{};
     std::vector<PHLWINDOWREF> windows;
 };
@@ -30,6 +34,7 @@ class CardFrames {
     void clearInput();
     void refresh(bool force = false);
     std::string status();
+    std::string rings();
 
   private:
     struct Layout {
@@ -56,7 +61,8 @@ class CardFrames {
         CBox box;
         CBox focusPane;
         std::string text;
-        bool focused, hovered, pressed;
+        bool focused, hovered, pressed, frame;
+        std::optional<uint32_t> ring;
         float alpha;
         bool operator==(const DamageState &) const = default;
     };

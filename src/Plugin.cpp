@@ -1,3 +1,4 @@
+#include "AccentColor.hpp"
 #include "Controller.hpp"
 #include <lua.hpp>
 #include <memory>
@@ -92,6 +93,13 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE h) {
         config(makeConfigValue<Bool>("plugin:hyprflip:notifications", "Show pairing and error notifications", true));
     settings.cardFrame = config(makeConfigValue<Bool>("plugin:hyprflip:card_frame", "Shared card outline and compact Flip button", true));
     settings.cardGap = config(makeConfigValue<Int>("plugin:hyprflip:card_gap", "Space between card apps; -1 follows desktop gaps", -1, SIntValueOptions{.min = -1, .max = 128}));
+    settings.accentRing = config(makeConfigValue<Bool>("plugin:hyprflip:accent_ring", "Accent-colored ring around every card", false));
+    settings.accentColor = config(makeConfigValue<String>("plugin:hyprflip:accent_color",
+        "Accent ring color as #RRGGBB; empty follows the active border", "",
+        SStringValueOptions{.validator = [](const std::string &value) -> std::expected<void, std::string> {
+            if (value.empty() || Hyprflip::parseAccent(value)) return {};
+            return std::unexpected("Use a color like #F78DBB");
+        }}));
     settings.dragToAdd = config(makeConfigValue<Bool>("plugin:hyprflip:drag_to_add", "Drop an outside app onto a card's add target", true));
     settings.perspective = config(makeConfigValue<Float>("plugin:hyprflip:perspective", "Perspective camera distance",
                                                          5.F, SFloatValueOptions{.min = 2.F, .max = 8.F}));

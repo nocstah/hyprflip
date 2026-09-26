@@ -101,6 +101,14 @@ dragging cancels the click. Menus, locks, grabs and covering windows retain inpu
 priority. Frames disappear for fullscreen and return afterward; damage is
 limited to changed frame state rather than an idle redraw loop.
 
+The optional **accent ring** (`accent_ring = true`) marks card membership in
+either appearance. It is drawn 2 logical pixels outside the card's window
+borders (and the frame header), follows window rounding, and takes its width
+from the border size, capped at 4. The focused card's ring is fully opaque;
+other cards' rings use 55% opacity so they never compete with the focus border.
+`accent_color` supplies the color; the shell sets it from its theme accent.
+When unset or invalid, the ring uses the first active border color.
+
 Choosing Classic tabs (`card_frame = false`) restores native/hy3 tab bars and
 the floating multi-app card's border-only appearance. An older hy3 provider
 without the optional frame extension keeps its original tabs. A provider with

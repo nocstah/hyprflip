@@ -162,6 +162,9 @@ def snapshot(ipc):
         base['capabilities']['drag_to_add'] = bool(state.get('drag_to_add'))
         base['capabilities']['spacing'] = type(state.get('card_gap')) is int
         base['card_gap'] = state.get('card_gap')
+        base['capabilities']['accent'] = type(state.get('accent_ring')) is bool
+        base['accent_ring'] = state.get('accent_ring')
+        base['accent_color'] = state.get('accent_color')
         try:
             base['shortcuts'] = shortcuts.snapshot(ipc)
         except (w.SetupError, OSError, KeyError, subprocess.TimeoutExpired):
@@ -330,7 +333,7 @@ def run_operation(ipc, payload, menu):
     if not isinstance(payload, dict) or type(payload.get('protocol')) is not int or payload['protocol'] != PROTOCOL:
         raise w.SetupError('OmaCards and the Hyprflip helper need matching protocol versions.')
     action, ctx = payload.get('action'), payload.get('context')
-    if action not in ('flip', 'unfold', 'floating', 'edit', 'create', 'open', 'manage', 'transition', 'preview', 'duration', 'shortcut', 'appearance', 'spacing'):
+    if action not in ('flip', 'unfold', 'floating', 'edit', 'create', 'open', 'manage', 'transition', 'preview', 'duration', 'shortcut', 'appearance', 'spacing', 'accent'):
         raise w.SetupError('Choose an available card action.')
     validate_context(ipc, ctx)
     request = menu.request
@@ -437,6 +440,15 @@ def run_operation(ipc, payload, menu):
             ipc.save_spacing(payload.get('gap'))
         return 'App spacing updated for all cards.'
 
+    if action == 'accent':
+        enabled = payload.get('enabled')
+        with request.exclusive():
+            request.check()
+            if enabled and payload.get('color') is not None:
+                ipc.save_accent_color(payload['color'])
+            ipc.save_accent_ring(enabled)
+        return 'Accent ring on for all cards.' if enabled else 'Accent ring off.'
+
     if action == 'create':
         flow = w.Setup(ipc, menu)
         plan = flow.prepare(anchor)
@@ -467,12 +479,23 @@ def run_operation(ipc, payload, menu):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('command', choices=('snapshot', 'run'))
+    parser.add_argument('command', choices=('snapshot', 'run', 'accent-color'))
     parser.add_argument('--request', default='{}')
+    parser.add_argument('--color', help='accent-color: the theme accent as #RRGGBB')
     args = parser.parse_args()
     ipc = w.Hyprctl()
     if args.command == 'snapshot':
         print(json.dumps(snapshot(ipc), ensure_ascii=False, allow_nan=False))
+        return 0
+    if args.command == 'accent-color':
+        # Follows the desktop theme without a panel request; unchanged colors
+        # are not rewritten or dispatched.
+        try:
+            ipc.save_accent_color(args.color)
+        except (w.SetupError, OSError, KeyError, subprocess.TimeoutExpired) as error:
+            print(json.dumps({'ok': False, 'message': str(error)}))
+            return 1
+        print(json.dumps({'ok': True, 'message': ''}))
         return 0
     channel, request = Channel(), None
     try:

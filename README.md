@@ -281,6 +281,8 @@ hl.config({ plugin = { hyprflip = {
     notifications = true,
     card_frame = true,   -- false: classic tabs; true: experimental card frame
     card_gap = -1,       -- -1: desktop spacing; 12: compact; 0–128: custom empty gap
+    accent_ring = false, -- true: accent-colored ring around every card
+    accent_color = "",   -- "#RRGGBB"; empty follows the active border color
     drag_to_add = true,  -- Drop outside windows onto a card’s temporary target
     perspective = 5.0,   -- 2–8; higher means less perspective
     retreat = 0.02,      -- 0–0.2

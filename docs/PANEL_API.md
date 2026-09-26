@@ -101,5 +101,11 @@ global preferences. Snapshots expose `appearance` (`classic` or `frame`) and
 `card_gap` (-1 for Desktop spacing; 12 for Compact). The helper persists each
 value atomically and restores the previous value if application fails. These
 preferences apply to existing cards without changing their membership.
+`capabilities.accent` gates the accent ring. Snapshots expose `accent_ring`
+(boolean) and `accent_color` (`#RRGGBB`, or empty when unset or invalid). The
+`accent` action takes `enabled` and an optional `color`; the color is applied
+first when enabling. `control.py accent-color --color '#RRGGBB'` updates only
+the color, without a panel request, so a shell can follow its theme; unchanged
+colors are not rewritten or dispatched. Both values persist like spacing.
 `capabilities.drag_to_add` reports whether the compositor's temporary drop
 targets are enabled; dragging stays a native compositor interaction.

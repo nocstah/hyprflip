@@ -44,6 +44,43 @@ class PreferencesTest(unittest.TestCase):
             with self.assertRaises(setup.SetupError): ipc.save_appearance('classic')
             with self.assertRaises(setup.SetupError): ipc.save_spacing(12)
 
+    def test_accent_ring_and_color_persist_and_roll_back(self):
+        with tempfile.TemporaryDirectory() as directory:
+            ipc = setup.Hyprctl({'XDG_STATE_HOME': directory})
+            state = {'accent_ring': False, 'accent_color': ''}
+            calls = []
+            ipc.status = lambda: state.copy()
+            def apply(*args):
+                calls.append(args[1])
+                key, value = args[1].split('hyprflip={')[1].rstrip('}})').split('=')
+                state[key] = value == 'true' if key == 'accent_ring' else value.strip('"')
+            ipc.call = apply
+            root = Path(directory) / 'hyprflip'
+            ipc.save_accent_color('#f78dbb')
+            ipc.save_accent_ring(True)
+            self.assertEqual(state, {'accent_ring': True, 'accent_color': '#F78DBB'})
+            self.assertEqual((root / 'accent_ring').read_text(), 'on\n')
+            self.assertEqual((root / 'accent_color').read_text(), '#F78DBB\n')
+            ipc.save_accent_color('#F78DBB')
+            self.assertEqual(len(calls), 2, 'an unchanged theme accent is not dispatched again')
+            ipc.call = lambda *args: None
+            with self.assertRaises(setup.SetupError): ipc.save_accent_color('#123456')
+            self.assertEqual((root / 'accent_color').read_text(), '#F78DBB\n')
+            self.assertEqual(sorted(p.name for p in root.iterdir()), ['accent_color', 'accent_ring'])
+
+    def test_invalid_accent_or_older_core_does_not_write_or_dispatch(self):
+        ipc = setup.Hyprctl()
+        with patch.object(ipc, 'call') as call, patch.object(ipc, 'status', return_value={'accent_ring': False, 'accent_color': ''}):
+            for value in ('F78DBB', '#F78DB', '#F78DBBAA', '"#F78DBB"', '#F78DBG', None, 0xF78DBB):
+                with self.assertRaises(setup.SetupError): ipc.save_accent_color(value)
+            for value in (None, 1, 'on'):
+                with self.assertRaises(setup.SetupError): ipc.save_accent_ring(value)
+            call.assert_not_called()
+        with patch.object(ipc, 'call') as call, patch.object(ipc, 'status', return_value={}):
+            with self.assertRaises(setup.SetupError): ipc.save_accent_ring(True)
+            with self.assertRaises(setup.SetupError): ipc.save_accent_color('#F78DBB')
+            call.assert_not_called()
+
 
 class FivePaneRecipesTest(unittest.TestCase):
     setUp = saved_test.SavedTest.setUp

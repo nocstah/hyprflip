@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Add an optional accent ring around every card, in Classic tabs and Card
+  frame appearances. `accent_ring` turns it on; `accent_color` (`#RRGGBB`) sets
+  its color. The focused card's ring is fully opaque and other cards' rings are
+  quieter. The helper persists both, reapplies them at login, and adds an
+  `accent` panel action plus `control.py accent-color` so a shell can follow
+  its theme. Status reports `card_rings` for tests.
 - Recognise Chromium web apps in saved cards after the default browser
   changes. A card saved with Brave's `brave-gmail.com__-Default` now reopens
   with Helium's or Chrome's `chrome-gmail.com__-Default` instead of waiting
