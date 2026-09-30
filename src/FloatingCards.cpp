@@ -6,6 +6,7 @@
 #include <hyprland/src/config/values/types/CssGapValue.hpp>
 #include <hyprland/src/config/shared/workspace/WorkspaceRuleManager.hpp>
 #include <hyprland/src/desktop/state/FocusState.hpp>
+#include <hyprland/src/desktop/state/ViewHitTester.hpp>
 #include <hyprland/src/desktop/state/WindowState.hpp>
 #include <hyprland/src/desktop/view/Group.hpp>
 #include <hyprland/src/desktop/view/Window.hpp>
@@ -15,6 +16,7 @@
 #include <hyprland/src/layout/target/WindowGroupTarget.hpp>
 #include <hyprland/src/managers/fullscreen/FullscreenController.hpp>
 #include <hyprland/src/output/Monitor.hpp>
+#include <hyprland/src/plugins/PluginAPI.hpp>
 #include <hyprland/src/render/Renderer.hpp>
 #include <hyprland/src/render/decorations/IHyprWindowDecoration.hpp>
 #include <hyprland/src/state/WorkspaceState.hpp>
@@ -36,6 +38,8 @@ PHLWINDOW resolve(uintptr_t address) {
     return nullptr;
 }
 uintptr_t addr(PHLWINDOW w) { return reinterpret_cast<uintptr_t>(w.get()); }
+HANDLE plugin = nullptr;
+CFunctionHook *focusHook = nullptr, *hitHook = nullptr;
 
 // Only the core-owned CGroup target enters a layout. This adapter turns its
 // outer geometry into a pane rectangle, then delegates to the original target.
@@ -95,6 +99,8 @@ struct Card {
     double gapOverride = -1;
 
     double gap(bool vertical) const {
+        // Fullscreen panes meet at a thin divider that CardFrames paints.
+        if (bare()) return FULLSCREEN_DIVIDER;
         if (gapOverride >= 0) return gapOverride;
         static auto value = CConfigValue<Config::IComplexConfigValue>("general:gaps_in");
         const auto workspace = group ? group->m_target->workspace() : faces[0].empty() || !faces[0][0] ? nullptr : faces[0][0]->m_workspace;
@@ -104,6 +110,58 @@ struct Card {
         return std::max<int64_t>(0, vertical ? g.m_top + g.m_bottom : g.m_left + g.m_right);
     }
 
+    // Hyprland keeps one fullscreen member: the group's current window. The
+    // whole visible card then fills that member's fullscreen area.
+    PHLWINDOW fullscreen() const {
+        for (const auto &[_, p] : targets)
+            if (auto w = p->window(); w && Fullscreen::controller()->isFullscreen(w))
+                return w;
+        return nullptr;
+    }
+    // Set while this card hands fullscreen to another member. Hyprland clears
+    // the old member before setting the new one; keep the fullscreen layout
+    // across that gap so apps never receive their tiled size mid-transfer.
+    std::optional<CBox> held;
+    bool bare() const { return held || fullscreen(); }
+    // Borders, rounding and shadows would double up at the divider. Remove
+    // them at layout priority, so explicit window rules still win.
+    bool flat = false;
+    static void flatten(PHLWINDOW w, bool value) {
+        auto &rules = *w->m_ruleApplicator;
+        if (value) {
+            rules.borderSize().set(0, Desktop::Types::PRIORITY_LAYOUT);
+            rules.rounding().set(0, Desktop::Types::PRIORITY_LAYOUT);
+            rules.noShadow().set(true, Desktop::Types::PRIORITY_LAYOUT);
+        } else {
+            rules.borderSize().unset(Desktop::Types::PRIORITY_LAYOUT);
+            rules.rounding().unset(Desktop::Types::PRIORITY_LAYOUT);
+            rules.noShadow().unset(Desktop::Types::PRIORITY_LAYOUT);
+        }
+        w->updateDecorationValues();
+    }
+    void flatten(bool value) {
+        if (flat == value)
+            return;
+        flat = value;
+        for (const auto &[_, p] : targets)
+            if (auto w = p->window())
+                flatten(w, value);
+    }
+    void current(PHLWINDOW w) {
+        held = fullscreenBox();
+        group->setCurrent(w);
+        held.reset();
+    }
+    std::optional<CBox> fullscreenBox() const {
+        if (held)
+            return held;
+        auto w = fullscreen();
+        if (!w || !w->m_workspace || !w->m_workspace->m_monitor || !w->m_workspace->m_space)
+            return {};
+        if (Fullscreen::controller()->getFullscreenModes(w).internal == Fullscreen::FSMODE_MAXIMIZED)
+            return w->m_workspace->m_space->workArea(w->m_isFloating);
+        return w->m_workspace->m_monitor->logicalBox();
+    }
     std::optional<unsigned> side(PHLWINDOW w) const {
         for (unsigned s = 0; s < 2; ++s)
             if (std::ranges::find(faces[s], w) != faces[s].end())
@@ -159,8 +217,10 @@ struct Card {
         return limits;
     }
     CBox faceBox(CBox box, unsigned s) const {
-        box.y += header;
-        box.h = std::max(1., box.h - header);
+        // Card frames are hidden while fullscreen, so the header space is too.
+        const double top = bare() ? 0 : header;
+        box.y += top;
+        box.h = std::max(1., box.h - top);
         if (unfolded) {
             const auto limits = faceLimits();
             const double gutter = gap(unfoldVertical);
@@ -202,12 +262,13 @@ struct Card {
     }
     Vector2D minimum() const {
         const auto limits = faceLimits();
+        const double top = bare() ? 0 : header;
         const auto first = limits[0].minimum, second = limits[1].minimum;
         return {unfolded && !unfoldVertical ? std::ceil(first.x) + std::ceil(second.x) + gap(false)
                                             : std::max(first.x, second.x),
                 (unfolded && unfoldVertical ? std::ceil(first.y) + std::ceil(second.y) + gap(true)
                                             : std::max(first.y, second.y)) +
-                    header};
+                    top};
     }
     bool fits(CBox box) const {
         for (unsigned s = 0; s < 2; ++s)
@@ -227,14 +288,10 @@ struct Card {
     void visibility() {
         if (!alive || changing)
             return;
-        PHLWINDOW fullscreen;
-        for (const auto &[_, p] : targets)
-            if (auto w = p->window(); w && Fullscreen::controller()->isFullscreen(w))
-                fullscreen = w;
         for (unsigned s = 0; s < 2; ++s)
             for (auto &ref : faces[s])
                 if (auto w = ref.lock()) {
-                    const bool shown = fullscreen ? w == fullscreen : unfolded || s == active;
+                    const bool shown = unfolded || s == active;
                     w->setInputBlocked(INPUT_BLOCK_GROUP_INACTIVE, !shown);
                     w->alpha(WINDOW_ALPHA_LAYOUT)->setValueAndWarp(shown ? 1.F : 0.F);
                 }
@@ -272,6 +329,8 @@ struct Card {
             return;
         if (w->m_target == it->second)
             w->m_target = it->second->original;
+        if (flat)
+            flatten(w, false);
         targets.erase(it);
     }
     void dissolve() {
@@ -300,8 +359,12 @@ void PaneTarget::setPositionGlobal(const STargetBox &box, uint8_t flags) {
     auto side = c->side(w);
     if (!side)
         return;
-    CBox outer = box.visualBox.empty() ? box.logicalBox : box.visualBox;
-    if (floating() && !Fullscreen::controller()->isFullscreen(w) && !c->adjusting) {
+    // While fullscreen, every member lays out inside the fullscreen area,
+    // whichever box a caller passes (the layout's tile, or Hyprland's group
+    // fullscreen transfer, which reuses another member's pane).
+    const auto full = c->fullscreenBox();
+    CBox outer = full ? *full : box.visualBox.empty() ? box.logicalBox : box.visualBox;
+    if (floating() && !full && !c->adjusting) {
         auto min = c->minimum();
         if (outer.w < min.x || outer.h < min.y) {
             c->adjusting = true;
@@ -313,12 +376,17 @@ void PaneTarget::setPositionGlobal(const STargetBox &box, uint8_t flags) {
         }
     }
     auto index = std::ranges::find(c->faces[*side], w) - c->faces[*side].begin();
-    auto pane = Fullscreen::controller()->isFullscreen(w) ? outer : c->paneBox(outer, *side, index);
+    auto pane = c->paneBox(outer, *side, index);
+    const bool fullscreen = Fullscreen::controller()->isFullscreen(w);
     // Tiled window targets inset their visual slot by the window's border.
     // Floating targets accept a content rectangle directly. Use the same slot
     // interpretation here so the empty gap is identical in both modes.
-    if (floating() && !Fullscreen::controller()->isFullscreen(w))
+    if (floating() && !fullscreen)
         pane.expand(-w->getRealBorderSize());
+    // Hyprland ignores fullscreen geometry it did not queue itself. This pane
+    // is the fullscreen member's place in the card, so let it through.
+    if (fullscreen)
+        Fullscreen::controller()->m_windowPosSettingQueued = true;
     m_box = {pane, pane};
     original->setPositionGlobal(m_box, flags);
     c->visibility();
@@ -376,7 +444,7 @@ bool select(uint64_t id, uint32_t side, bool focus) {
     if (!c || !c->valid() || side > 1)
         return false;
     c->active = side;
-    c->group->setCurrent(c->focused[side].lock());
+    c->current(c->focused[side].lock());
     c->visibility();
     if (focus)
         Desktop::focusState()->fullWindowFocus(c->focused[side].lock(), Desktop::FOCUS_REASON_KEYBIND);
@@ -498,7 +566,7 @@ bool unfold(uint64_t id, bool value) {
     auto sizedBox = [&]() {
         auto box = c->group->m_target->position();
         const auto min = c->minimum();
-        if (c->group->m_target->floating()) {
+        if (c->group->m_target->floating() && !c->bare()) {
             box.w = std::max(box.w, min.x);
             box.h = std::max(box.h, min.y);
         }
@@ -545,7 +613,7 @@ bool arrange(uint64_t id, uint32_t side, bool vertical, uint32_t count, const ui
     c->vertical[side] = vertical;
     auto box = c->group->m_target->position();
     auto min = c->minimum();
-    if (c->group->m_target->floating()) {
+    if (c->group->m_target->floating() && !c->bare()) {
         box.w = std::max(box.w, min.x);
         box.h = std::max(box.h, min.y);
     }
@@ -767,7 +835,87 @@ void focused(PHLWINDOW w) {
         if (auto s = c->side(w); s && !c->changing) {
             c->focused[*s] = w;
             c->active = *s;
+            // Pointer focus bypasses fullWindowFocus. Keep fullscreen on the
+            // focused pane so the fullscreen toggle acts on the whole card.
+            if (auto current = c->fullscreen(); current && current != w && c->valid())
+                c->current(w);
             c->visibility();
+            return;
+        }
+}
+namespace {
+// Hyprland treats focusing a non-fullscreen window under fullscreen as leaving
+// or stealing fullscreen (misc:on_focus_under_fullscreen). Inside one card,
+// hand fullscreen to the pane first: the group transfer keeps the card whole.
+void share(PHLWINDOW w) {
+    if (!w || !w->m_workspace)
+        return;
+    for (auto &[_, c] : cards)
+        if (c->side(w)) {
+            auto current = c->fullscreen();
+            if (c->valid() && !c->changing && current && current != w)
+                c->current(w);
+            return;
+        }
+}
+using FullWindowFocus = void (*)(Desktop::CFocusState *, PHLWINDOW, Desktop::eFocusReason, SP<CWLSurfaceResource>, bool);
+void focusWithin(Desktop::CFocusState *self, PHLWINDOW w, Desktop::eFocusReason reason, SP<CWLSurfaceResource> surface,
+                 bool cycle) {
+    share(w);
+    reinterpret_cast<FullWindowFocus>(focusHook->m_original)(self, w, reason, surface, cycle);
+}
+// Under fullscreen, Hyprland sends the pointer to the fullscreen window
+// wherever it is. In a fullscreen card, send it to the pane under the pointer.
+using WindowAt = PHLWINDOW (*)(const Desktop::CViewHitTester *, const Vector2D &, uint16_t, PHLWINDOW);
+PHLWINDOW windowWithin(const Desktop::CViewHitTester *self, const Vector2D &pos, uint16_t properties, PHLWINDOW ignore) {
+    auto found = reinterpret_cast<WindowAt>(hitHook->m_original)(self, pos, properties, ignore);
+    if (!found || found->m_isFloating || !Fullscreen::controller()->isFullscreen(found))
+        return found;
+    for (auto &[_, c] : cards)
+        if (c->side(found)) {
+            if (!c->valid())
+                return found;
+            for (unsigned s = 0; s < 2; ++s)
+                for (auto &ref : c->faces[s])
+                    if (auto w = ref.lock(); w && w != ignore && (c->unfolded || s == c->active) && w->acceptsInput() &&
+                                             w->getWindowBoxUnified(properties).containsPoint(pos))
+                        return w;
+            return found;
+        }
+    return found;
+}
+CFunctionHook *hook(void *handle, const std::string &name, const std::string &owner, void *replacement) {
+    for (const auto &match : HyprlandAPI::findFunctionsByName(handle, name))
+        if (match.demangled.find(owner + "::" + name) != std::string::npos) {
+            auto result = HyprlandAPI::createFunctionHook(handle, match.address, replacement);
+            if (result && !result->hook()) {
+                HyprlandAPI::removeFunctionHook(handle, result);
+                result = nullptr;
+            }
+            return result;
+        }
+    return nullptr;
+}
+} // namespace
+void install(void *handle) {
+    plugin = handle;
+    focusHook = hook(handle, "fullWindowFocus", "CFocusState", reinterpret_cast<void *>(&focusWithin));
+    hitHook = hook(handle, "windowAt", "CViewHitTester", reinterpret_cast<void *>(&windowWithin));
+}
+bool focusShared() { return focusHook && hitHook; }
+void fullscreened(PHLWINDOW w) {
+    // A pane fullscreened directly may not be the group's current window.
+    // Make it current so layouts see the card as fullscreen.
+    for (auto &[_, c] : cards)
+        if (auto s = c->side(w)) {
+            if (c->valid())
+                c->flatten(c->bare());
+            if (c->valid() && !c->changing && Fullscreen::controller()->isFullscreen(w) && c->group->current() != w) {
+                c->focused[*s] = w;
+                c->active = *s;
+                c->current(w);
+                c->visibility();
+            }
             return;
         }
 }
@@ -791,6 +939,10 @@ bool setStyle(uint64_t id, double header, double gap) {
     return true;
 }
 void shutdown() {
+    for (auto *h : {focusHook, hitHook})
+        if (h)
+            HyprlandAPI::removeFunctionHook(plugin, h);
+    focusHook = hitHook = nullptr;
     for (auto &[_, c] : cards)
         c->dissolve();
     cards.clear();

@@ -177,7 +177,9 @@ application. Inner split proportions are retained. While unfolded,
 **Super+Ctrl+Alt+F** folds onto the
 opposite face; it does not run the perspective turn while both faces are visible.
 Movement, release, close and config reload continue to work. Leave fullscreen
-before unfolding or moving a card.
+before moving a card. Native dwindle and floating cards fullscreen as a whole:
+fullscreen any app and the visible face (or both faces, unfolded) fills the
+screen; flip, peek, unfold and layout changes work there too.
 
 ## Guided creation from O
 
@@ -394,7 +396,7 @@ form cards backed by a native group with the same two-face API.
 Focus and close still act on real applications. Tiled resizing adjusts panes;
 floating movement and resizing adjust the shared frame. Use the navigation module
 or explicit `workspace` action to move a whole card; an unadapted window-move
-command can act on the selected tiled pane. Leave fullscreen before flipping or moving a container.
+command can act on the selected tiled pane. Leave fullscreen before moving a container, or before flipping an hy3 container.
 New windows open outside the card. Unloading Hyprflip dissolves its containers
 into visible splits; the experimental updater reconstructs them explicitly.
 

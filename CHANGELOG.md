@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Fullscreen a whole card on dwindle and floating cards. Fullscreening any
+  app (or maximizing it) fills the screen with every app on the visible face,
+  meeting at a thin divider in the accent color (`accent_color`, else the
+  active border color) with no gaps, borders or rounding between them; the
+  card frame hides until you leave. The pointer focuses whichever app it is
+  over. Flip, peek, unfold and
+  face layout changes keep working, and moving focus between the card's apps
+  keeps the card fullscreen under every `misc:on_focus_under_fullscreen`
+  setting. Leaving fullscreen restores the card's tile or floating frame.
+  hy3 cards keep the previous single-app fullscreen. Status reports
+  `fullscreen_focus` and `card_dividers`.
 - Add an optional accent ring around every card, in Classic tabs and Card
   frame appearances. `accent_ring` turns it on; `accent_color` (`#RRGGBB`) sets
   its color. The focused card's ring is fully opaque and other cards' rings are

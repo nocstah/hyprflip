@@ -1,5 +1,29 @@
 # Validation
 
+## Whole-card fullscreen (2026-09-30)
+
+Native dwindle and floating cards fullscreen as a whole card. The new
+`tests/fullscreen_workflows.py` passes all ten checks in a disposable nested
+session with only Hyprflip loaded: the visible face fills the monitor with a
+2px accent divider and no pane borders; keyboard focus and a real virtual
+pointer reach every pane under all three `misc:on_focus_under_fullscreen`
+policies, and fullscreen follows the focused pane; flip, all transitions,
+peek, unfold and face layout changes run while fullscreen; leaving restores
+the tile and its neighbor exactly; maximize fills the work area; floating
+cards return to their frame; unloading releases every app. Native-pair
+fullscreen transfer and the 183 Python tests also pass.
+
+The headless-output dwindle/floating suites and the animated native-pair
+suite could not run in that nested session (headless outputs reported 0×0 and
+mid-turn frames did not present); both failed identically on the previous
+commit. Screenshots of the fullscreen divider were inspected.
+
+```sh
+python3 tests/nested_session.py --directory /tmp/hf-fs
+python3 tests/fullscreen_workflows.py /tmp/hf-fs/session.json \
+  --protocol /path/to/matching/Hyprland/protocols/wlr-virtual-pointer-unstable-v1.xml
+```
+
 ## Stock Omarchy installation and laptop unfolding (2026-09-23)
 
 The published `v0.3.0-rc.1` source was freshly cloned and built, then its actual

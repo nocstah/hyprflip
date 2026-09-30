@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include "CardFrames.hpp"
+#include "FloatingCards.hpp"
 #include <algorithm>
 #include <cmath>
 #include <format>
@@ -84,6 +85,8 @@ class FrameGroupBar final : public CHyprGroupBarDecoration {
 struct PaintData {
     bool frame = false;
     CBox box, label, button, labelText, buttonText, focusPane, ring;
+    std::vector<CBox> dividers;
+    CHyprColor dividerColor;
     Config::CGradientValueData border, ringColor;
     int ringWidth = 0, ringRound = 0;
     CHyprColor fill, buttonFill;
@@ -100,6 +103,8 @@ class CardFramePass final : public IPassElement {
     explicit CardFramePass(PaintData data, CBox bounds) : data(std::move(data)), bounds(bounds) {}
     std::vector<UP<IPassElement>> draw() override {
         auto &gl = Render::GL::g_pHyprOpenGL;
+        for (const auto &divider : data.dividers)
+            gl->renderRect(divider, data.dividerColor.modifyA(data.dividerColor.a * data.alpha), {});
         if (!data.ring.empty())
             gl->renderBorder(data.ring, data.ringColor,
                              {.round = data.ringRound,
@@ -232,6 +237,54 @@ std::vector<CardFrames::Layout> CardFrames::layouts() const {
     for (auto view : m_source()) {
         Layout layout;
         layout.view = std::move(view);
+        if (std::ranges::any_of(layout.view.windows, [](const auto &ref) {
+                auto w = ref.lock();
+                return w && w->m_isMapped && Fullscreen::controller()->isFullscreen(w);
+            })) {
+            // Fullscreen cards have no frame or ring: only a divider wherever
+            // two visible panes meet.
+            if (!layout.view.divider || layout.view.animating)
+                continue;
+            std::vector<CBox> panes;
+            for (const auto &ref : layout.view.windows) {
+                auto w = ref.lock();
+                if (!w || !w->m_isMapped || w->isHidden() || !w->m_workspace || !w->m_workspace->m_visible ||
+                    w->alpha(WINDOW_ALPHA_LAYOUT)->value() <= .01F)
+                    continue;
+                auto box = w->geometricBox(IGeometric::GEOMETRIC_CURRENT).translate(w->m_floatingOffset);
+                if (!w->m_pinned)
+                    box.translate(w->m_workspace->m_renderOffset->value());
+                panes.push_back(box);
+                layout.anchor = w;
+            }
+            const auto between = [](const CBox &a, const CBox &b, bool vertical) -> std::optional<CBox> {
+                const double end = vertical ? a.y + a.h : a.x + a.w, start = vertical ? b.y : b.x;
+                const double low = vertical ? std::max(a.x, b.x) : std::max(a.y, b.y);
+                const double high = vertical ? std::min(a.x + a.w, b.x + b.w) : std::min(a.y + a.h, b.y + b.h);
+                if (start < end - .5 || start - end > FloatingCards::FULLSCREEN_DIVIDER + 1 || high - low < 1)
+                    return {};
+                const double width = std::max(FloatingCards::FULLSCREEN_DIVIDER, start - end);
+                return vertical ? CBox{low, end, high - low, width} : CBox{end, low, width, high - low};
+            };
+            for (const auto &a : panes)
+                for (const auto &b : panes)
+                    for (bool vertical : {false, true})
+                        if (auto divider = &a != &b ? between(a, b, vertical) : std::nullopt)
+                            layout.dividers.push_back(*divider);
+            if (layout.dividers.empty())
+                continue;
+            layout.box = layout.dividers.front();
+            for (const auto &divider : layout.dividers) {
+                const double x = std::min(layout.box.x, divider.x), y = std::min(layout.box.y, divider.y);
+                layout.box = {x, y, std::max(layout.box.x + layout.box.w, divider.x + divider.w) - x,
+                              std::max(layout.box.y + layout.box.h, divider.y + divider.h) - y};
+            }
+            layout.alpha = layout.anchor->m_workspace->m_alpha->value();
+            result.push_back(std::move(layout));
+            continue;
+        }
+        if (!layout.view.frame && !layout.view.ring)
+            continue;
         bool any = false;
         for (const auto &w : Desktop::windowState()->windows()) {
             if (!shown(w) || std::ranges::find(layout.view.windows, w) == layout.view.windows.end())
@@ -309,7 +362,9 @@ void CardFrames::refresh(bool force) {
                                 m_hovered == layout.view.id,
                                 m_pressed == layout.view.id,
                                 layout.view.frame,
-                                layout.view.ring ? std::optional(layout.view.ring->getAsHex()) : std::nullopt,
+                                layout.dividers.empty()
+                                    ? layout.view.ring ? std::optional(layout.view.ring->getAsHex()) : std::nullopt
+                                    : std::optional(layout.view.divider->getAsHex()),
                                 layout.alpha};
     for (const auto &[id, previous] : m_last) {
         const auto current = next.find(id);
@@ -328,12 +383,17 @@ void CardFrames::stage(eRenderStage stage) {
         m_layouts = layouts();
         m_rendered.clear();
         m_rendering = true;
-    } else if (stage == RENDER_POST_WINDOWS)
+    } else if (stage == RENDER_POST_WINDOWS) {
+        // Fullscreen windows render in their own order; draw dividers on top.
+        if (m_rendering)
+            for (const auto &layout : m_layouts)
+                if (!layout.dividers.empty() && m_rendered.insert(layout.view.id).second)
+                    paint(layout);
         m_rendering = false;
-    else if (stage == RENDER_POST_WINDOW && m_rendering) {
+    } else if (stage == RENDER_POST_WINDOW && m_rendering) {
         const auto window = g_pHyprRenderer->m_renderData.currentWindow.lock();
         for (const auto &layout : m_layouts)
-            if (layout.anchor == window && m_rendered.insert(layout.view.id).second)
+            if (layout.dividers.empty() && layout.anchor == window && m_rendered.insert(layout.view.id).second)
                 paint(layout);
     }
 }
@@ -354,6 +414,17 @@ void CardFrames::paint(const Layout &layout) {
     data.frame = layout.view.frame;
     data.roundingPower = layout.anchor->roundingPower();
     data.alpha = layout.alpha;
+    if (!layout.dividers.empty()) {
+        const auto bounds = layout.box.copy().translate(-monitor->m_position);
+        if (!CBox{{}, monitor->m_size}.intersection(bounds).size().x)
+            return;
+        for (const auto &divider : layout.dividers)
+            data.dividers.push_back(local(divider));
+        data.dividerColor = *layout.view.divider;
+        data.frame = false;
+        g_pHyprRenderer->m_renderPass.add(makeUnique<CardFramePass>(std::move(data), bounds.copy().expand(DAMAGE_MARGIN)));
+        return;
+    }
     if (layout.view.ring) {
         // Full strength on the focused card, quieter elsewhere, so the ring
         // marks card membership without competing with the focus border.
@@ -490,7 +561,7 @@ void CardFrames::clearInput() {
 std::string CardFrames::status() {
     std::string result = "[";
     for (const auto &layout : layouts()) {
-        if (!layout.view.frame)
+        if (!layout.view.frame || !layout.dividers.empty())
             continue;
         if (result.size() > 1)
             result += ',';
@@ -499,6 +570,17 @@ std::string CardFrames::status() {
             layout.view.id, layout.box.x, layout.box.y, layout.box.w, layout.box.h, layout.button.x, layout.button.y,
             layout.button.w, layout.button.h, layout.view.active, layout.view.unfolded ? "true" : "false");
     }
+    return result + ']';
+}
+std::string CardFrames::dividers() {
+    std::string result = "[";
+    for (const auto &layout : layouts())
+        for (const auto &box : layout.dividers) {
+            if (result.size() > 1)
+                result += ',';
+            result += std::format("{{\"id\":{},\"box\":[{},{},{},{}],\"color\":\"#{:06X}\"}}", layout.view.id, box.x,
+                                  box.y, box.w, box.h, layout.view.divider->getAsHex() & 0xffffff);
+        }
     return result + ']';
 }
 std::string CardFrames::rings() {

@@ -334,8 +334,11 @@ turn off these targets.
   unequal space when their apps need it, while preserving each face's pane
   proportions. Application size limits can still prevent a split or unfold;
   the existing card is kept when a change is refused.
-- **Fullscreen and movement:** native pairs use native group behavior. Leave
-  fullscreen before flipping, unfolding or moving an experimental container.
+- **Fullscreen and movement:** native pairs use native group behavior. Native
+  dwindle and floating cards fullscreen as a whole card: the visible face fills
+  the screen and flip, peek, unfold and layout changes keep working. Leave
+  fullscreen before moving a card, adding or replacing apps, or flipping an hy3
+  container.
   Floating cards move and resize as a unit with normal desktop mouse bindings.
   Tiled card reordering uses the optional navigation bindings. Named/special-workspace
   card moves are not implemented.

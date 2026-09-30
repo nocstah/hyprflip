@@ -18,6 +18,8 @@ struct CardFrameView {
     // the card in either appearance. A card with neither is not listed.
     bool frame = false;
     std::optional<CHyprColor> ring;
+    // Line color between the apps of a fullscreen card.
+    std::optional<CHyprColor> divider;
     unsigned count[2]{};
     std::vector<PHLWINDOWREF> windows;
 };
@@ -35,11 +37,13 @@ class CardFrames {
     void refresh(bool force = false);
     std::string status();
     std::string rings();
+    std::string dividers();
 
   private:
     struct Layout {
         CardFrameView view;
         CBox box, button, label, focusPane;
+        std::vector<CBox> dividers;
         PHLWINDOWREF anchor;
         std::string text;
         bool focused = false;

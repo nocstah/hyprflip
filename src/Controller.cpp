@@ -67,6 +67,7 @@ Controller::Controller(HANDLE handle, Settings settings)
         finish();
     }, nullptr);
     g_pEventLoopManager->addTimer(m_timer);
+    FloatingCards::install(handle);
     m_frames = std::make_unique<CardFrames>([this]() { return frameViews(); }, [this](uint64_t id) {
         // A button is a click on release. Leave the input dispatch stack before
         // changing layout/focus, and resolve the card again in case it closed.
@@ -113,7 +114,8 @@ Controller::Controller(HANDLE handle, Settings settings)
         }
         deferReconcile();
     }));
-    m_listeners.emplace_back(e.window.fullscreen.listen([this](PHLWINDOW) {
+    m_listeners.emplace_back(e.window.fullscreen.listen([this](PHLWINDOW w) {
+        FloatingCards::fullscreened(w);
         if (!m_mutating) m_peek.reset();
         if (!m_mutating && m_turn) {
             auto p = find(m_turn->pairID);
@@ -339,21 +341,23 @@ void Controller::syncFrames() {
 }
 std::vector<CardFrameView> Controller::frameViews() const {
     std::vector<CardFrameView> result;
+    static auto activeBorder = CConfigValue<Config::IComplexConfigValue>("general:col.active_border");
+    const auto border = static_cast<Config::CGradientValueData *>(activeBorder.ptr());
+    const auto parsed = parseAccent(m_settings.accentColor->value());
+    const auto accent =
+        parsed ? CHyprColor(*parsed) : border->m_colors.empty() ? CHyprColor(0xffffffff) : border->m_colors.front();
     std::optional<CHyprColor> ring;
-    if (m_settings.accentRing->value()) {
-        static auto activeBorder = CConfigValue<Config::IComplexConfigValue>("general:col.active_border");
-        const auto border = static_cast<Config::CGradientValueData *>(activeBorder.ptr());
-        const auto accent = parseAccent(m_settings.accentColor->value());
-        ring = accent ? CHyprColor(*accent) : border->m_colors.empty() ? CHyprColor(0xffffffff) : border->m_colors.front();
-    }
+    if (m_settings.accentRing->value())
+        ring = accent;
     for (const auto &pair : m_pairs) {
-        if (!pair.frame && !ring) continue;
+        if (!pair.frame && !ring && !pair.containerID) continue;
         auto s = state(pair);
         if (!s) continue;
         CardFrameView view;
         view.id = pair.id;
         view.frame = pair.frame;
         view.ring = ring;
+        if (pair.containerID) view.divider = accent.modifyA(1.F);
         view.active = s->active;
         view.unfolded = s->unfolded;
         view.animating = m_turn && m_turn->pairID == pair.id;
@@ -736,7 +740,8 @@ bool Controller::canReturnPeek() const {
     for (const auto &ref : s->windows()) {
         auto w = ref.lock();
         if (!w || w->m_workspace != m_peek->workspace || w->m_monitor != m_peek->monitor ||
-            w->popupsCount() || Fullscreen::controller()->isFullscreen(w)) return false;
+            w->popupsCount() || (p->providerEpoch != FloatingCards::EPOCH && Fullscreen::controller()->isFullscreen(w)))
+            return false;
     }
     return true;
 }
@@ -790,7 +795,7 @@ Result Controller::flip(std::optional<Transition> preview) {
     if (s->unfolded) {
         if (preview) return {false, "Fold the card with O before previewing a transition."};
         for (const auto &ref : s->windows())
-            if (Fullscreen::controller()->isFullscreen(ref.lock()))
+            if (p->providerEpoch != FloatingCards::EPOCH && Fullscreen::controller()->isFullscreen(ref.lock()))
                 return {false, "Leave fullscreen before folding this container."};
         auto api = provider(p->providerEpoch);
         m_mutating = true;
@@ -805,7 +810,7 @@ Result Controller::flip(std::optional<Transition> preview) {
     if (p->containerID) {
         for (const auto &ref : s->windows()) {
             auto member = ref.lock();
-            if (Fullscreen::controller()->isFullscreen(member))
+            if (p->providerEpoch != FloatingCards::EPOCH && Fullscreen::controller()->isFullscreen(member))
                 return {false, "Leave fullscreen before flipping this container."};
             if (!fits(member, member->size(IGeometric::GEOMETRIC_GOAL)))
                 return {false, "A pane no longer fits its application's size limits. Resize the card before flipping."};
@@ -1095,7 +1100,7 @@ Result Controller::unfold() {
     if (!s)
         return {false, "This card changed. Pair its windows again."};
     for (const auto &w : s->windows())
-        if (Fullscreen::controller()->isFullscreen(w.lock()))
+        if (p->providerEpoch != FloatingCards::EPOCH && Fullscreen::controller()->isFullscreen(w.lock()))
             return {false, "Leave fullscreen before unfolding this container."};
     auto api = provider(p->providerEpoch);
     m_mutating = true;
@@ -1125,7 +1130,7 @@ Result Controller::editContainer(ContainerEdit operation, const std::string &tar
             return {false, "That app is no longer on this side. Open the card menu again."};
     }
     for (const auto &member : s->windows())
-        if (Fullscreen::controller()->isFullscreen(member.lock()))
+        if (p->providerEpoch != FloatingCards::EPOCH && Fullscreen::controller()->isFullscreen(member.lock()))
             return {false, "Leave fullscreen before changing the card layout."};
     if (s->faces[s->active].size() < 2)
         return {false, "This side needs at least two apps. Add an app from the card menu first."};
@@ -1168,7 +1173,7 @@ Result Controller::arrangeFace(const std::string &arguments) {
     if (!s)
         return {false, "This card changed. Open the card menu again."};
     for (const auto &member : s->windows())
-        if (Fullscreen::controller()->isFullscreen(member.lock()))
+        if (p->providerEpoch != FloatingCards::EPOCH && Fullscreen::controller()->isFullscreen(member.lock()))
             return {false, "Leave fullscreen before restoring the card layout."};
     auto api = provider(p->providerEpoch);
     m_mutating = true;
@@ -1406,6 +1411,7 @@ std::string Controller::status() {
                        ",\"accent_ring\":" + (m_settings.accentRing->value() ? "true" : "false") +
                        ",\"accent_color\":" + quote(parseAccent(m_settings.accentColor->value()) ? m_settings.accentColor->value() : "") +
                        ",\"drag_to_add\":" + (m_settings.dragToAdd->value() ? "true" : "false") +
+                       ",\"fullscreen_focus\":" + (FloatingCards::focusShared() ? "true" : "false") +
                        ",\"drop_targets\":" + (m_drop ? m_drop->status() : "[]") +
                        ",\"animating\":" + (m_turn ? "true" : "false") +
                        ",\"peek_available\":true,\"peeking\":" + (m_peek ? "true" : "false") +
@@ -1464,6 +1470,7 @@ std::string Controller::status() {
     }
     return json + "],\"card_frames\":" + (m_frames ? m_frames->status() : "[]") +
            ",\"card_rings\":" + (m_frames ? m_frames->rings() : "[]") +
+           ",\"card_dividers\":" + (m_frames ? m_frames->dividers() : "[]") +
            ",\"native_cards\":true,\"hy3_provider\":" + (provider() ? "true" : "false") +
            ",\"floating_cards\":true,\"workspace_protection\":true,\"container_provider\":true" +
            ",\"layout_controls\":true,\"repair_cards\":true,\"pane_replacement\":true" +
