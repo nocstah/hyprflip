@@ -280,6 +280,7 @@ hl.config({ plugin = { hyprflip = {
     transition = "flip", -- flip, vertical, slide, fade, dissolve, portal, instant
     enabled = true,
     notifications = true,
+    desktop_notifications = true, -- false: Hyprland's own notification bar
     card_frame = true,   -- false: classic tabs; true: experimental card frame
     card_gap = -1,       -- -1: desktop spacing; 12: compact; 0–128: custom empty gap
     accent_ring = false, -- true: accent-colored ring around every card

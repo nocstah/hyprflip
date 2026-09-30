@@ -4,6 +4,9 @@
 #include <algorithm>
 #include <charconv>
 #include <dlfcn.h>
+#include <filesystem>
+#include <unistd.h>
+#include <hyprutils/os/Process.hpp>
 #include <format>
 #include <hyprland/src/desktop/Workspace.hpp>
 #include <hyprland/src/desktop/state/FocusState.hpp>
@@ -1474,9 +1477,32 @@ Result Controller::dispatch(const std::string &action) {
                    "workspace <number> [silent], move <left|right|up|down>, cancel, "
                    "flip, peek [end], unpair, finish, or status."};
 }
+namespace {
+// notify-send on PATH, for desktop notifications through the user's daemon.
+std::optional<std::string> notifySend() {
+    const char *path = getenv("PATH");
+    std::istringstream dirs(path ? path : "/usr/local/bin:/usr/bin:/bin");
+    for (std::string dir; std::getline(dirs, dir, ':');) {
+        auto candidate = std::filesystem::path(dir) / "notify-send";
+        if (!dir.empty() && access(candidate.c_str(), X_OK) == 0) return candidate.string();
+    }
+    return std::nullopt;
+}
+} // namespace
 void Controller::notify(const Result &r) {
     if (!m_settings.notifications->value() || r.message == "ok")
         return;
+    // A desktop notification matches the rest of the desktop; the same
+    // synchronous hint makes a newer message replace an older one.
+    if (m_settings.desktopNotifications->value())
+        if (const auto binary = notifySend()) {
+            Hyprutils::OS::CProcess process(*binary, {"--app-name=Hyprflip", "--expire-time=3500",
+                                                      "--hint=string:x-canonical-private-synchronous:hyprflip",
+                                                      "--icon=" + std::string(r.ok ? "dialog-information" : "dialog-warning"),
+                                                      "Hyprflip", r.message});
+            if (process.runAsync())
+                return;
+        }
     HyprlandAPI::addNotification(m_handle, "Hyprflip: " + r.message, CHyprColor(r.ok ? 0xff87c7a1 : 0xffed997b), 3500);
 }
 std::string Controller::status() {

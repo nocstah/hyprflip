@@ -112,6 +112,8 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE h) {
         }}));
     settings.notifications =
         config(makeConfigValue<Bool>("plugin:hyprflip:notifications", "Show pairing and error notifications", true));
+    settings.desktopNotifications = config(makeConfigValue<Bool>("plugin:hyprflip:desktop_notifications",
+        "Show messages as desktop notifications (notify-send) instead of Hyprland's bar", true));
     settings.cardFrame = config(makeConfigValue<Bool>("plugin:hyprflip:card_frame", "Shared card outline and compact Flip button", true));
     settings.cardGap = config(makeConfigValue<Int>("plugin:hyprflip:card_gap", "Space between card apps; -1 follows desktop gaps", -1, SIntValueOptions{.min = -1, .max = 128}));
     settings.accentRing = config(makeConfigValue<Bool>("plugin:hyprflip:accent_ring", "Accent-colored ring around every card", false));

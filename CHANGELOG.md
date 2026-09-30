@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Show Hyprflip's messages as desktop notifications through `notify-send`
+  (mako on Omarchy), with a newer message replacing an older one, instead of
+  Hyprland's notification bar. `desktop_notifications = false` restores the
+  bar, which is also the fallback when `notify-send` is missing.
 - Omachill adapter v3: toggling Chill on a workspace with a fullscreen native
   card leaves fullscreen and chills the card instead of refusing. An hy3 card
   keeps its fullscreen and Chill explains why. v3 upgrades v1 and v2 engines.

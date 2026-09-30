@@ -16,7 +16,7 @@
 namespace Hyprflip {
 struct Settings {
     SP<Config::Values::Int> duration, cardGap, fullscreenDivider;
-    SP<Config::Values::Bool> enabled, notifications, cardFrame, dragToAdd, accentRing;
+    SP<Config::Values::Bool> enabled, notifications, cardFrame, dragToAdd, accentRing, desktopNotifications;
     SP<Config::Values::Float> perspective, retreat;
     SP<Config::Values::String> transition, accentColor, dividerColor;
 };
