@@ -64,6 +64,10 @@ decisions ask `hl.plugin.hyprflip.chill_blocked(id)`, which stays true for hy3
 cards, fullscreen cards, reservations and moves. App handoff still requires
 `protects_workspace`. A v1 engine keeps every card workspace tiled.
 
+Adapter v3 lets Chill win over a fullscreen card: toggling Chill on its
+workspace leaves fullscreen first, then chills the card. A card that still
+cannot chill (hy3) gets its fullscreen back and Chill explains why.
+
 The optional adapter targets Omachill 1.2.0 and upgrades an engine that
 already carries the v1 guard. Prepare a copy with:
 

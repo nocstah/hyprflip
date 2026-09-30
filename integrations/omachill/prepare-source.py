@@ -10,6 +10,7 @@ from pathlib import Path
 
 MARKER = '-- Hyprflip workspace protection v1'
 GEOMETRY = '-- Hyprflip card geometry v2'
+FULLSCREEN = '-- Hyprflip fullscreen chill v3'
 
 
 def prepare(source):
@@ -17,7 +18,44 @@ def prepare(source):
         source = protection(source)
     if GEOMETRY not in source:
         source = geometry(source)
+    if FULLSCREEN not in source:
+        source = fullscreen(source)
     return source
+
+
+def fullscreen(source):
+    state, replace = replacer(source)
+    replace('local function toggle(selector)\n', '''-- Hyprflip fullscreen chill v3
+-- Chill takes precedence over a fullscreen card: leave fullscreen, then chill.
+-- A card that still cannot chill (hy3) gets its fullscreen back.
+local function leave_card_fullscreen(ws)
+  local plugin = hl.plugin and hl.plugin.hyprflip
+  if not plugin or not plugin.card_box then return {} end
+  local left = {}
+  for _, w in ipairs(hl.get_windows({ workspace = ws.id })) do
+    local ok, x = pcall(plugin.card_box, w.address)
+    if w.fullscreen ~= 0 and ok and x then
+      left[#left + 1] = { w = w, mode = w.fullscreen == 1 and "maximized" or "fullscreen" }
+      on_window(hl.dsp.window.fullscreen, w, { action = "unset" })
+    end
+  end
+  return left
+end
+
+local function toggle(selector)
+''')
+    replace('''  if card_workspace(ws) and not off then
+    notify("This workspace's Hyprflip card can't chill right now. Leave fullscreen, or ungroup an hy3 card.")
+    return
+  end''', '''  if card_workspace(ws) and not off then
+    local left = leave_card_fullscreen(ws)
+    if card_workspace(ws) then
+      for _, e in ipairs(left) do on_window(hl.dsp.window.fullscreen, e.w, { mode = e.mode, action = "set" }) end
+      notify("This workspace's Hyprflip card can't chill. Ungroup an hy3 card first.")
+      return
+    end
+  end''')
+    return state['source']
 
 
 def replacer(source):

@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Omachill adapter v3: toggling Chill on a workspace with a fullscreen native
+  card leaves fullscreen and chills the card instead of refusing. An hy3 card
+  keeps its fullscreen and Chill explains why. v3 upgrades v1 and v2 engines.
 - Fullscreen a whole card on dwindle and floating cards. Fullscreening any
   app (or maximizing it) fills the screen with every app on the visible face,
   meeting at a thin divider in the accent color (`accent_color`, else the

@@ -133,14 +133,18 @@ hl.config({general={gaps_in=14,gaps_out=24},animations={enabled=false},
     assert card()['faces'] == [[a], [b, c]]
     passed('leaving Chill tiles the card back into its slot as one tile')
 
-    ipc.focus(b); ipc.call('dispatch', 'hl.dsp.window.fullscreen({mode="fullscreen"})')
-    assert protect()
-    lua(f'chillmode.toggle({WS})')
-    time.sleep(.2)
-    assert not card()['floating'] and card()['fullscreen']
-    ipc.call('dispatch', 'hl.dsp.window.fullscreen({mode="fullscreen"})')
-    assert not protect()
-    passed('a fullscreen card keeps its workspace out of Chill until it leaves fullscreen')
+    for enter in ('dispatch', 'action'):
+        ipc.focus(b)
+        if enter == 'dispatch': ipc.call('dispatch', 'hl.dsp.window.fullscreen({mode="fullscreen"})')
+        else: ipc.action('fullscreen')
+        assert card()['fullscreen'] and protect()
+        # Chill wins: the card leaves fullscreen, then chills as one window.
+        lua(f'chillmode.toggle({WS})')
+        wait(lambda: card()['floating'] and not card()['fullscreen'])
+        assert all(tagged(x) for x in members())
+        lua(f'chillmode.toggle({WS})')
+        wait(lambda: not card()['floating'])
+    passed('Chill on a fullscreen card leaves fullscreen and chills it, from either fullscreen')
 
     extra = spawn('extra')
     lua(f'chillmode.toggle({WS})')
