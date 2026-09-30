@@ -214,6 +214,52 @@ hl.config({general={gaps_in=14,gaps_out=24},animations={enabled=false},
     assert tuple(card()['box']) == tile
     passed('maximize fills the work area with the whole card')
 
+    extra, spare = spawn('extra'), spawn('spare')
+    ipc.focus(b); ipc.call('dispatch', FULL); back = fills(screen)
+    # Marking by address does not focus the app, which would end fullscreen.
+    ipc.action(f'mark {extra}'); ipc.focused((b, 'attach horizontal'))
+    assert card()['faces'][1] == [b, c, extra] and card()['fullscreen'], card()
+    assert len(fills(screen)) == 3 and len(ipc.status()['card_dividers']) == 2
+    ipc.focus(b); ipc.action(f'replace {extra} {spare}')
+    assert card()['faces'][1] == [b, c, spare] and card()['fullscreen']
+    assert len(fills(screen)) == 3
+    ipc.focus(spare); ipc.action('release')
+    assert card()['faces'][1] == [b, c] and card()['fullscreen']
+    assert fills(screen) == back
+    passed('apps join, replace and leave a fullscreen card without leaving fullscreen')
+
+    ipc.call('eval', 'hl.config({plugin={hyprflip={fullscreen_divider=0}}})'); ipc.action('finish')
+    now = fills(screen)
+    assert now[1][0] == now[0][0] + now[0][2] and not ipc.status()['card_dividers'], now
+    ipc.call('eval', 'hl.config({plugin={hyprflip={fullscreen_divider=4,divider_color="#00FF00"}}})'); ipc.action('finish')
+    now = fills(screen)
+    divider = ipc.status()['card_dividers']
+    assert now[1][0] - (now[0][0] + now[0][2]) == 4 and divider[0]['box'][2] == 4 and divider[0]['color'] == '#00FF00', (now, divider)
+    ipc.call('eval', 'hl.config({plugin={hyprflip={fullscreen_divider=2,divider_color=""}}})'); ipc.action('finish')
+    assert fills(screen) == back and ipc.status()['card_dividers'][0]['color'] == '#FF0000'
+    passed('divider width and color follow their settings; zero lets apps touch')
+
+    ipc.call('dispatch', FULL)
+    for x in (extra, spare):
+        ipc.call('dispatch', f'hl.dsp.window.close({{window="address:{x}"}})')
+    wait(lambda: not any(x in ipc.windows() for x in (extra, spare)))
+    tile = tuple(card()['box'])
+    ipc.focus(b); ipc.action('fullscreen')
+    assert ipc.windows()[b]['fullscreen'] == 2 and ipc.windows()[b]['fullscreenClient'] == 0, ipc.windows()[b]
+    assert fills(screen) == back
+    ipc.action('flip'); fills(screen)
+    assert ipc.windows()[a]['fullscreen'] == 2 and ipc.windows()[a]['fullscreenClient'] == 0
+    ipc.action('flip'); ipc.focus(c); fills(screen)
+    assert ipc.windows()[c]['fullscreenClient'] == 0
+    ipc.action('fullscreen')
+    assert not any(ipc.windows()[x]['fullscreen'] for x in (a, b, c)) and tuple(card()['box']) == tile
+    ipc.focus(b); ipc.call('dispatch', FULL)
+    assert ipc.windows()[b]['fullscreenClient'] == 2, 'app fullscreen sync was not restored'
+    ipc.call('dispatch', FULL)
+    ipc.focus(b); ipc.action('fullscreen'); ipc.call('dispatch', FULL)
+    assert not any(ipc.windows()[x]['fullscreen'] for x in (a, b, c)) and tuple(card()['box']) == tile
+    passed('the card fullscreen action fills the screen without telling apps, and either toggle leaves')
+
     ipc.action('floating'); assert card()['floating']
     floated = tuple(card()['box'])
     ipc.call('dispatch', FULL); fills(screen)

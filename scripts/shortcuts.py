@@ -22,6 +22,7 @@ DEFINITIONS = (
     ('attach_h', 'Add app beside', 'H', 'attach pane beside'),
     ('attach_v', 'Add app below', 'V', 'attach pane below'),
     ('release', 'Remove focused app', 'E', 'release focused pane'),
+    ('fullscreen', 'Fullscreen whole card', 'Return', 'fullscreen the whole card'),
     ('cancel', 'Cancel pairing', 'Escape', 'cancel pairing'),
 )
 BY_ID = {row[0]: row for row in DEFINITIONS}

@@ -51,4 +51,23 @@ if hl.plugin.hyprflip and hl.plugin.hyprflip.preview then
             pcall(function() hl.config({plugin={hyprflip={accent_ring=ring == "on"}}}) end)
         end
     end
+    local divider_file = io.open(root .. "/hyprflip/fullscreen_divider", "r")
+    if divider_file then
+        local text = divider_file:read("*l") or ""
+        divider_file:close()
+        local divider = text:match("^%d+$") and tonumber(text) or nil
+        if divider and divider >= 0 and divider <= 16 then
+            pcall(function() hl.config({plugin={hyprflip={fullscreen_divider=divider}}}) end)
+        end
+    end
+    local divider_color_file = io.open(root .. "/hyprflip/divider_color", "r")
+    if divider_color_file then
+        local text = divider_color_file:read("*l") or ""
+        divider_color_file:close()
+        -- Empty follows the accent color.
+        local color = text == "" and "" or text:match("^#%x%x%x%x%x%x$")
+        if color then
+            pcall(function() hl.config({plugin={hyprflip={divider_color=color}}}) end)
+        end
+    end
 end

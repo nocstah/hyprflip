@@ -81,6 +81,49 @@ class PreferencesTest(unittest.TestCase):
             with self.assertRaises(setup.SetupError): ipc.save_accent_color('#F78DBB')
             call.assert_not_called()
 
+    def test_fullscreen_divider_and_color_persist_and_roll_back(self):
+        with tempfile.TemporaryDirectory() as directory:
+            ipc = setup.Hyprctl({'XDG_STATE_HOME': directory})
+            state = {'fullscreen_divider': 2, 'divider_color': ''}
+            calls = []
+            ipc.status = lambda: state.copy()
+            def apply(*args):
+                calls.append(args[1])
+                key, value = args[1].split('hyprflip={')[1].rstrip('}})').split('=')
+                state[key] = int(value) if key == 'fullscreen_divider' else value.strip('"')
+            ipc.call = apply
+            root = Path(directory) / 'hyprflip'
+            ipc.save_divider_color('#89b4fa')
+            ipc.save_fullscreen_divider(0)
+            self.assertEqual(state, {'fullscreen_divider': 0, 'divider_color': '#89B4FA'})
+            self.assertEqual((root / 'fullscreen_divider').read_text(), '0\n')
+            self.assertEqual((root / 'divider_color').read_text(), '#89B4FA\n')
+            ipc.save_divider_color('')
+            self.assertEqual(state['divider_color'], '', 'empty follows the accent again')
+            self.assertEqual((root / 'divider_color').read_text(), '\n')
+            self.assertIn('divider_color=""', calls[-1])
+            ipc.save_divider_color('')
+            self.assertEqual(len(calls), 3, 'an unchanged color is not dispatched again')
+            ipc.call = lambda *args: None
+            with self.assertRaises(setup.SetupError): ipc.save_fullscreen_divider(4)
+            self.assertEqual((root / 'fullscreen_divider').read_text(), '0\n')
+            with self.assertRaises(setup.SetupError): ipc.save_divider_color('#123456')
+            self.assertEqual((root / 'divider_color').read_text(), '\n')
+            self.assertEqual(sorted(p.name for p in root.iterdir()), ['divider_color', 'fullscreen_divider'])
+
+    def test_invalid_divider_or_older_core_does_not_write_or_dispatch(self):
+        ipc = setup.Hyprctl()
+        with patch.object(ipc, 'call') as call, patch.object(ipc, 'status', return_value={'fullscreen_divider': 2, 'divider_color': ''}):
+            for value in (-1, 17, True, '2', 2.0, None):
+                with self.assertRaises(setup.SetupError): ipc.save_fullscreen_divider(value)
+            for value in ('89B4FA', '#89B4F', '"#89B4FA"', '#89B4FG', None, 0x89B4FA):
+                with self.assertRaises(setup.SetupError): ipc.save_divider_color(value)
+            call.assert_not_called()
+        with patch.object(ipc, 'call') as call, patch.object(ipc, 'status', return_value={'accent_ring': False}):
+            with self.assertRaises(setup.SetupError): ipc.save_fullscreen_divider(2)
+            with self.assertRaises(setup.SetupError): ipc.save_divider_color('')
+            call.assert_not_called()
+
 
 class FivePaneRecipesTest(unittest.TestCase):
     setUp = saved_test.SavedTest.setUp

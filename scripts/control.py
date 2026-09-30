@@ -114,6 +114,9 @@ def snapshot(ipc):
                 cards.append({'id': card['id'], 'kind': kind, 'key': f"{kind}:{card['id']}",
                               'token': card_token(card, kind, windows, ctx['instance']), 'faces': face_rows,
                               'current': current, 'active': active, 'unfolded': bool(card.get('unfolded')),
+                              'fullscreen': bool(card.get('fullscreen')),
+                              # Native dwindle/floating cards; only these fullscreen as a whole.
+                              'native': kind == 'container' and bool(card.get('native_group')),
                               'floating': bool(card.get('floating', windows[current].get('floating'))),
                               'workspace': windows[current]['workspace']['id'],
                               'workspace_label': w.workspace_name(windows[current]), 'saved_names': names,
@@ -165,6 +168,11 @@ def snapshot(ipc):
         base['capabilities']['accent'] = type(state.get('accent_ring')) is bool
         base['accent_ring'] = state.get('accent_ring')
         base['accent_color'] = state.get('accent_color')
+        # Only cores with whole-card fullscreen report its divider.
+        base['capabilities']['divider'] = type(state.get('fullscreen_divider')) is int
+        base['capabilities']['fullscreen'] = base['capabilities']['divider']
+        base['fullscreen_divider'] = state.get('fullscreen_divider')
+        base['divider_color'] = state.get('divider_color')
         try:
             base['shortcuts'] = shortcuts.snapshot(ipc)
         except (w.SetupError, OSError, KeyError, subprocess.TimeoutExpired):
@@ -306,6 +314,8 @@ def edit_prefix(intent, pane, face, card, state):
     members = card['faces'][face]
     if pane is not None and pane not in members:
         raise w.SetupError('That app is no longer on this side.')
+    if intent in ('repair', 'unpair') and card.get('fullscreen'):
+        raise w.SetupError('Leave card fullscreen, then try again.')
     if intent in ('save', 'manage', 'repair', 'unpair', 'add'):
         return [intent]
     if intent == 'remove' and pane:
@@ -333,19 +343,24 @@ def run_operation(ipc, payload, menu):
     if not isinstance(payload, dict) or type(payload.get('protocol')) is not int or payload['protocol'] != PROTOCOL:
         raise w.SetupError('OmaCards and the Hyprflip helper need matching protocol versions.')
     action, ctx = payload.get('action'), payload.get('context')
-    if action not in ('flip', 'unfold', 'floating', 'edit', 'create', 'open', 'manage', 'transition', 'preview', 'duration', 'shortcut', 'appearance', 'spacing', 'accent'):
+    if action not in ('flip', 'unfold', 'floating', 'edit', 'create', 'open', 'manage', 'transition', 'preview', 'duration', 'shortcut', 'appearance', 'spacing', 'accent', 'divider', 'fullscreen'):
         raise w.SetupError('Choose an available card action.')
     validate_context(ipc, ctx)
     request = menu.request
     card = None
-    if action in ('flip', 'unfold', 'floating', 'edit', 'preview'):
+    if action in ('flip', 'unfold', 'floating', 'fullscreen', 'edit', 'preview'):
         card, windows, state = resolve_card(ipc, payload.get('target'), ctx)
         if windows[card['current']]['workspace']['id'] != ctx['workspace']:
             raise w.SetupError('Go to this card’s workspace before editing it.')
         if state.get('animating'):
             raise w.SetupError('Wait for the turn to finish, then try again.')
-        if action in ('unfold', 'edit') and payload['target']['kind'] != 'container':
+        if action in ('unfold', 'edit', 'fullscreen') and payload['target']['kind'] != 'container':
             raise w.SetupError('Create a multi-app card with O to use these controls.')
+        if action == 'fullscreen':
+            if type(state.get('fullscreen_divider')) is not int:
+                raise w.SetupError('Update Hyprflip to fullscreen whole cards.')
+            if not card.get('native_group'):
+                raise w.SetupError('Whole-card fullscreen works on dwindle and floating cards.')
         if action == 'preview' and (payload.get('mode') not in w.TRANSITIONS or
                                    payload['mode'] not in state.get('transition_modes', [])):
             raise w.SetupError('Choose an available transition.')
@@ -359,7 +374,7 @@ def run_operation(ipc, payload, menu):
     validate_context(ipc, ctx)
     if card:
         card, windows, state = resolve_card(ipc, payload['target'], ctx)
-    if action in ('flip', 'unfold', 'floating', 'preview', 'edit', 'create'):
+    if action in ('flip', 'unfold', 'floating', 'fullscreen', 'preview', 'edit', 'create'):
         anchor = card['current'] if card else ctx.get('anchor')
         if action == 'edit':
             anchor = (card['current'] if card['current'] in card['faces'][face] else card['faces'][face][0])
@@ -387,7 +402,7 @@ def run_operation(ipc, payload, menu):
             raise w.SetupError('Focus the app you want on the front, then choose Create card.')
         ipc.focus(anchor)
 
-    if action in ('flip', 'unfold', 'floating', 'preview'):
+    if action in ('flip', 'unfold', 'floating', 'fullscreen', 'preview'):
         command = action
         if action == 'preview':
             mode = payload.get('mode')
@@ -448,6 +463,17 @@ def run_operation(ipc, payload, menu):
                 ipc.save_accent_color(payload['color'])
             ipc.save_accent_ring(enabled)
         return 'Accent ring on for all cards.' if enabled else 'Accent ring off.'
+
+    if action == 'divider':
+        width = payload.get('width')
+        if type(width) is not int or not 0 <= width <= 16:
+            raise w.SetupError('Choose a divider between 0 and 16 pixels.')
+        with request.exclusive():
+            request.check()
+            if payload.get('color') is not None:
+                ipc.save_divider_color(payload['color'])
+            ipc.save_fullscreen_divider(width)
+        return 'Fullscreen divider off.' if width == 0 else 'Fullscreen divider updated for all cards.'
 
     if action == 'create':
         flow = w.Setup(ipc, menu)

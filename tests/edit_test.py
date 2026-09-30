@@ -27,6 +27,7 @@ class CardIPC(IPC):
     def action(self, action):
         super().action(action)
         if action == 'mark': self.snapshot['marked'] = self.active
+        if action.startswith('mark 0x'): self.snapshot['marked'] = action.split()[1]
         if action == 'cancel': self.snapshot['marked'] = None
         if action.startswith('other_side '): self.active = action.split()[1]
         if action.startswith('attach ') and self.refuse_attach:
@@ -204,6 +205,77 @@ class EditTest(unittest.TestCase):
         selected = flow.prepare('0xb')
         ipc.clients['0xc']['workspace'] = {'id': 8, 'name': '8'}
         with self.assertRaises(setup.SetupError): flow.apply(selected)
+        self.assertEqual(ipc.mutations, [])
+
+
+class FullscreenEditTest(unittest.TestCase):
+    def fullscreen(self, native=True, full=False):
+        ipc = CardIPC(full=full)
+        ipc.snapshot['containers'][0].update(native_group=native, fullscreen=True)
+        ipc.clients['0xb']['fullscreen'] = 2
+        return ipc
+
+    def test_add_marks_by_address_without_focusing_the_new_app(self):
+        ipc = self.fullscreen()
+        ipc.snapshot['marked'] = None
+        flow = setup.Edit(ipc, Picker('add', '0xc'))
+        flow.apply(flow.prepare('0xb'))
+        self.assertEqual(ipc.mutations, [('focus', '0xb'), ('action', 'mark 0xc'),
+                                         ('focus', '0xb'), ('action', 'attach horizontal'), ('focus', '0xc')])
+        self.assertNotIn(('focus', '0xc'), ipc.mutations[:-1], 'the new app is focused only after it joins the card')
+
+    def test_failed_add_restores_the_previous_mark_by_address(self):
+        ipc = self.fullscreen()
+        ipc.snapshot['marked'] = '0xd'
+        flow = setup.Edit(ipc, Picker('add', '0xc'))
+        plan = flow.prepare('0xb')
+        ipc.refuse_attach = True
+        with self.assertRaisesRegex(setup.SetupError, 'too small'): flow.apply(plan)
+        self.assertIn(('action', 'mark 0xd'), ipc.mutations)
+        self.assertNotIn(('focus', '0xd'), ipc.mutations)
+        self.assertNotIn(('focus', '0xc'), ipc.mutations)
+        self.assertEqual(ipc.snapshot['marked'], '0xd')
+
+    def test_layout_and_removal_continue_while_fullscreen(self):
+        ipc = self.fullscreen(full=True)
+        ipc.clients['0xb']['at'], ipc.clients['0xc']['at'] = [0, 0], [600, 0]
+        ipc.snapshot['layout_controls'] = True
+        flow = setup.Edit(ipc, Picker('layout', 'layout vertical'))
+        flow.apply(flow.prepare('0xb'))
+        self.assertEqual(ipc.mutations, [('focus', '0xb'), ('action', 'layout vertical')])
+        ipc.mutations.clear()
+        flow = setup.Edit(ipc, Picker('release:0xc'))
+        flow.apply(flow.prepare('0xb'))
+        self.assertIn(('action', 'release'), ipc.mutations)
+
+    def test_ungroup_and_reopen_wait_until_fullscreen_ends(self):
+        ipc = self.fullscreen()
+        ipc.snapshot['repair_cards'] = True
+        picker = Picker(None)
+        with self.assertRaises(setup.Cancelled): setup.Edit(ipc, picker).prepare('0xb')
+        values = [c.value for c in picker.prompts[0][1]]
+        self.assertNotIn('unpair', values)
+        self.assertNotIn('repair', values)
+        plan = setup.EditPlan('0xb', deepcopy(ipc.snapshot['containers'][0]),
+                              {a: ipc.clients[a] for a in ('0xa', '0xb')}, 'unpair')
+        with self.assertRaisesRegex(setup.SetupError, 'Leave card fullscreen'): setup.Edit(ipc, Picker()).apply(plan)
+        self.assertEqual(ipc.mutations, [])
+
+    def test_hy3_or_unrelated_fullscreen_still_refuses(self):
+        for case in ('hy3', 'other'):
+            with self.subTest(case=case):
+                ipc = self.fullscreen(native=case != 'hy3')
+                if case == 'other':
+                    ipc.clients['0xb']['fullscreen'] = 0
+                    ipc.clients['0xd']['fullscreen'] = 2
+                with self.assertRaisesRegex(setup.SetupError, 'Leave fullscreen'):
+                    setup.Edit(ipc, Picker('add', '0xc')).prepare('0xb')
+                self.assertEqual(ipc.mutations, [])
+
+    def test_mark_address_rejects_anything_but_an_address(self):
+        ipc = CardIPC()
+        for value in ('0xc; flip', 'mark', None, '0xZ'):
+            with self.assertRaises(setup.SetupError): setup.mark_address(ipc, value)
         self.assertEqual(ipc.mutations, [])
 
 

@@ -146,6 +146,66 @@ class PanelControlTest(unittest.TestCase):
             with self.assertRaisesRegex(setup.SetupError, 'saved card changed'):
                 self.run_action(self.payload('open', name='Mail', recipe_token=control.digest({'old': True})))
 
+    def test_fullscreen_and_divider_are_reported_only_by_new_cores(self):
+        result = control.snapshot(self.ipc)
+        self.assertFalse(result['capabilities']['fullscreen'])
+        self.assertFalse(result['capabilities']['divider'])
+        self.assertFalse(result['cards'][0]['fullscreen'])
+        self.assertFalse(result['cards'][0]['native'])
+        self.ipc.snapshot.update(fullscreen_divider=2, divider_color='')
+        self.ipc.snapshot['containers'][0].update(fullscreen=True, native_group=True)
+        result = control.snapshot(self.ipc)
+        self.assertTrue(result['cards'][0]['native'])
+        self.assertTrue(result['capabilities']['fullscreen'])
+        self.assertTrue(result['capabilities']['divider'])
+        self.assertEqual((result['fullscreen_divider'], result['divider_color']), (2, ''))
+        self.assertTrue(result['cards'][0]['fullscreen'])
+        self.assertEqual(self.ipc.mutations, [])
+
+    def retarget(self, **card):
+        # Tokens cover the whole card, so reissue it like a fresh snapshot.
+        container = self.ipc.snapshot['containers'][0]
+        container.update(card)
+        self.target['token'] = control.card_token(container, 'container', self.ipc.windows(), self.ctx['instance'])
+
+    def test_fullscreen_targets_the_card_like_floating(self):
+        self.ipc.snapshot['fullscreen_divider'] = 2
+        self.retarget(native_group=True)
+        self.assertEqual(self.run_action(self.payload('fullscreen')), '')
+        self.assertEqual(self.ipc.mutations[-2:], [('focus', '0xb'), ('action', 'fullscreen')])
+
+    def test_fullscreen_refuses_older_cores_hy3_and_native_pairs(self):
+        self.retarget(native_group=True)
+        with self.assertRaisesRegex(setup.SetupError, 'Update Hyprflip'): self.run_action(self.payload('fullscreen'))
+        self.ipc.snapshot['fullscreen_divider'] = 2
+        self.retarget(native_group=False)
+        with self.assertRaisesRegex(setup.SetupError, 'dwindle and floating'): self.run_action(self.payload('fullscreen'))
+        pair = dict(id=3, front='0xa', back='0xb', current='0xb')
+        self.ipc.snapshot['pairs'] = [pair]
+        target = dict(id=3, kind='pair', token=control.card_token(pair, 'pair', self.ipc.windows(), self.ctx['instance']))
+        with self.assertRaisesRegex(setup.SetupError, 'multi-app card'):
+            self.run_action(self.payload('fullscreen') | {'target': target})
+        self.assertEqual(self.ipc.mutations, [])
+
+    def test_divider_action_validates_before_saving(self):
+        calls = []
+        self.ipc.save_divider_color = lambda color: calls.append(('color', color))
+        self.ipc.save_fullscreen_divider = lambda width: calls.append(('width', width))
+        for width in (-1, 17, True, '2', None):
+            with self.assertRaises(setup.SetupError): self.run_action(self.payload('divider', width=width, color='#89B4FA'))
+        self.assertEqual(calls, [])
+        self.assertEqual(self.run_action(self.payload('divider', width=3, color='')), 'Fullscreen divider updated for all cards.')
+        self.assertEqual(self.run_action(self.payload('divider', width=0)), 'Fullscreen divider off.')
+        self.assertEqual(calls, [('color', ''), ('width', 3), ('width', 0)])
+        self.assertEqual(self.ipc.mutations, [])
+
+    def test_fullscreen_card_keeps_ungroup_and_reopen_for_later(self):
+        card = self.ipc.snapshot['containers'][0] | {'fullscreen': True}
+        for intent in ('unpair', 'repair'):
+            with self.assertRaisesRegex(setup.SetupError, 'Leave card fullscreen'):
+                control.edit_prefix(intent, None, 1, card, {})
+        self.assertEqual(control.edit_prefix('add', None, 1, card, {}), ['add'])
+
 
 class ChannelTest(unittest.TestCase):
     def setUp(self):

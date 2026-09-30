@@ -40,6 +40,7 @@ int workspace(lua_State *L) {
 int move(lua_State *L) { return invoke(L, (std::string("move ") + luaL_checkstring(L, 1)).c_str()); }
 int unfold(lua_State *L) { return invoke(L, "unfold"); }
 int floating(lua_State *L) { return invoke(L, "floating"); }
+int fullscreen(lua_State *L) { return invoke(L, "fullscreen"); }
 int layout(lua_State *L) { return invoke(L, (std::string("layout ") + luaL_checkstring(L, 1)).c_str()); }
 int arrange(lua_State *L) { return invoke(L, (std::string("arrange ") + luaL_checkstring(L, 1)).c_str()); }
 int replace(lua_State *L) { return invoke(L, (std::string("replace ") + luaL_checkstring(L, 1)).c_str()); }
@@ -54,6 +55,26 @@ int inContainer(lua_State *L) {
 int protectsWorkspace(lua_State *L) {
     const auto workspace = luaL_checkinteger(L, 1);
     lua_pushboolean(L, workspace > 0 && workspace <= INT32_MAX && controller->protectsWorkspace(workspace));
+    return 1;
+}
+int cardBox(lua_State *L) {
+    const auto box = controller->cardBox(luaL_checkstring(L, 1));
+    if (!box) {
+        lua_pushnil(L);
+        return 1;
+    }
+    for (const double value : {box->x, box->y, box->w, box->h})
+        lua_pushnumber(L, value);
+    return 4;
+}
+int cardPlace(lua_State *L) {
+    const CBox box{luaL_checknumber(L, 2), luaL_checknumber(L, 3), luaL_checknumber(L, 4), luaL_checknumber(L, 5)};
+    lua_pushboolean(L, controller->placeCard(luaL_checkstring(L, 1), box));
+    return 1;
+}
+int chillBlocked(lua_State *L) {
+    const auto workspace = luaL_checkinteger(L, 1);
+    lua_pushboolean(L, workspace > 0 && workspace <= INT32_MAX && controller->blocksChill(workspace));
     return 1;
 }
 int adopt(lua_State *L) {
@@ -100,6 +121,14 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE h) {
             if (value.empty() || Hyprflip::parseAccent(value)) return {};
             return std::unexpected("Use a color like #F78DBB");
         }}));
+    settings.fullscreenDivider = config(makeConfigValue<Int>("plugin:hyprflip:fullscreen_divider",
+        "Divider width between apps of a fullscreen card; 0 lets them touch", 2, SIntValueOptions{.min = 0, .max = 16}));
+    settings.dividerColor = config(makeConfigValue<String>("plugin:hyprflip:divider_color",
+        "Fullscreen divider color as #RRGGBB; empty follows accent_color, then the active border", "",
+        SStringValueOptions{.validator = [](const std::string &value) -> std::expected<void, std::string> {
+            if (value.empty() || Hyprflip::parseAccent(value)) return {};
+            return std::unexpected("Use a color like #F78DBB");
+        }}));
     settings.dragToAdd = config(makeConfigValue<Bool>("plugin:hyprflip:drag_to_add", "Drop an outside app onto a card's add target", true));
     settings.perspective = config(makeConfigValue<Float>("plugin:hyprflip:perspective", "Perspective camera distance",
                                                          5.F, SFloatValueOptions{.min = 2.F, .max = 8.F}));
@@ -122,12 +151,16 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE h) {
                                    {"move", move},
                                    {"unfold", unfold},
                                    {"floating", floating},
+                                   {"fullscreen", fullscreen},
                                    {"layout", layout},
                                    {"arrange", arrange},
                                    {"replace", replace},
                                    {"other_side", otherSide},
                                    {"in_container", inContainer},
                                    {"protects_workspace", protectsWorkspace},
+                                   {"card_box", cardBox},
+                                   {"chill_blocked", chillBlocked},
+                                   {"card_place", cardPlace},
                                    {"adopt", adopt},
                                    {"status", status}})
         if (!HyprlandAPI::addLuaFunction(handle, "hyprflip", name, fn))

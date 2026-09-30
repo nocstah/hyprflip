@@ -8,7 +8,7 @@ local names = {
     ["separate windows"]="unpair", ["mark first side"]="mark",
     ["attach second side"]="pair", ["attach pane beside"]="attach_h",
     ["attach pane below"]="attach_v", ["release focused pane"]="release",
-    ["cancel pairing"]="cancel",
+    ["fullscreen the whole card"]="fullscreen", ["cancel pairing"]="cancel",
 }
 local entries, preferences = {}, {}
 local function chord(mask, key)

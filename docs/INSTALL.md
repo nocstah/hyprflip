@@ -278,7 +278,7 @@ It installs `setup.py`, `workflow.py`, `control.py` and `shortcuts.py` in
 `~/.local/lib/hyprflip/`, plus `hyprflip-setup.lua` and
 `hyprflip-preferences.lua` and `hyprflip-shortcuts.lua` in `~/.config/hypr/`.
 It adds the setup `require` after the other bindings,
-checks O/C/L/K/Space for conflicts, backs up changed files and validates reload.
+checks O/C/L/K/Space (and Return on cores with card fullscreen) for conflicts, backs up changed files and validates reload.
 It does not replace or unload compositor libraries.
 
 - **Super+Ctrl+Alt+O:** create a card from an ungrouped app, or unfold/fold one.
@@ -286,6 +286,8 @@ It does not replace or unload compositor libraries.
 - **Super+Ctrl+Alt+L:** search and open a saved card.
 - **Super+Ctrl+Alt+K:** find and reveal an app across open cards.
 - **Super+Ctrl+Alt+Space:** hold to peek; release to return.
+- **Super+Ctrl+Alt+Return:** fullscreen the whole dwindle or floating card; press
+  again to leave. Installed and conflict-checked only with a core that supports it.
 
 Use a normal dwindle workspace (or workspace 8 for the optional hy3 trial),
 focus the desired front and use O

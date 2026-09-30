@@ -20,6 +20,7 @@ struct CardFrameView {
     std::optional<CHyprColor> ring;
     // Line color between the apps of a fullscreen card.
     std::optional<CHyprColor> divider;
+    double dividerWidth = 0;
     unsigned count[2]{};
     std::vector<PHLWINDOWREF> windows;
 };

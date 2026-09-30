@@ -69,6 +69,9 @@ class SetupInstallTest(unittest.TestCase):
                 if self.module.exists() or self.conflict == 'K':
                     reply.append({'modmask': 76, 'key': 'K', 'description':
                                   'Other action' if self.conflict == 'K' else 'Hyprflip: find an app in cards'})
+                if 'fullscreen_divider' in self.state and (self.module.exists() or self.conflict == 'Return'):
+                    reply.append({'modmask': 76, 'key': 'Return', 'description':
+                                  'Other action' if self.conflict == 'Return' else 'Hyprflip: fullscreen the whole card'})
                 if (self.config / 'hyprflip-mouse.lua').exists() or self.conflict == 'mouse:274':
                     reply.append({'modmask': 76, 'key': 'mouse:274', 'description':
                                   'Other action' if self.conflict == 'mouse:274' else 'Hyprflip: flip focused card with mouse'})
@@ -117,6 +120,17 @@ class SetupInstallTest(unittest.TestCase):
             self.assertEqual(self.main.read_bytes(), self.original)
             self.assertFalse(self.helper.exists())
             self.assertEqual(self.reloads, 0)
+
+    def test_card_fullscreen_shortcut_is_checked_and_verified_on_new_cores(self):
+        self.state['fullscreen_divider'] = 2
+        self.conflict = 'Return'
+        with self.assertRaisesRegex(SystemExit, 'Super\\+Ctrl\\+Alt\\+Return is assigned'): self.install()
+        self.assertEqual(self.main.read_bytes(), self.original)
+        self.assertEqual(self.reloads, 0)
+        self.conflict = None
+        with self.assertRaises(SystemExit) as result: self.install()
+        self.assertEqual(result.exception.code, 0)
+        self.assertIn('Hyprflip: fullscreen the whole card', self.module.read_text())
 
     def test_backend_only_supports_native_pairs_without_rebinding(self):
         self.state['container_provider'] = False

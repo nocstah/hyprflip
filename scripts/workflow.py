@@ -35,6 +35,24 @@ class MenuUnavailable(SetupError):
     pass
 
 
+def fullscreen_card_only(card, windows, workspace):
+    """True when every fullscreen app on the workspace belongs to this native card.
+
+    Native dwindle/floating cards keep editing while fullscreen; hy3 cards and
+    two-window groups, or an unrelated fullscreen app, still need it left first.
+    """
+    fullscreen = {a for a, w in windows.items() if w.get('fullscreen') and w['workspace']['id'] == workspace}
+    members = {a for face in card.get('faces', []) for a in face}
+    return bool(fullscreen) and bool(card.get('native_group')) and fullscreen <= members
+
+
+def mark_address(ipc, address):
+    """Mark an app without focusing it; focus would pull a card out of fullscreen."""
+    if not isinstance(address, str) or not re.fullmatch(r'0x[0-9a-fA-F]+', address):
+        raise SetupError('The selected window is no longer available.')
+    ipc.action('mark ' + address)
+
+
 def card_layout_available(state, layout):
     """New cores own dwindle cards; older cores require their hy3 provider."""
     if not state.get('container_provider'):
@@ -265,6 +283,28 @@ class Hyprctl:
         self._save_preference('accent_color', color, 'accent_color', color, current, lambda c: '"%s"' % c,
                               'The accent color could not be applied.')
 
+    def save_fullscreen_divider(self, width):
+        if type(width) is not int or not 0 <= width <= 16:
+            raise SetupError('Choose a divider between 0 and 16 pixels.')
+        current = self.status().get('fullscreen_divider')
+        if type(current) is not int or not 0 <= current <= 16:
+            raise SetupError('Update Hyprflip to use card fullscreen.')
+        self._save_preference('fullscreen_divider', str(width), 'fullscreen_divider', width, current, lambda w: '%d' % w,
+                              'The fullscreen divider could not be applied.')
+
+    def save_divider_color(self, color):
+        # Empty follows the accent color, then the active border.
+        if not isinstance(color, str) or not re.fullmatch(r'(#[0-9A-Fa-f]{6})?', color):
+            raise SetupError('Use a divider color like #F78DBB, or follow the accent.')
+        color = color.upper()
+        current = self.status().get('divider_color')
+        if not isinstance(current, str) or not re.fullmatch(r'(#[0-9A-Fa-f]{6})?', current):
+            raise SetupError('Update Hyprflip to use card fullscreen.')
+        if current == color:
+            return
+        self._save_preference('divider_color', color, 'divider_color', color, current, lambda c: '"%s"' % c,
+                              'The divider color could not be applied.')
+
     def focused(self, *operations):
         # Keep focus validation and the action together; a pointer/app focus
         # event can otherwise arrive between separate hyprctl requests.
@@ -273,7 +313,7 @@ class Hyprctl:
             if not re.fullmatch(r'0x[0-9a-fA-F]+', address):
                 raise SetupError('The selected window is no longer available.')
             name, _, argument = action.partition(' ')
-            if not (name in ('mark', 'pair', 'card', 'release', 'unpair', 'other_side', 'flip', 'unfold', 'floating') and not argument or
+            if not (name in ('mark', 'pair', 'card', 'release', 'unpair', 'other_side', 'flip', 'unfold', 'floating', 'fullscreen') and not argument or
                     name == 'workspace' and re.fullmatch(r'[1-9][0-9]{0,9}', argument) and int(argument) <= 2147483647 or
                     name == 'other_side' and re.fullmatch(r'0x[0-9a-fA-F]+', argument) or
                     name == 'attach' and argument in ('horizontal', 'vertical') or
@@ -637,7 +677,9 @@ class Find:
                     or any(current.get(k) != original.get(k) for k in ('pid', 'class', 'initialClass', 'workspace'))):
                 raise SetupError('An app closed or moved. Open Find app again.')
         workspace = plan.windows[plan.address]['workspace']['id']
-        if any(w.get('fullscreen') and w['workspace']['id'] == workspace for w in windows.values()):
+        # Revealing focuses only this card's members, which a fullscreen native card allows.
+        if (any(w.get('fullscreen') and w['workspace']['id'] == workspace for w in windows.values())
+                and not (plan.kind == 'containers' and fullscreen_card_only(card, windows, workspace))):
             raise SetupError('Leave fullscreen on the card’s workspace, then use Find app again.')
         return card, state
 
@@ -1004,7 +1046,10 @@ class Edit(Setup):
                 or self.ipc.data('-j', 'activewindow').get('address') not in (None, plan.anchor)):
             raise SetupError('Focus changed. Return to the side you want and open Edit card again.')
         if any(w.get('fullscreen') and w['workspace']['id'] == workspace for w in windows.values()):
-            raise SetupError('Leave fullscreen on this workspace, then open Edit card again.')
+            if not fullscreen_card_only(card, windows, workspace):
+                raise SetupError('Leave fullscreen on this workspace, then open Edit card again.')
+            if plan.action in ('unpair', 'repair'):
+                raise SetupError('Leave card fullscreen, then open Edit card again.')
         if plan.candidate and plan.candidate not in self.eligible(windows, state):
             raise SetupError('That app is no longer available. Open Edit card and choose another app.')
         return windows, state
@@ -1025,13 +1070,16 @@ class Edit(Setup):
         face = next(f for f in card['faces'] if anchor in f)
         name = app_name(windows[anchor])
         limit = state.get('container_max_panes', 2)
+        # A fullscreen card keeps its apps; ungrouping or reopening waits until it leaves.
+        whole = bool(card.get('fullscreen'))
         choices = ([Choice('add', 'Add an app to this side', 'Choose an open app from any workspace')]
                    if len(face) < limit else [])
         if state.get('pane_replacement'):
             choices.append(Choice('replace', f'Replace {name}…' if len(face) == 1 else 'Replace an app…',
                                   'Keep its position · Previous app stays open'))
         if len(face) == 1:
-            choices.append(Choice('unpair', 'Ungroup card', 'All apps stay open as separate windows'))
+            if not whole:
+                choices.append(Choice('unpair', 'Ungroup card', 'All apps stay open as separate windows'))
             prompt = f'Edit card: {name}'
         else:
             if state.get('layout_controls'):
@@ -1052,7 +1100,7 @@ class Edit(Setup):
         choices.extend([Choice('save', 'Save card…', 'Reuse this arrangement after restarting'),
                         Choice('manage', 'Manage card…', 'Update saved card · Rename · Duplicate'),
                         Choice('saved', 'Open saved card…', 'Reuse open apps · Launch missing apps')])
-        if state.get('repair_cards'):
+        if state.get('repair_cards') and not whole:
             choices.insert(0, Choice('repair', 'Reopen missing apps', 'Restore closed apps from this card’s saved setup'))
         action = self.menu.choose(prompt, choices)
         if action not in {c.value for c in choices}:
@@ -1169,6 +1217,10 @@ class Edit(Setup):
         # A failed edit must never dissolve the existing card.
         marked = state.get('marked')
         workspace = windows[plan.anchor]['workspace']['id']
+        card = next(c for c in state.get('containers', []) if c['id'] == plan.card['id'])
+        # Focusing an app outside a fullscreen card would end its fullscreen,
+        # so mark the new app by address and focus only card members.
+        whole = bool(card.get('fullscreen')) and fullscreen_card_only(card, windows, workspace)
         moved = []
         tiled = []
         try:
@@ -1176,8 +1228,12 @@ class Edit(Setup):
             self.import_windows({plan.candidate: plan.windows[plan.candidate]}, workspace, moved)
             self.ipc.focus(plan.anchor)
             width, height = self.ipc.windows()[plan.anchor]['size']
-            self.ipc.focused((plan.candidate, 'mark'),
-                             (plan.anchor, 'attach ' + ('horizontal' if width >= height else 'vertical')))
+            attach = 'attach ' + ('horizontal' if width >= height else 'vertical')
+            if whole:
+                mark_address(self.ipc, plan.candidate)
+                self.ipc.focused((plan.anchor, attach))
+            else:
+                self.ipc.focused((plan.candidate, 'mark'), (plan.anchor, attach))
         except Exception:
             recovery_error = None
             try:
@@ -1196,7 +1252,8 @@ class Edit(Setup):
                     try:
                         if (marked in self.eligible(current, self.ipc.status(), workspace) and marked in windows
                                 and all(current[marked][k] == windows[marked][k] for k in ('pid', 'class', 'workspace'))):
-                            self.ipc.focused((marked, 'mark'))
+                            if whole: mark_address(self.ipc, marked)
+                            else: self.ipc.focused((marked, 'mark'))
                     finally:
                         if (plan.anchor in current and all(current[plan.anchor][k] == windows[plan.anchor][k]
                                                            for k in ('pid', 'class', 'workspace'))):

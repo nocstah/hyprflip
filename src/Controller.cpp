@@ -315,13 +315,14 @@ void Controller::syncFrames() {
     std::vector<PHLWINDOWREF> native;
     const double header = m_settings.cardFrame->value() ? CardFrames::headerHeight() : 0;
     const double gap = m_settings.cardGap->value();
+    const double divider = m_settings.fullscreenDivider->value();
     for (auto &pair : m_pairs) {
         bool ready = false;
         if (!pair.containerID) {
             ready = true;
             if (header) for (const auto &window : pair.windows) native.push_back(window);
         } else if (pair.providerEpoch == FloatingCards::EPOCH) {
-            ready = FloatingCards::setStyle(pair.containerID, header, gap);
+            ready = FloatingCards::setStyle(pair.containerID, header, gap, divider);
         } else if (provider(pair.providerEpoch)) {
             for (auto plugin : g_pPluginSystem->getAllPlugins()) {
                 if (plugin->m_name != "hy3") continue;
@@ -357,7 +358,11 @@ std::vector<CardFrameView> Controller::frameViews() const {
         view.id = pair.id;
         view.frame = pair.frame;
         view.ring = ring;
-        if (pair.containerID) view.divider = accent.modifyA(1.F);
+        if (pair.containerID && m_settings.fullscreenDivider->value() > 0) {
+            const auto chosen = parseAccent(m_settings.dividerColor->value());
+            view.divider = chosen ? CHyprColor(*chosen) : accent.modifyA(1.F);
+            view.dividerWidth = m_settings.fullscreenDivider->value();
+        }
         view.active = s->active;
         view.unfolded = s->unfolded;
         view.animating = m_turn && m_turn->pairID == pair.id;
@@ -378,8 +383,11 @@ std::vector<CardDropOffer> Controller::dropOffers(PHLWINDOW window) const {
         const auto s = state(p);
         if (!s) continue;
         const auto workspace = s->focused[s->active]->m_workspace;
+        // A native card fullscreen on this workspace still accepts apps.
+        const bool fullscreenCard = workspace && p.providerEpoch == FloatingCards::EPOCH &&
+            s->contains(Fullscreen::controller()->getFullscreenWindow(workspace));
         if (!workspace || !workspace->m_visible || workspace->m_isSpecialWorkspace ||
-            Fullscreen::controller()->hasFullscreen(workspace) || window->m_workspace != workspace ||
+            (Fullscreen::controller()->hasFullscreen(workspace) && !fullscreenCard) || window->m_workspace != workspace ||
             workspace->m_renderOffset->isBeingAnimated()) continue;
         for (unsigned side = 0; side < 2; ++side) {
             if (!s->unfolded && side != s->active) continue;
@@ -419,12 +427,18 @@ Result Controller::dropAttach(PHLWINDOW window, const CardDropOffer &offer) {
         return {false, "The card changed during the drag. Try again."};
     if (before->faces[offer.side].size() >= CONTAINER_MAX_PANES)
         return {false, "This side already has five apps. Remove an app before adding another."};
-    if (Fullscreen::controller()->hasFullscreen(window->m_workspace))
+    if (Fullscreen::controller()->hasFullscreen(window->m_workspace) &&
+        (p->providerEpoch != FloatingCards::EPOCH || !before->contains(Fullscreen::controller()->getFullscreenWindow(window->m_workspace))))
         return {false, "Leave fullscreen before adding an app."};
     const auto marked = m_marked;
     const bool floating = window->m_isFloating;
     const auto box = window->geometricBox(IGeometric::GEOMETRIC_GOAL);
-    const bool chilled = window->m_ruleApplicator->m_tagKeeper.isTagged("chillmode");
+    // A chilled card floats; a chilled app joins it as it is. Otherwise Chill
+    // hands the app back to tiling before it joins a tiled card.
+    const bool cardChilled = std::ranges::any_of(before->windows(), [](const auto &member) {
+        return member->m_ruleApplicator->m_tagKeeper.isTagged("chillmode");
+    });
+    const bool chilled = !cardChilled && window->m_ruleApplicator->m_tagKeeper.isTagged("chillmode");
     // Keep the existing card workspace protected while the incoming app changes
     // float mode. This is the same public handoff used by the guided picker.
     if (chilled) {
@@ -612,8 +626,15 @@ std::string Controller::animationFallback(PHLWINDOW a, PHLWINDOW b) const {
     return {};
 }
 
-Result Controller::mark() {
+Result Controller::mark(const std::string &target) {
+    // An address marks without focusing, so a fullscreen card can take an app
+    // that focusing would otherwise pull the card out of fullscreen for.
     auto w = Desktop::focusState()->window();
+    if (!target.empty()) {
+        w = nullptr;
+        for (const auto &candidate : Desktop::windowState()->windows())
+            if (address(candidate) == quote(target)) w = candidate;
+    }
     if (find(w))
         return {false, "Release this window from its Hyprflip card before marking it."};
     if (auto error = unavailable(w); !error.empty())
@@ -945,7 +966,7 @@ Result Controller::attach(bool vertical) {
     if (s->faces[s->active].size() >= CONTAINER_MAX_PANES)
         return {false, "This side already has five apps. Remove an app before adding another."};
     for (const auto &member : s->windows())
-        if (Fullscreen::controller()->isFullscreen(member.lock()))
+        if (p->providerEpoch != FloatingCards::EPOCH && Fullscreen::controller()->isFullscreen(member.lock()))
             return {false, "Leave fullscreen before attaching to this container."};
     if ((w->m_isFloating && p->providerEpoch != FloatingCards::EPOCH) || w->m_workspace != s->focused[s->active]->m_workspace)
         return {false, "Tile the marked window on the same workspace before attaching it."};
@@ -998,7 +1019,7 @@ Result Controller::replacePane(const std::string &arguments) {
     if ((next->m_isFloating && p->providerEpoch != FloatingCards::EPOCH) || next->m_workspace != old->m_workspace)
         return {false, "Tile the replacement on the card workspace first."};
     for (const auto &w : s->windows())
-        if (Fullscreen::controller()->isFullscreen(w.lock()))
+        if (p->providerEpoch != FloatingCards::EPOCH && Fullscreen::controller()->isFullscreen(w.lock()))
             return {false, "Leave fullscreen before replacing an app."};
     auto api = provider(p->providerEpoch);
     m_mutating = true;
@@ -1056,6 +1077,31 @@ Result Controller::workspace(uint32_t destination, bool follow) {
     reconcile();
     return {ok, ok ? "ok" : "The card could not move to that workspace. Hy3 cards require a hy3 destination."};
 }
+std::optional<CBox> Controller::cardBox(const std::string &window) const {
+    if (m_stopping) return std::nullopt;
+    for (const auto& pair : m_pairs) {
+        const auto card = state(pair);
+        if (!card) continue;
+        for (const auto& w : card->windows())
+            if (address(w.lock()) == quote(window)) return card->geometry;
+    }
+    return std::nullopt;
+}
+bool Controller::placeCard(const std::string &window, CBox box) {
+    if (m_stopping || m_mutating || inputBusy()) return false;
+    for (auto& pair : m_pairs) {
+        const auto card = state(pair);
+        if (!card || pair.providerEpoch != FloatingCards::EPOCH ||
+            std::ranges::none_of(card->windows(), [&](const auto& w) { return address(w.lock()) == quote(window); }))
+            continue;
+        finish();
+        m_mutating = true;
+        const bool ok = FloatingCards::place(pair.containerID, box);
+        m_mutating = false;
+        return ok;
+    }
+    return false;
+}
 bool Controller::protectsWorkspace(uint32_t workspace) const {
     if (!workspace || m_stopping) return false;
     if (m_movingWorkspace == workspace) return true;
@@ -1066,6 +1112,24 @@ bool Controller::protectsWorkspace(uint32_t workspace) const {
         const auto card = state(pair);
         if (card && card->focused[0] && card->focused[0]->m_workspace &&
             card->focused[0]->m_workspace->m_id == workspace) return true;
+    }
+    return false;
+}
+bool Controller::blocksChill(uint32_t workspace) const {
+    if (!workspace || m_stopping) return false;
+    if (m_movingWorkspace == workspace) return true;
+    for (const auto& [token, reservation] : m_reservations)
+        if (reservation.workspace == workspace && reservation.until > Clock::now()) return true;
+    for (const auto& pair : m_pairs) {
+        if (!pair.containerID) continue;
+        const auto card = state(pair);
+        if (!card || !card->focused[0] || !card->focused[0]->m_workspace ||
+            card->focused[0]->m_workspace->m_id != workspace) continue;
+        // Chill floats a native card as one window, both faces sharing its
+        // frame. hy3 cards and fullscreen cards stay out of Chill.
+        if (pair.providerEpoch != FloatingCards::EPOCH ||
+            std::ranges::any_of(card->windows(), [](const auto& w) { return Fullscreen::controller()->isFullscreen(w.lock()); }))
+            return true;
     }
     return false;
 }
@@ -1244,6 +1308,18 @@ void Controller::onFrame(PHLMONITOR monitor) {
     }
     m_timer->updateTimeout(std::chrono::milliseconds(250));
 }
+Result Controller::fullscreen() {
+    if (inputBusy()) return {false, "Finish the active grab or drag before changing fullscreen."};
+    auto p = find(Desktop::focusState()->window());
+    if (!p || !p->containerID || p->providerEpoch != FloatingCards::EPOCH)
+        return {false, "Focus an app in a multi-app card to fullscreen the card."};
+    finish();
+    m_mutating = true;
+    const bool ok = FloatingCards::fullscreen(p->containerID);
+    m_mutating = false;
+    reconcile();
+    return {ok, ok ? "ok" : "The card could not change fullscreen."};
+}
 Result Controller::floating() {
     if (inputBusy()) return {false, "Finish the active drag before changing the card mode."};
     auto p = find(Desktop::focusState()->window());
@@ -1295,6 +1371,7 @@ Result Controller::action(const std::string &action) {
 Result Controller::dispatch(const std::string &action) {
     reconcile();
     if (action == "floating") return floating();
+    if (action == "fullscreen") return fullscreen();
     std::erase_if(m_reservations, [](const auto& entry) { return entry.second.until <= Clock::now(); });
     if (action.starts_with("reserve ")) {
         std::istringstream args(action.substr(8));
@@ -1322,6 +1399,8 @@ Result Controller::dispatch(const std::string &action) {
     m_peek.reset();
     if (action == "mark")
         return mark();
+    if (action.starts_with("mark 0x"))
+        return mark(action.substr(5));
     if (action == "pair")
         return pair();
     if (action == "card")
@@ -1410,6 +1489,8 @@ std::string Controller::status() {
                        ",\"card_gap\":" + std::to_string(m_settings.cardGap->value()) +
                        ",\"accent_ring\":" + (m_settings.accentRing->value() ? "true" : "false") +
                        ",\"accent_color\":" + quote(parseAccent(m_settings.accentColor->value()) ? m_settings.accentColor->value() : "") +
+                       ",\"fullscreen_divider\":" + std::to_string(m_settings.fullscreenDivider->value()) +
+                       ",\"divider_color\":" + quote(parseAccent(m_settings.dividerColor->value()) ? m_settings.dividerColor->value() : "") +
                        ",\"drag_to_add\":" + (m_settings.dragToAdd->value() ? "true" : "false") +
                        ",\"fullscreen_focus\":" + (FloatingCards::focusShared() ? "true" : "false") +
                        ",\"drop_targets\":" + (m_drop ? m_drop->status() : "[]") +
@@ -1455,7 +1536,8 @@ std::string Controller::status() {
             }
             json += ']';
         }
-        json += "],\"native_group\":" + std::string(p.providerEpoch == FloatingCards::EPOCH ? "true" : "false") + ",\"floating\":" + std::string(s->focused[s->active]->m_isFloating ? "true" : "false") + ",\"layouts\":[";
+        json += "],\"native_group\":" + std::string(p.providerEpoch == FloatingCards::EPOCH ? "true" : "false") +
+                ",\"fullscreen\":" + std::string(std::ranges::any_of(s->windows(), [](const auto &w) { return Fullscreen::controller()->isFullscreen(w.lock()); }) ? "true" : "false") + ",\"floating\":" + std::string(s->focused[s->active]->m_isFloating ? "true" : "false") + ",\"layouts\":[";
         for (unsigned side = 0; side < 2; ++side) {
             if (side) json += ',';
             json += "{\"axis\":" + quote(s->vertical[side] ? "vertical" : "horizontal") +

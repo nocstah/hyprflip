@@ -55,13 +55,16 @@ def main():
     if not args.backend_only and available != 'true':
         raise SystemExit('Update Hyprflip to a build with card controls first.')
     preferences = shortcuts.read(workflow.Hyprctl())
+    # Cores with whole-card fullscreen report its divider width.
+    fullscreen = type(state.get('fullscreen_divider')) is int
     expected_chords = set() if args.backend_only else {preferences.get(i, (76, k)) for i, k in
-        (('create', 'O'), ('edit', 'C'), ('library', 'L'), ('find', 'K'), ('peek', 'space'))}
+        (('create', 'O'), ('edit', 'C'), ('library', 'L'), ('find', 'K'), ('peek', 'space'))
+        + ((('fullscreen', 'Return'),) if fullscreen else ())}
     if args.mouse_flip: expected_chords.add((76, 'mouse:274'))
     conflicts = [b for b in json.loads(ctl('-j', 'binds')) if (b['modmask'], b['key'].lower()) in {(m, k.lower()) for m, k in expected_chords}
                  and not b.get('description', '').startswith('Hyprflip:')]
     if conflicts:
-        keys = ', '.join('Super+Ctrl+Alt+' + b['key'].upper() for b in conflicts)
+        keys = ', '.join(shortcuts.label(b['modmask'], b['key'].upper() if len(b['key']) == 1 else b['key']) for b in conflicts)
         raise SystemExit(keys + ' is assigned to another action; resolve that conflict first.')
     content = main_config.read_text()
     bootstrap = (project / 'examples/module-path.lua').read_text()
@@ -98,6 +101,7 @@ def main():
         print('Super+Ctrl+Alt+L: search saved cards; Enter opens or switches directly.')
         print('Super+Ctrl+Alt+K: find an app on either face of any open card.')
         if state.get('peek_available'): print('Super+Ctrl+Alt+Space: hold to peek; release to return.')
+        if fullscreen: print('Super+Ctrl+Alt+Return: fullscreen the whole card; press again to leave.')
     if args.mouse_flip: print('Super+Ctrl+Alt+middle-click: flip the focused card on release (optional).')
     if args.dry_run:
         return 0
@@ -128,6 +132,7 @@ def main():
         expected = [('O', 'Hyprflip: unfold, fold or create a card'), ('C', 'Hyprflip: edit card'),
                     ('L', 'Hyprflip: open saved card'), ('K', 'Hyprflip: find an app in cards')]
         if state.get('peek_available'): expected.append(('SPACE', 'Hyprflip: hold to peek at the other side'))
+        if fullscreen: expected.append(('Return', 'Hyprflip: fullscreen the whole card'))
         for key, description in ([] if args.backend_only else expected):
             ident = shortcuts.DESCRIPTIONS[description]
             mask, key = preferences.get(ident, (76, key))

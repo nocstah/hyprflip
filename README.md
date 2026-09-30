@@ -235,6 +235,7 @@ Hold **Super + Ctrl + Alt** for the following keys:
 | **Space**, held | Peek at the other side; release to return | Helper binding, or a custom core binding |
 | **H** / **V** | Attach a marked app beside / below the focused pane | Container bindings |
 | **E** | Release the focused pane | Container bindings |
+| **Return** | Fullscreen the whole dwindle or floating card; press again to leave | Guided helper |
 
 Use **K** when you remember the app, and **L** when you want a saved arrangement.
 Results in K show the workspace, face and whether the app is hidden.
@@ -283,6 +284,8 @@ hl.config({ plugin = { hyprflip = {
     card_gap = -1,       -- -1: desktop spacing; 12: compact; 0–128: custom empty gap
     accent_ring = false, -- true: accent-colored ring around every card
     accent_color = "",   -- "#RRGGBB"; empty follows the active border color
+    fullscreen_divider = 2, -- 0–16; line between a fullscreen card's apps, 0 lets them touch
+    divider_color = "",  -- "#RRGGBB"; empty follows accent_color, then the active border
     drag_to_add = true,  -- Drop outside windows onto a card’s temporary target
     perspective = 5.0,   -- 2–8; higher means less perspective
     retreat = 0.02,      -- 0–0.2
@@ -336,9 +339,10 @@ turn off these targets.
   the existing card is kept when a change is refused.
 - **Fullscreen and movement:** native pairs use native group behavior. Native
   dwindle and floating cards fullscreen as a whole card: the visible face fills
-  the screen and flip, peek, unfold and layout changes keep working. Leave
-  fullscreen before moving a card, adding or replacing apps, or flipping an hy3
-  container.
+  the screen, split by a thin accent divider, and flip, peek, unfold, layout
+  changes and adding, replacing or releasing apps keep working. Leave
+  fullscreen before moving a card, or flipping an hy3 container. With Omachill
+  adapter v2, Chill floats a native card as one window.
   Floating cards move and resize as a unit with normal desktop mouse bindings.
   Tiled card reordering uses the optional navigation bindings. Named/special-workspace
   card moves are not implemented.

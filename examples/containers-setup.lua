@@ -55,3 +55,13 @@ if hl.plugin.hyprflip and hl.plugin.hyprflip.peek then
     -- Hyprflip observes the triggering key’s physical release, including when the
     -- modifiers are released first. Clicking or typing keeps the visible side.
 end
+
+if hl.plugin.hyprflip and hl.plugin.hyprflip.fullscreen then
+    -- Whole-card fullscreen for dwindle and floating cards; apps keep their
+    -- own fullscreen state, so browsers keep their toolbars.
+    shortcuts.unbind("SUPER + CTRL + ALT + Return")
+    shortcuts.bind("SUPER + CTRL + ALT + Return", function()
+        local plugin = hl.plugin.hyprflip
+        if plugin and plugin.fullscreen then plugin.fullscreen() end
+    end, { description = "Hyprflip: fullscreen the whole card" })
+end

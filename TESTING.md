@@ -1,5 +1,32 @@
 # Validation
 
+## Fullscreen editing, card fullscreen and native-card Chill (2026-09-30)
+
+In a disposable nested session with only Hyprflip loaded,
+`tests/fullscreen_workflows.py` passes 13 checks, adding: apps joining,
+replacing and leaving a fullscreen card (marked by address); divider width 0/2/4
+and color; and the `fullscreen` action keeping apps unaware (`fullscreenClient`
+0) through flips and focus, with either toggle leaving and app sync restored.
+An app moved in from another workspace also joined a fullscreen card without
+ending fullscreen.
+
+`tests/chill_card_workflows.py` passes 8 checks against Omachill 1.2 prepared by
+adapter v2: native card workspaces are open to Chill while `protects_workspace`
+still protects them for v1 engines; Chill floats the card at exactly 80% of its
+tile with every app tagged; flip, unfold and fold keep the chilled frame;
+tiling back restores the slot; a fullscreen card blocks Chill; chilled apps join
+and leave a chilled card; unload releases every app. The adapter produces the
+same engine from a pristine source and from a v1-patched one, and is idempotent.
+
+`tests/chill_workflows.py` (hy3) passes its first five checks with the v1
+engine; its injected pair-failure check fails identically on the previous
+commit's code and helpers, so it predates these changes. 199 Python tests pass.
+
+```sh
+python3 tests/chill_card_workflows.py /tmp/hf-fs/session.json \
+  --engine /path/to/chillmode-prepared-by-adapter-v2.lua
+```
+
 ## Whole-card fullscreen (2026-09-30)
 
 Native dwindle and floating cards fullscreen as a whole card. The new

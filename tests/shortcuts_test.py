@@ -62,6 +62,16 @@ class ShortcutsTest(unittest.TestCase):
         self.assertEqual(shortcuts.read(self.ipc), {'flip': (65, 'F9')})
         self.assertEqual(self.ipc.binds[0]['key'], 'F9')
 
+    def test_card_fullscreen_row_defaults_to_return_and_is_editable(self):
+        self.ipc.binds = [{'description': 'Hyprflip: fullscreen the whole card', 'key': 'Return', 'modmask': 76}]
+        row = next(r for r in shortcuts.snapshot(self.ipc)['rows'] if r['id'] == 'fullscreen')
+        self.assertEqual((row['default_mask'], row['default_key'], row['shortcut']), (76, 'Return', 'Super+Ctrl+Alt+Return'))
+        self.assertTrue(row['editable'])
+        self.assertEqual(shortcuts.save(self.ipc, 'fullscreen', 76, 'F11'), 'Fullscreen whole card: Super+Ctrl+Alt+F11')
+        self.assertEqual(shortcuts.read(self.ipc), {'fullscreen': (76, 'F11')})
+        lua = (Path(__file__).resolve().parents[1] / 'examples/shortcuts.lua').read_text()
+        self.assertIn('["fullscreen the whole card"]="fullscreen"', lua)
+
     def test_rejects_injection_modifiers_and_unknown_keysyms(self):
         for mask, key in ((True, 'F'), (0, 'F'), (1, 'F'), (256, 'F'), (64, 'F);os.exit()'),
                           (64, 'made_up_key'), (64, 'Super_L')):

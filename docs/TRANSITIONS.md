@@ -54,7 +54,18 @@ O can offer to tile floating apps when creating a card; collect choices before
 mutation and restore floating state on a failed creation. Protection must expire
 or be released after cancellation, helper failure, card removal or plugin unload.
 
-The optional adapter targets Omachill 1.2.0. Prepare a copy with:
+Adapter v2 lets Chill take workspaces with native dwindle cards. Chill
+measures such a card with `hl.plugin.hyprflip.card_box(address)` rather than
+its visible pane, floats it in place as one window with
+`hl.plugin.hyprflip.card_place(address, x, y, w, h)`, and converts tile-back
+resizes from the card to that pane. Both faces share the chilled frame, so
+flipping keeps its size; tiling back returns the card to its slot. Chill
+decisions ask `hl.plugin.hyprflip.chill_blocked(id)`, which stays true for hy3
+cards, fullscreen cards, reservations and moves. App handoff still requires
+`protects_workspace`. A v1 engine keeps every card workspace tiled.
+
+The optional adapter targets Omachill 1.2.0 and upgrades an engine that
+already carries the v1 guard. Prepare a copy with:
 
 ```sh
 python integrations/omachill/prepare-source.py /path/to/omachill/chillmode.lua /tmp/chillmode-with-hyprflip.lua

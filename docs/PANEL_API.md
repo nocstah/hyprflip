@@ -11,7 +11,8 @@ use `--backend-only` to install the helper and preference loader without the
 container bindings. This update changes Python and Lua files, not native
 compositor libraries. The Lua preference loader accepts only known transition
 names, integer durations from 0 to 2000 milliseconds, known appearance names,
-and integer card gaps from -1 to 128 logical pixels.
+integer card gaps from -1 to 128 logical pixels, `#RRGGBB` accent and divider
+colors, and integer fullscreen dividers from 0 to 16 pixels.
 
 ## Local JSON protocol 1
 
@@ -40,7 +41,7 @@ card. Saved-card operations include `name` and `recipe_token` from its row.
 
 | Action | Additional fields |
 | --- | --- |
-| `flip`, `unfold`, `floating` | `target` |
+| `flip`, `unfold`, `floating`, `fullscreen` | `target` |
 | `preview` | `target`, `mode` |
 | `edit` | `target`, `face` (0/1), optional `pane` address and `intent` |
 | `create` | Uses the original focused app |
@@ -50,6 +51,8 @@ card. Saved-card operations include `name` and `recipe_token` from its row.
 | `shortcut` | `binding` action ID, integer modifier `mask`, XKB `key` |
 | `appearance` | `style`: `classic` or `frame` |
 | `spacing` | Integer `gap`: -1 for Desktop spacing, or 0–128 logical pixels |
+| `accent` | Boolean `enabled`, optional `color` (`#RRGGBB`) |
+| `divider` | Integer `width`, 0–16; optional `color` (`#RRGGBB`, or empty to follow the accent) |
 
 Editor intents are stable IDs: add, replace, remove, other_side, previous, next,
 horizontal, vertical, balance, save, manage, repair, unpair. An empty intent
@@ -107,5 +110,19 @@ preferences apply to existing cards without changing their membership.
 first when enabling. `control.py accent-color --color '#RRGGBB'` updates only
 the color, without a panel request, so a shell can follow its theme; unchanged
 colors are not rewritten or dispatched. Both values persist like spacing.
+`fullscreen` toggles whole-card fullscreen for a native (dwindle or floating)
+multi-app card, targeted like `floating`; hy3 cards and two-window groups are
+refused. Apps are not told they are fullscreen, so browsers keep their toolbars.
+Cards report `fullscreen` and `native` (a dwindle or floating card that can
+fullscreen as a whole); `capabilities.fullscreen` gates the control. While a
+native card is fullscreen, the helper keeps editing it (flip, unfold, layout,
+add, replace, remove) and marks an added app by address so focus never leaves
+the card; ungrouping and reopening missing apps wait until it leaves fullscreen.
+`capabilities.divider` gates the divider between a fullscreen card's apps.
+Snapshots expose `fullscreen_divider` (0–16 pixels; 0 lets the apps touch) and
+`divider_color` (`#RRGGBB`, or empty to follow `accent_color`, then the active
+border). The `divider` action takes `width` and an optional `color`, applied
+first; both persist like spacing. Both capabilities are true only on cores that
+report `fullscreen_divider`.
 `capabilities.drag_to_add` reports whether the compositor's temporary drop
 targets are enabled; dragging stays a native compositor interaction.

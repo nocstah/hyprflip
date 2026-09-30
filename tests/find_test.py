@@ -113,5 +113,21 @@ class FindTest(unittest.TestCase):
         ipc.snapshot['containers'] = []
         with self.assertRaisesRegex(w.SetupError, 'No cards are open'): w.Find(ipc, Picker()).prepare()
 
+    def test_fullscreen_native_card_reveals_its_own_apps_but_hy3_waits(self):
+        for native in (True, False):
+            with self.subTest(native=native):
+                ipc = IPC()
+                card = ipc.snapshot['containers'][0]
+                card.update(native_group=native, fullscreen=True)
+                ipc.clients['0xa']['fullscreen'] = 2
+                flow = w.Find(ipc, Picker('0xc'))
+                plan = flow.prepare()
+                if native:
+                    flow.apply(plan)
+                    self.assertEqual(ipc.mutations, [('focus', '0xa'), ('action', 'flip'), ('focus', '0xc')])
+                else:
+                    with self.assertRaisesRegex(w.SetupError, 'Leave fullscreen'): flow.apply(plan)
+                    self.assertEqual(ipc.mutations, [])
+
 
 if __name__ == '__main__': unittest.main()

@@ -13,6 +13,40 @@
   setting. Leaving fullscreen restores the card's tile or floating frame.
   hy3 cards keep the previous single-app fullscreen. Status reports
   `fullscreen_focus` and `card_dividers`.
+- Add, replace, release and drag apps into a fullscreen native card without
+  leaving fullscreen. `hyprflip mark 0x<address>` marks an app without
+  focusing it, since focusing an outside app would end fullscreen.
+- `fullscreen_divider` (0–16 px, default 2; 0 lets apps touch) and
+  `divider_color` (`#RRGGBB`; empty follows `accent_color`, then the active
+  border) style the line between fullscreen apps.
+- A `fullscreen` action (Lua `hyprflip.fullscreen()`) fills the screen with
+  the whole card without telling the apps they are fullscreen, so browsers
+  keep their toolbars. It follows flips and focus; the action or the normal
+  fullscreen toggle leaves. Status reports each card's `fullscreen`.
+- Chill mode can take a workspace that holds native dwindle cards. The card
+  floats in place as one chilled window at the chilled size, both faces
+  sharing that frame, and tiles back into its slot. New `chill_blocked`,
+  `card_box` and `card_place` Lua functions support Omachill adapter v2
+  (`integrations/omachill/prepare-source.py`, which also upgrades a v1
+  engine). `protects_workspace` is unchanged, so engines with only the v1
+  guard still keep card workspaces tiled. hy3 cards and fullscreen cards stay
+  out of Chill.
+- Helper and panel: add a `fullscreen` panel action (targeted like `floating`,
+  native dwindle/floating cards only) and a `divider` action (`width` 0–16,
+  optional `color` `#RRGGBB` or empty to follow the accent). Snapshots report
+  `capabilities.fullscreen`/`capabilities.divider`, `fullscreen_divider`,
+  `divider_color`, and per-card `fullscreen` and `native`. The divider width
+  and color persist in `$XDG_STATE_HOME/hyprflip` with rollback on failure and
+  are reapplied at login by `preferences.lua`.
+- Guided setup binds **Super+Ctrl+Alt+Return** to fullscreen the whole card
+  (on cores that support it), checks it for conflicts, and lists it in the
+  shortcut editor as **Fullscreen whole card**.
+- Keep editing a fullscreen native card from the helper: flip, unfold, layout,
+  add, replace, remove and Find app no longer ask you to leave fullscreen when
+  the only fullscreen app on the workspace belongs to that card. Added apps are
+  marked by address (`hyprflip mark 0x…`) so focus never leaves the card.
+  hy3 cards, unrelated fullscreen apps, ungrouping and reopening missing apps
+  still require leaving fullscreen first.
 - Add an optional accent ring around every card, in Classic tabs and Card
   frame appearances. `accent_ring` turns it on; `accent_color` (`#RRGGBB`) sets
   its color. The focused card's ring is fully opaque and other cards' rings are

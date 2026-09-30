@@ -257,13 +257,14 @@ std::vector<CardFrames::Layout> CardFrames::layouts() const {
                 panes.push_back(box);
                 layout.anchor = w;
             }
-            const auto between = [](const CBox &a, const CBox &b, bool vertical) -> std::optional<CBox> {
+            const double thickness = layout.view.dividerWidth;
+            const auto between = [thickness](const CBox &a, const CBox &b, bool vertical) -> std::optional<CBox> {
                 const double end = vertical ? a.y + a.h : a.x + a.w, start = vertical ? b.y : b.x;
                 const double low = vertical ? std::max(a.x, b.x) : std::max(a.y, b.y);
                 const double high = vertical ? std::min(a.x + a.w, b.x + b.w) : std::min(a.y + a.h, b.y + b.h);
-                if (start < end - .5 || start - end > FloatingCards::FULLSCREEN_DIVIDER + 1 || high - low < 1)
+                if (start < end - .5 || start - end > thickness + 1 || high - low < 1)
                     return {};
-                const double width = std::max(FloatingCards::FULLSCREEN_DIVIDER, start - end);
+                const double width = std::max(thickness, start - end);
                 return vertical ? CBox{low, end, high - low, width} : CBox{end, low, width, high - low};
             };
             for (const auto &a : panes)

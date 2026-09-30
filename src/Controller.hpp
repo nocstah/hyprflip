@@ -15,10 +15,10 @@
 
 namespace Hyprflip {
 struct Settings {
-    SP<Config::Values::Int> duration, cardGap;
+    SP<Config::Values::Int> duration, cardGap, fullscreenDivider;
     SP<Config::Values::Bool> enabled, notifications, cardFrame, dragToAdd, accentRing;
     SP<Config::Values::Float> perspective, retreat;
-    SP<Config::Values::String> transition, accentColor;
+    SP<Config::Values::String> transition, accentColor, dividerColor;
 };
 struct Result {
     bool ok;
@@ -33,10 +33,17 @@ class Controller {
     std::string status();
     bool inContainer();
     bool protectsWorkspace(uint32_t workspace) const;
+    // Narrower than protectsWorkspace: native cards may chill as one window.
+    bool blocksChill(uint32_t workspace) const;
+    // The whole card's rectangle for any of its apps, so tools that treat a
+    // group as one window (Chill) can measure the card instead of one pane.
+    std::optional<CBox> cardBox(const std::string &window) const;
+    bool placeCard(const std::string &window, CBox box);
     void notify(const Result &result);
 
   private:
     Result floating();
+    Result fullscreen();
     struct Pair {
         uint64_t id;
         std::array<PHLWINDOWREF, 2> windows;
@@ -91,7 +98,7 @@ class Controller {
     void select(Pair &pair, unsigned index, bool focus = true);
     void damage(const Pair &pair);
     void detach();
-    Result mark();
+    Result mark(const std::string &target = {});
     Result pair(bool multiApp = false);
     Result adopt(const std::string &front, const std::string &back);
     Result flip(std::optional<Transition> preview = std::nullopt);

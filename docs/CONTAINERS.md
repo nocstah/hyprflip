@@ -194,7 +194,10 @@ This adds a small Python helper and
 [`examples/containers-setup.lua`](../examples/containers-setup.lua), loaded after
 the other Hyprflip bindings. It backs up affected files and installs
 **Super+Ctrl+Alt+O/C/L/K/Space** for guided creation, editing, saved-card launching
-finding open card apps and hold-to-peek. No compositor library is replaced or unloaded.
+finding open card apps and hold-to-peek, plus **Super+Ctrl+Alt+Return** to fullscreen
+the whole dwindle or floating card when the core supports it. While a card is
+fullscreen, editing, adding and removing apps keep it fullscreen; ungrouping and
+reopening missing apps wait until you leave. No compositor library is replaced or unloaded.
 
 - On an existing card, **O** still unfolds or folds immediately.
 - On an ungrouped app, **O** opens the automatically detected searchable menu. The focused
