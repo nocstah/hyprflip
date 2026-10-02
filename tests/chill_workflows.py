@@ -134,7 +134,8 @@ try:
     selected = flow.prepare(a)
     real_focused = ipc.focused
     def reject_pair(*operations):
-        if any(action == 'pair' for _, action in operations): raise setup.SetupError('Injected pair failure')
+        # Cores with native cards create them with `card`; older ones with `pair`.
+        if any(action in ('pair', 'card') for _, action in operations): raise setup.SetupError('Injected pair failure')
         return real_focused(*operations)
     ipc.focused = reject_pair
     try: flow.apply(selected)

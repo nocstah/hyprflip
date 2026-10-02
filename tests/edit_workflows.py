@@ -75,6 +75,17 @@ def spawn(name, gtk=False, minimum=None):
     return next(a for a, w in ipc.windows().items() if w['class'] == name)
 
 
+
+def settled():
+    """Status once window motion has finished; card frames follow animated positions."""
+    previous = ipc.status()
+    for _ in range(50):
+        time.sleep(.1)
+        current = ipc.status()
+        if current == previous: return deepcopy(current)
+        previous = current
+    raise AssertionError('Card status did not settle')
+
 try:
     assert not ipc.data('-j', 'plugin', 'list')
     for source, name in ((project / 'build/hyprflip.so', 'edit-hyprflip.so'),
@@ -93,11 +104,11 @@ hl.config({input={resolve_binds_by_sym=true}})
     pair(a, b)
     ipc.focus(d); ipc.action('mark'); ipc.focus(b); time.sleep(.4)
     for choices in ((None,), ('add', None)):
-        before, boxes = deepcopy(ipc.status()), geometry()
+        before, boxes = settled(), geometry()
         try: edit(b, *choices)
         except setup.Cancelled: pass
         else: raise AssertionError('Cancellation must abort the edit')
-        assert ipc.status() == before and geometry() == boxes and active() == b
+        assert settled() == before and geometry() == boxes and active() == b
     passed('cancelling either edit menu preserves card, geometry, focus and pending mark')
 
     edit(b, 'add', c)
@@ -108,7 +119,9 @@ hl.config({input={resolve_binds_by_sym=true}})
     try: setup.Edit(ipc, picker).prepare(c)
     except setup.Cancelled: pass
     assert '2 apps on this side' in picker.prompts[0][0]
-    assert [x.value for x in picker.prompts[0][1]] == ['add', 'release:' + c, 'release:' + b]
+    values = [x.value for x in picker.prompts[0][1]]
+    # Later releases added more card actions; adding and releasing each pane remain.
+    assert 'add' in values and [v for v in values if v.startswith('release:')] == ['release:' + c, 'release:' + b], values
     passed('adding an app targets the back, focuses the new pane and leaves room for a third app')
 
     edit(c, 'release:' + c)
@@ -138,7 +151,7 @@ hl.config({input={resolve_binds_by_sym=true}})
     ipc.focus(a)
     picker = Picker('unpair'); flow = setup.Edit(ipc, picker)
     flow.apply(flow.prepare(a))
-    assert picker.prompts[0][1][-1].label == 'Ungroup card'
+    assert [x.label for x in picker.prompts[0][1] if x.value == 'unpair'] == ['Ungroup card']
     assert not ipc.status()['containers'] and all(ipc.windows()[w]['acceptsInput'] for w in (a, b, c, d))
     passed('unfolded edits retain all live panes; removing the last app is explicitly an ungroup action')
 
@@ -146,21 +159,24 @@ hl.config({input={resolve_binds_by_sym=true}})
     flow = setup.Edit(ipc, Picker('add', c))
     selected = flow.prepare(b)
     ipc.call('dispatch', f'hl.dsp.window.move({{window="address:{c}",workspace="2",follow=false}})')
-    before = deepcopy(ipc.status())
+    before = settled()
     try: flow.apply(selected)
     except setup.SetupError: pass
     else: raise AssertionError('Moving a selected app must invalidate the edit')
-    assert ipc.status() == before and active() == b
+    assert settled() == before and active() == b
     ipc.call('dispatch', f'hl.dsp.window.move({{window="address:{c}",workspace="3",follow=false}})')
     selected = setup.Edit(ipc, Picker('add', c)).prepare(b)
-    ipc.action('flip'); before = deepcopy(ipc.status())
+    ipc.action('flip'); before = settled()
     try: flow.apply(selected)
     except setup.SetupError: pass
     else: raise AssertionError('Flipping while the picker is open must invalidate the edit')
-    assert ipc.status() == before and active() == a
+    assert settled() == before and active() == a
     passed('moving a selected app or flipping the card aborts a stale edit before mutation')
 
     module = (project / 'examples/containers-setup.lua').read_text()
+    # Installed setups provide this module next to the config; point at the repo's copy.
+    module = ('package.preload["hypr.hyprflip-preferences"] = function() return dofile('
+              + json.dumps(str(project / 'examples/preferences.lua')) + ') end\n' + module)
     spy = '''
 _G.hyprflip_edit_command = nil
 local hl = setmetatable({
@@ -172,7 +188,8 @@ local hl = setmetatable({
     subprocess.run(['wtype', '-M', 'logo', '-M', 'ctrl', '-M', 'alt', '-k', 'c',
                     '-m', 'alt', '-m', 'ctrl', '-m', 'logo'], env=env, check=True, timeout=5)
     wait(lambda: ipc.call('repl', 'return _G.hyprflip_edit_command ~= nil') == 'true')
-    assert "--edit '" + a + "'" in ipc.call('repl', 'return _G.hyprflip_edit_command')
+    # The shortcut opens the cards menu, which starts from the focused card.
+    assert ipc.call('repl', 'return _G.hyprflip_edit_command').endswith(" --cards")
     assert not card(a)['unfolded']
     subprocess.run(['wtype', '-M', 'logo', '-M', 'ctrl', '-M', 'alt', '-k', 'o',
                     '-m', 'alt', '-m', 'ctrl', '-m', 'logo'], env=env, check=True, timeout=5)
@@ -194,11 +211,11 @@ local hl = setmetatable({
     ipc.move(c, 5)
     ipc.focus(a); pair(a, b); ipc.focus(b)
     for choices in (('add', 'workspace:5', None), ('add', 'workspace:5', 'back', None)):
-        before = deepcopy(ipc.status())
+        before = settled()
         try: edit(b, *choices)
         except setup.Cancelled: pass
         else: raise AssertionError('Remote picker cancellation must abort')
-        assert ipc.status() == before and ipc.windows()[c]['workspace']['id'] == 5 and active() == b
+        assert settled() == before and ipc.windows()[c]['workspace']['id'] == 5 and active() == b
     passed('workspace submenus and Back are cancellable without moving any app or changing focus')
 
     edit(b, 'add', 'workspace:5', c)
@@ -229,6 +246,11 @@ local hl = setmetatable({
         def action(self, action):
             if action.startswith('attach '): raise setup.SetupError('Injected attachment failure')
             return super().action(action)
+        # The helper attaches inside a batched focus call.
+        def focused(self, *operations):
+            if any(action.startswith('attach ') for _, action in operations):
+                raise setup.SetupError('Injected attachment failure')
+            return super().focused(*operations)
     ipc.move(c, 5); ipc.move(d, 6); ipc.focus(a)
     flow = setup.Setup(RefuseAttach(env), Picker('workspace:5', c, 'workspace:6', d, 'create'))
     try: flow.apply(flow.prepare(a))

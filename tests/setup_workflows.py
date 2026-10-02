@@ -123,6 +123,9 @@ if hl.plugin.hyprflip then hl.config({plugin={hyprflip={notifications=false,dura
     # The shipped O callback must take the immediate native path for a card,
     # and capture the front's address when dispatching the helper for setup.
     module = (project / 'examples/containers-setup.lua').read_text()
+    # Installed setups provide this module next to the config; point at the repo's copy.
+    module = ('package.preload["hypr.hyprflip-preferences"] = function() return dofile('
+              + json.dumps(str(project / 'examples/preferences.lua')) + ') end\n' + module)
     spy = '''
 _G.hyprflip_setup_command = nil
 local hl = setmetatable({
@@ -161,16 +164,21 @@ local hl = setmetatable({
 
     class RefuseAttach(setup.Hyprctl):
         attachments = 0
+        def refuse(self):
+            self.attachments += 1
+            if self.attachments == 2:
+                raise setup.SetupError('The selected companion can no longer be attached.')
         def action(self, action):
-            if action.startswith('attach '):
-                self.attachments += 1
-                if self.attachments == 2:
-                    raise setup.SetupError('The selected companion can no longer be attached.')
+            if action.startswith('attach '): self.refuse()
             return super().action(action)
+        # The helper attaches inside a batched focus call.
+        def focused(self, *operations):
+            if any(action.startswith('attach ') for _, action in operations): self.refuse()
+            return super().focused(*operations)
     d = spawn('third-back')
     ipc.move(d, 5)
     ipc.focus(a)
-    refused = setup.Setup(RefuseAttach(env), Picker(b, c, 'workspace:5', d))
+    refused = setup.Setup(RefuseAttach(env), Picker(b, c, 'workspace:5', d, 'create'))
     try: refused.apply(refused.prepare(a))
     except setup.SetupError as error: assert 'can no longer be attached' in str(error)
     else: raise AssertionError('Attachment failure should be reported')

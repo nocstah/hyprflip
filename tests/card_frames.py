@@ -172,13 +172,18 @@ if hl.plugin.hyprflip then hl.config({plugin={hyprflip={duration_ms=0,notificati
     shutil.copy2(project / 'build/containers/core/motion_probe.so', probe)
     ipc.call('plugin', 'load', str(probe))
     try:
-        time.sleep(.4)
-        ipc.call('hf-motion-probe', 'start')
-        for _ in range(40):
-            ipc.status(); time.sleep(.025)
-        frames = [f for f in ipc.data('hf-motion-probe', 'stop') if f['monitor'] == output]
-        assert len(frames) < 15, len(frames)
-        passed(f'status polling does not cause idle redraws ({len(frames)} rendered frames during 40 polls)')
+        # Some outputs render continuously while idle (e.g. headless outputs
+        # on a second GPU), so compare polling with an idle baseline.
+        def rendered(poll):
+            time.sleep(.4)
+            ipc.call('hf-motion-probe', 'start')
+            for _ in range(40):
+                if poll: ipc.status()
+                time.sleep(.025)
+            return len([f for f in ipc.data('hf-motion-probe', 'stop') if f['monitor'] == output])
+        idle, polled = rendered(False), rendered(True)
+        assert polled < idle + 15, (idle, polled)
+        passed(f'status polling does not cause idle redraws ({polled} rendered frames during 40 polls, {idle} idle)')
     finally:
         ipc.call('plugin', 'unload', str(probe))
     ipc.focus(b); ipc.action('unfold')

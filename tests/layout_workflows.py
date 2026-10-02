@@ -109,11 +109,20 @@ try:
     else: raise AssertionError('Cannot leave an empty face')
     ipc.action('unfold')
     e = spawn('fifth'); attach(a, e)
+    # Fill the back to the five-app limit; moving a sixth there is refused.
+    extras = [spawn(name) for name in ('sixth', 'seventh')]
+    for extra in extras: attach(b, extra)
+    assert len(card()['faces'][1]) == 5
     ipc.focus(a); before = deepcopy(card())
     try: ipc.action('other_side')
-    except setup.SetupError as error: assert 'three apps' in str(error)
+    except setup.SetupError as error: assert 'five apps' in str(error), error
     else: raise AssertionError('Cannot overfill the other face')
     assert card() == before
+    for extra in extras:
+        ipc.call('dispatch', f'hl.dsp.window.close({{window="address:{extra}"}})')
+    deadline = time.monotonic() + 5
+    while card()['faces'][1] != [b, c, d] and time.monotonic() < deadline: time.sleep(.05)
+    assert card()['faces'] == [[a, e], [b, c, d]], card()
     passed('unfolded edits preserve both visible faces; empty sides and a fourth pane are refused without mutation')
 
     # A narrow surviving pane must not get a negative weight when another moves.

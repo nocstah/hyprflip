@@ -1,5 +1,26 @@
 # Validation
 
+## Workflow suites brought up to date (2026-10-02)
+
+The six suites that failed on both rc.3 and its baseline were test problems,
+not product bugs. After the fixes below, all 21 workflow suites pass in fresh
+nested sessions on the second GPU, against 0.3.0-rc.3 plus these tests.
+
+- Card frames (10): polling is compared with an idle baseline; headless outputs
+  on the second GPU render continuously (60 idle frames, 66 while polling
+  either `hyprctl version` or Hyprflip status).
+- Edit (14): status is compared once window motion settles (card frames follow
+  animated positions); menu checks allow the actions added since; the Edit
+  shortcut opens `--cards`; failure injection also covers attachments made
+  through the batched focus call.
+- Guided setup (7): the setup module gets `hypr.hyprflip-preferences`, which
+  installs provide; five-app faces need an explicit "create"; batched
+  attachments are injected too.
+- hy3 Chill (8): pair-failure injection also covers `card`, which cores with
+  native cards use.
+- Layout (6): the overfill check fills the other face to the five-app limit.
+- Containers (13): the scale/rotation rule is awaited; rules apply asynchronously.
+
 ## Full workflow regression for 0.3.0-rc.3 (2026-10-02)
 
 All suites below ran in fresh nested sessions on the AMD iGPU of an

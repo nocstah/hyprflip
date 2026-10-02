@@ -238,8 +238,9 @@ try:
     check("GPU captures across midpoint and reversal after midpoint")
 
     lua(f'hl.monitor({{output={json.dumps(monitor)},mode="1280x800@60",position="0x0",scale=1.6,transform=1}})')
-    output = next(m for m in json.loads(ctl('-j', 'monitors')) if m['name'] == monitor)
-    assert output['scale'] == 1.6 and output['transform'] == 1, output
+    # Monitor rules apply asynchronously; wait for the scale and rotation.
+    def output(): return next(m for m in json.loads(ctl('-j', 'monitors')) if m['name'] == monitor)
+    wait(lambda: output()['scale'] == 1.6 and output()['transform'] == 1)
     time.sleep(1)
     action("flip")
     assert status()["animating"], status()
