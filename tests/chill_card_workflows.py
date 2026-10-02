@@ -158,6 +158,21 @@ hl.config({general={gaps_in=14,gaps_out=24},animations={enabled=false},
     wait(lambda: not card()['floating'])
     passed('chilled apps join and leave a chilled card while it stays chilled')
 
+    # A card moved onto a chilled workspace joins it like a newly opened app.
+    ipc.focus(b); ipc.action('workspace 92')
+    wait(lambda: all(ipc.windows()[x]['workspace']['id'] == 92 for x in members()))
+    lua(f'chillmode.toggle({WS})')
+    wait(lambda: ipc.windows()[neighbor]['floating'])
+    ipc.focus(b); ipc.action(f'workspace {WS}')
+    wait(lambda: card()['floating'] and all(tagged(x) for x in members()))
+    assert all(ipc.windows()[x]['workspace']['id'] == WS for x in members())
+    screen = next(m for m in ipc.data('-j', 'monitors') if m['activeWorkspace']['id'] == WS)
+    joined = tuple(card()['box'])
+    assert inside(joined, (screen['x'], screen['y'], screen['width'] / screen['scale'], screen['height'] / screen['scale'])), joined
+    lua(f'chillmode.toggle({WS})')
+    wait(lambda: not card()['floating'] and not any(tagged(x) for x in members()))
+    passed('a card moved onto a chilled workspace joins Chill, then tiles back with it')
+
     ipc.call('plugin', 'unload', str(library)); loaded = False
     for x in (a, b, c):
         assert not ipc.windows()[x]['grouped']

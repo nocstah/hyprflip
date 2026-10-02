@@ -1062,22 +1062,33 @@ Result Controller::workspace(uint32_t destination, bool follow) {
     auto s = state(*p);
     if (!s)
         return {false, "This card changed. Pair its windows again."};
-    for (const auto& window : Desktop::windowState()->windows())
-        if (window->m_isMapped && window->m_isFloating && window->m_workspace &&
-            window->m_workspace->m_id == destination &&
-            window->m_ruleApplicator->m_tagKeeper.isTagged("chillmode"))
-            return {false, "Turn off Chill mode on workspace " + std::to_string(destination) +
-                           " before moving the card there. The card stayed in place."};
+    // A native card joins a chilled destination the way a new app does, when
+    // Chill (Omachill 1.5+) offers join. Otherwise the move is refused.
+    const bool chilled = std::ranges::any_of(Desktop::windowState()->windows(), [&](const auto& window) {
+        return window->m_isMapped && window->m_isFloating && window->m_workspace && window->m_workspace->m_id == destination &&
+            window->m_ruleApplicator->m_tagKeeper.isTagged("chillmode");
+    });
+    const bool joins = chilled && p->providerEpoch == FloatingCards::EPOCH &&
+        HyprlandAPI::invokeHyprctlCommand("repl", "return tostring(chillmode ~= nil and chillmode.join ~= nil)").starts_with("true");
+    if (chilled && !joins)
+        return {false, "Turn off Chill mode on workspace " + std::to_string(destination) +
+                       " before moving the card there. The card stayed in place."};
     for (const auto &w : s->windows())
         if (Fullscreen::controller()->isFullscreen(w.lock()))
             return {false, "Leave fullscreen before moving this container."};
     auto api = provider(p->providerEpoch);
+    const auto id = p->id;
     m_movingWorkspace = destination;
     m_mutating = true;
     const bool ok = api && api->workspace(p->containerID, destination, follow);
     m_mutating = false;
     m_movingWorkspace.reset();
     reconcile();
+    // reconcile() may drop pairs; look the card up again.
+    if (auto *moved = ok && joins ? find(id) : nullptr)
+        if (const auto card = state(*moved))
+            HyprlandAPI::invokeHyprctlCommand("eval", "if chillmode and chillmode.join then chillmode.join(" +
+                                                          address(card->focused[card->active]) + ") end");
     return {ok, ok ? "ok" : "The card could not move to that workspace. Hy3 cards require a hy3 destination."};
 }
 std::optional<CBox> Controller::cardBox(const std::string &window) const {

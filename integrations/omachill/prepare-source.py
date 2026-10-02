@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Add the optional Hyprflip integration to Omachill 1.2 without vendoring its engine.
 
-Omachill 1.4.0 includes it already; this adapter leaves such engines unchanged.
+Omachill 1.5.0 includes all of it (1.4.0 lacks v4); this adapter leaves 1.5.0 unchanged.
 
 v1 guards protected card workspaces; v2 measures a native card as one window, so
 Chill floats and tiles it back whole. Each step applies once and upgrades a
@@ -13,6 +13,7 @@ from pathlib import Path
 MARKER = '-- Hyprflip workspace protection v1'
 GEOMETRY = '-- Hyprflip card geometry v2'
 FULLSCREEN = '-- Hyprflip fullscreen chill v3'
+JOIN = '-- Hyprflip card join v4'
 
 
 def prepare(source):
@@ -22,7 +23,26 @@ def prepare(source):
         source = geometry(source)
     if FULLSCREEN not in source:
         source = fullscreen(source)
+    if JOIN not in source:
+        source = join(source)
     return source
+
+
+def join(source):
+    state, replace = replacer(source)
+    replace('_G.chillmode = { hold_workspace = hold_workspace,', '''-- Hyprflip card join v4
+-- A card Hyprflip moved onto a chilled workspace joins it the way a newly
+-- opened app does: tagged, floating, at the chilled size among the others.
+local function join(address)
+  local w = hl.get_window("address:" .. address)
+  if not w or not w.mapped or not w.workspace or w.workspace.special then return false end
+  if #windows_on(w.workspace, chilled) == 0 or card_workspace(w.workspace) then return false end
+  guarded(function() float_into(w, w.workspace) end)
+  return true
+end
+
+_G.chillmode = { join = join, hold_workspace = hold_workspace,''')
+    return state['source']
 
 
 def fullscreen(source):

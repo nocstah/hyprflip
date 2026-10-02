@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- A native card moved onto a chilled workspace joins Chill like a newly opened
+  app instead of being refused, through Omachill's `chillmode.join` (1.5.0, or
+  adapter v4). hy3 cards and engines without `join` keep the refusal.
 - Omachill 1.4.0 includes the card integration (adapter v1–v3), so updating
   Omachill no longer drops it; `prepare-source.py` is only needed for older
   engines.

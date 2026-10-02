@@ -68,10 +68,10 @@ Adapter v3 lets Chill win over a fullscreen card: toggling Chill on its
 workspace leaves fullscreen first, then chills the card. A card that still
 cannot chill (hy3) gets its fullscreen back and Chill explains why.
 
-Omachill 1.4.0 and later include this integration (v1–v3), so updating
-Omachill keeps it. The adapter is only needed for older engines: it targets
-Omachill 1.2.0, upgrades an engine that already carries an earlier step, and
-leaves 1.4.0 unchanged. Prepare a copy with:
+Omachill 1.5.0 includes this integration (v1–v4; 1.4.0 has v1–v3), so
+updating Omachill keeps it. The adapter is only needed for older engines: it
+targets Omachill 1.2.0, upgrades an engine that already carries an earlier
+step, and leaves 1.5.0 unchanged. Prepare a copy with:
 
 ```sh
 python integrations/omachill/prepare-source.py /path/to/omachill/chillmode.lua /tmp/chillmode-with-hyprflip.lua
@@ -87,9 +87,11 @@ float or reposition apps. It resolves the optional plugin on every call and
 still works when Hyprflip is absent. Cards protect their normal workspaces.
 Creation and imports reserve their involved workspaces for at most 60 seconds;
 completion and cancellation release reservations. The updater uses bounded
-120-second holds while compositor libraries are replaced. Moving a card onto
-a workspace that already has chilled floaters asks you to turn off Chill there
-first and leaves the card in place.
+120-second holds while compositor libraries are replaced. Moving a native card onto
+a chilled workspace makes it join Chill like a newly opened app, through
+`chillmode.join` (adapter v4, Omachill 1.5.0). Without `join`, and for hy3
+cards, the move asks you to turn off Chill there first and leaves the card in
+place.
 
 Upgrade holds are stored briefly in the compositor's private runtime directory,
 keyed by its instance signature, and read once when the Chill engine loads.

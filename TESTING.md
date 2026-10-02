@@ -1,5 +1,12 @@
 # Validation
 
+## Cards joining a chilled workspace (2026-10-02)
+
+`tests/chill_card_workflows.py` passes 9 checks with the adapter-v4 engine,
+including a tiled card moved onto a chilled workspace: it floats inside the
+screen with every app tagged, and tiles back when Chill is turned off. With a
+v3 engine (no `join`) the same move is refused and the card stays in place.
+
 ## Workflow suites brought up to date (2026-10-02)
 
 The six suites that failed on both rc.3 and its baseline were test problems,
