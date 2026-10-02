@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Omachill 1.4.0 includes the card integration (adapter v1–v3), so updating
+  Omachill no longer drops it; `prepare-source.py` is only needed for older
+  engines.
 ## 0.3.0-rc.3 — 2026-10-02
 
 - Show Hyprflip's messages as desktop notifications through `notify-send`

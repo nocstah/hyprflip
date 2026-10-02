@@ -68,8 +68,10 @@ Adapter v3 lets Chill win over a fullscreen card: toggling Chill on its
 workspace leaves fullscreen first, then chills the card. A card that still
 cannot chill (hy3) gets its fullscreen back and Chill explains why.
 
-The optional adapter targets Omachill 1.2.0 and upgrades an engine that
-already carries the v1 guard. Prepare a copy with:
+Omachill 1.4.0 and later include this integration (v1–v3), so updating
+Omachill keeps it. The adapter is only needed for older engines: it targets
+Omachill 1.2.0, upgrades an engine that already carries an earlier step, and
+leaves 1.4.0 unchanged. Prepare a copy with:
 
 ```sh
 python integrations/omachill/prepare-source.py /path/to/omachill/chillmode.lua /tmp/chillmode-with-hyprflip.lua

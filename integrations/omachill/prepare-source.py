@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Add the optional Hyprflip integration to Omachill 1.2 without vendoring its engine.
 
+Omachill 1.4.0 includes it already; this adapter leaves such engines unchanged.
+
 v1 guards protected card workspaces; v2 measures a native card as one window, so
 Chill floats and tiles it back whole. Each step applies once and upgrades a
 source that already carries an earlier step.
