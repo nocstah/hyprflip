@@ -1,5 +1,50 @@
 # Validation
 
+## Full workflow regression for 0.3.0-rc.3 (2026-10-02)
+
+All suites below ran in fresh nested sessions on the AMD iGPU of an
+RTX 5090 desktop (`--aquamarine`, see below), against this release's core,
+hy3 provider and helper.
+
+Pass: dwindle (7), floating `--dwindle` (9), card interactions `--dwindle` (9),
+unfold (5), fullscreen (13), native-card Chill (8), card interactions hy3 (9),
+floating hy3 (9), native-pair integration (18, including GPU captures),
+opening (6), repair (9), peek (19), three panes (9), workflows with
+Hyprglass (10), card motion (5).
+
+Fail identically on the pre-work baseline `3449c39`, run the same way, so they
+are not regressions of this release: containers (the nested Wayland output
+ignores the 1.6× scale/rotation rule), edit (status after a cancelled edit),
+layout ("Cannot overfill the other face"), setup (the module test cannot
+`require("hypr.hyprflip-preferences")` in a bare session), card frames (66
+frames rendered during 40 idle status polls; limit 15) and the hy3 Chill
+injected pair-failure check. Menu and portable workflows were not run: no
+Fuzzel, Rofi or Wofi is installed.
+
+## Nested sessions on NVIDIA
+
+Most workflow suites add a headless 4K output. On an NVIDIA desktop the nested
+compositor allocates through the parent's NVIDIA GBM device, which cannot
+allocate buffers for headless outputs: every mode is rejected and the output
+stays 0×0. Third-party compositors cannot serve as the parent instead, because
+Aquamarine 0.15 requires `xdg_wm_base` and `wl_compositor` version 6.
+
+On a machine with a second (non-NVIDIA) GPU, build Aquamarine 0.15.0 with
+`tests/aquamarine-render-node.patch`, which lets `AQ_TEST_RENDER_NODE` choose
+the render node, and pass its build directory to the launcher. It is loaded
+only by the nested compositor through `LD_LIBRARY_PATH`:
+
+```sh
+git clone --branch v0.15.0 https://github.com/hyprwm/aquamarine /tmp/aq
+git -C /tmp/aq apply "$PWD/tests/aquamarine-render-node.patch"
+cmake -S /tmp/aq -B /tmp/aq/build -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build /tmp/aq/build
+python3 tests/nested_session.py --directory /tmp/hf-dw --aquamarine /tmp/aq/build
+```
+
+The launcher picks the first non-NVIDIA render node (override with
+`--render-node`) and Mesa's EGL vendor.
+
 ## Fullscreen editing, card fullscreen and native-card Chill (2026-09-30)
 
 In a disposable nested session with only Hyprflip loaded,

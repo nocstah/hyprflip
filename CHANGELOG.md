@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.3.0-rc.3 — 2026-10-02
+
 - Show Hyprflip's messages as desktop notifications through `notify-send`
   (mako on Omarchy), with a newer message replacing an older one, instead of
   Hyprland's notification bar. `desktop_notifications = false` restores the
