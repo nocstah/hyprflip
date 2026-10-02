@@ -121,6 +121,7 @@ def end():
     time.sleep(.18)
 
 
+probe = None
 try:
     assert not ipc.data('-j', 'plugin', 'list'), 'Use a fresh disposable session'
     for kind, filename in (('client-header', 'frame-pointer-protocol.h'), ('private-code', 'frame-pointer-protocol.c')):
@@ -244,7 +245,7 @@ finally:
         process.wait(timeout=5)
     config.write_text(original)
     ipc.call('reload')
-    ipc.call('plugin', 'unload', str(probe))
+    if probe: ipc.call('plugin', 'unload', str(probe))
     for target in reversed(loaded): ipc.call('plugin', 'unload', str(target))
     if output: ipc.call('output', 'remove', output)
     (root / 'card-interaction-results.json').write_text(json.dumps(checks, indent=2) + '\n')

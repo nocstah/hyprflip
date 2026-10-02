@@ -1,0 +1,14 @@
+diff --git a/src/backend/Wayland.cpp b/src/backend/Wayland.cpp
+index 8905adc..28e8e5e 100644
+--- a/src/backend/Wayland.cpp
++++ b/src/backend/Wayland.cpp
+@@ -455,6 +455,9 @@ bool Aquamarine::CWaylandBackend::initDmabuf() {
+ 
+     wl_display_roundtrip(waylandState.display);
+ 
++    // Test-only override: render on another GPU than the parent compositor's.
++    if (const char* node = getenv("AQ_TEST_RENDER_NODE"); node && *node)
++        drmState.nodeName = node;
+     if (!drmState.nodeName.empty()) {
+         drmState.fd = open(drmState.nodeName.c_str(), O_RDWR | O_NONBLOCK | O_CLOEXEC);
+         if (drmState.fd < 0) {

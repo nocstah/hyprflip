@@ -18,6 +18,9 @@ parser.add_argument("--directory", type=Path, required=True)
 demo_flags = parser.add_mutually_exclusive_group()
 demo_flags.add_argument("--containers", action="store_true", help="Open an interactive hy3 card demo")
 demo_flags.add_argument("--native-cards", action="store_true", help="Open an interactive dwindle card demo using only the core")
+parser.add_argument("--aquamarine", type=Path,
+                    help="Aquamarine build with tests/aquamarine-render-node.patch: render on a non-NVIDIA GPU (see TESTING.md)")
+parser.add_argument("--render-node", type=Path, help="render node for --aquamarine (default: first non-NVIDIA)")
 args = parser.parse_args()
 demo = args.containers or args.native_cards
 root = args.directory.resolve()
@@ -38,6 +41,27 @@ for directory in ("runtime", "config", "cache", "data", "state"):
     (root / directory).mkdir(mode=0o700, exist_ok=True)
 runtime = root / "runtime"
 env = os.environ.copy()
+processes = []
+
+
+def render_node():
+    """The first render node not driven by NVIDIA, whose GBM cannot allocate headless outputs."""
+    if args.render_node:
+        return args.render_node
+    for node in sorted(Path("/dev/dri").glob("renderD*")):
+        vendor = Path("/sys/class/drm") / node.name / "device/vendor"
+        if vendor.exists() and vendor.read_text().strip() != "0x10de":
+            return node
+    raise SystemExit("No non-NVIDIA render node found; pass --render-node")
+
+
+if args.aquamarine:
+    # NVIDIA's GBM cannot allocate buffers for headless outputs, which most
+    # workflow suites use. A patched Aquamarine renders on another GPU instead.
+    if not (args.aquamarine / "libaquamarine.so").exists():
+        raise SystemExit(f"No libaquamarine.so in {args.aquamarine}")
+    env.update(LD_LIBRARY_PATH=str(args.aquamarine), AQ_TEST_RENDER_NODE=str(render_node()),
+               __EGL_VENDOR_LIBRARY_FILENAMES="/usr/share/glvnd/egl_vendor.d/50_mesa.json")
 parent = Path(env.get("WAYLAND_DISPLAY", "wayland-1"))
 if not parent.is_absolute():
     parent = Path(env["XDG_RUNTIME_DIR"]) / parent
@@ -64,7 +88,6 @@ hl.config({
 })
 '''
 config.write_text(base_config)
-processes = []
 stopping = False
 def stop(signum, frame):
     global stopping
