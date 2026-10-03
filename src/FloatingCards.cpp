@@ -327,6 +327,23 @@ struct Card {
                     w->alpha(WINDOW_ALPHA_LAYOUT)->setValueAndWarp(shown ? 1.F : 0.F);
                 }
     }
+    // Focus raises only the focused window's own target, which is a pane
+    // inside the card. Raise every app of a floating card together (hidden
+    // face first, focused app last), so a turn never passes behind another
+    // window that sits between its faces.
+    void raise() {
+        if (!alive || !group || !group->m_target->floating())
+            return;
+        std::vector<PHLWINDOW> order;
+        for (unsigned s : {active ^ 1u, active})
+            for (auto &ref : faces[s])
+                if (auto w = ref.lock(); w && w != focused[active].lock())
+                    order.push_back(w);
+        if (auto w = focused[active].lock())
+            order.push_back(w);
+        for (const auto &w : order)
+            Desktop::windowState()->raise(w);
+    }
     void decos() {
         for (const auto &[_, p] : targets)
             if (auto w = p->window()) {
@@ -477,6 +494,7 @@ bool select(uint64_t id, uint32_t side, bool focus) {
     c->active = side;
     c->current(c->focused[side].lock());
     c->visibility();
+    c->raise();
     if (focus)
         Desktop::focusState()->fullWindowFocus(c->focused[side].lock(), Desktop::FOCUS_REASON_KEYBIND);
     return true;
@@ -883,6 +901,7 @@ void focused(PHLWINDOW w) {
             if (auto current = c->fullscreen(); current && current != w && c->valid())
                 c->current(w);
             c->visibility();
+            c->raise();
             return;
         }
 }

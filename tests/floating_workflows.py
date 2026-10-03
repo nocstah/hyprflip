@@ -101,6 +101,22 @@ try:
     assert card()['box'][2:]==[old_size[0]+100,old_size[1]+50], (old_size,card()['box']);visible()
     passed('moving and resizing either visible pane changes the shared outer frame')
 
+    # Focus raises the whole floating card, hidden face included, above other
+    # floating windows; a turn must never pass behind one of them.
+    def stack(): return [w['address'] for w in ipc.data('-j', 'clients') if w['address'] in (a, b, c, d)]
+    def named(): return [ipc.windows()[x]['class'].removeprefix('hyprflip-floating-') for x in stack()]
+    ipc.call('dispatch', f'hl.dsp.window.float({{window="address:{d}",action="enable"}})')
+    ipc.focus(d); assert stack()[-1] == d
+    ipc.focus(b)
+    members = [x for face in card()['faces'] for x in face]
+    assert stack().index(d) < min(stack().index(x) for x in members) and stack()[-1] == b, (named(), card()['faces'], card()['floating'])
+    ipc.action('flip')
+    assert stack().index(d) < min(stack().index(x) for x in members), stack()
+    assert stack()[-1] == card()['layouts'][card()['active']]['focused'], stack()
+    ipc.action('flip')
+    ipc.call('dispatch', f'hl.dsp.window.float({{window="address:{d}",action="disable"}})')
+    passed('focusing or flipping a floating card raises every app of both faces above other floating windows')
+
     for mode in ('flip','vertical','slide','fade','dissolve','portal'):
         ipc.call('eval',f'hl.config({{animations={{enabled=true}},plugin={{hyprflip={{duration_ms=120,transition="{mode}"}}}}}})')
         source=card()['active'];ipc.action('flip');wait(lambda:not ipc.status()['animating'])

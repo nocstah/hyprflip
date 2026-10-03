@@ -1,5 +1,15 @@
 # Validation
 
+## Floating cards stay on top while turning (2026-10-04)
+
+Reproduced on the second GPU with two overlapping floating cards: the focused
+top card was drawn under the other card, and its flip turned behind it.
+`tests/floating_workflows.py` now floats another window over a card, focuses
+and flips the card, and checks that every app of both faces is stacked above
+it with the focused app on top. Floating (dwindle 10, hy3 10), interactions
+(dwindle 9, hy3 9), fullscreen (13), native-card Chill (9) and card frames (10)
+pass.
+
 ## Cards joining a chilled workspace (2026-10-02)
 
 `tests/chill_card_workflows.py` passes 9 checks with the adapter-v4 engine,

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Fix a floating card turning behind another floating window. Focusing a card
+  raised only the focused pane's own target, so a card could stay under other
+  windows, and a flip passed behind them. Focus and face changes now raise
+  every app of the card together, focused app last.
 - A native card moved onto a chilled workspace joins Chill like a newly opened
   app instead of being refused, through Omachill's `chillmode.join` (1.5.0, or
   adapter v4). hy3 cards and engines without `join` keep the refusal.
