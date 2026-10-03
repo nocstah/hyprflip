@@ -21,6 +21,10 @@ jobs:
           /tmp/hyprflip-core-test
       - name: Test card helpers and installer recovery
         run: python3 -m unittest discover -s tests -p '*_test.py'
+      - name: Check Lua configuration syntax
+        run: |
+          sudo apt-get install -y --no-install-recommends lua5.4 >/dev/null
+          for file in examples/*.lua; do luac5.4 -p "$file"; done
       - name: Check Python syntax and plugin manifest
         run: |
           python3 -m compileall -q scripts tests
