@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.3.0-rc.4 — 2026-10-05
+
 - Super+J on a native card face with several apps flips them between beside
   and stacked, as it did for hy3 cards; elsewhere it is still Omarchy's
   split toggle. New `layout toggle` action and Lua `face_size()`; guided

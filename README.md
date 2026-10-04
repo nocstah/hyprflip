@@ -63,7 +63,7 @@ running shell, then automatically fall back to **Fuzzel, Rofi or Wofi**.
 | Guided menus and saved-card library | — | Optional helper: Omarchy shell, Fuzzel, Rofi or Wofi |
 | Installation | Supplied core installer or hyprpm | Core + optional helper; hy3 provider only for hy3 layouts |
 
-Native dwindle cards are available in the **0.3.0-rc.3 preview**. The five-app
+Native dwindle cards are available in the **0.3.0-rc.4 preview**. The five-app
 limit is Hyprflip's supported model. Try the [short beta checklist](docs/BETA.md)
 on a default Omarchy setup and report how installation and everyday use go.
 
