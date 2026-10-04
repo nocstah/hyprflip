@@ -1,5 +1,12 @@
 # Validation
 
+## Menu, portable and notification suites (2026-10-05)
+
+Run for the first time on this machine, in hy3 demo sessions on the second
+GPU (`--containers --aquamarine`) with Fuzzel installed: menu workflows pass
+with `--backend fuzzel` (2 checks; Rofi and Wofi are not installed), portable
+workflows pass (5), and notification workflows pass.
+
 ## Blur during snapshot transitions (2026-10-05)
 
 With translucent, blurred apps over dense text (foot needs
