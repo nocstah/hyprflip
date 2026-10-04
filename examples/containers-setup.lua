@@ -56,6 +56,21 @@ if hl.plugin.hyprflip and hl.plugin.hyprflip.peek then
     -- modifiers are released first. Clicking or typing keeps the visible side.
 end
 
+if hl.plugin.hyprflip and hl.plugin.hyprflip.face_size then
+    -- Omarchy's Super+J toggles the focused split, but on a native card the
+    -- layout only sees the whole card's tile. On a face with several apps,
+    -- flip that face between beside and stacked instead.
+    hl.unbind("SUPER + J")
+    hl.bind("SUPER + J", function()
+        local plugin = hl.plugin.hyprflip
+        if plugin and plugin.face_size and plugin.face_size() >= 2 then
+            plugin.layout("toggle")
+        else
+            hl.dispatch(hl.dsp.layout("togglesplit"))
+        end
+    end, { description = "Toggle window split" })
+end
+
 if hl.plugin.hyprflip and hl.plugin.hyprflip.fullscreen then
     -- Whole-card fullscreen for dwindle and floating cards; apps keep their
     -- own fullscreen state, so browsers keep their toolbars.

@@ -290,6 +290,12 @@ std::optional<Controller::State> Controller::state(const Pair &p) const {
     return result;
 }
 bool Controller::valid(const Pair &p) const { return state(p).has_value(); }
+size_t Controller::faceSize() {
+    reconcile();
+    const auto p = find(Desktop::focusState()->window());
+    const auto s = p && p->containerID ? state(*p) : std::nullopt;
+    return s ? s->faces[s->active].size() : 0;
+}
 bool Controller::inContainer() {
     reconcile();
     const auto p = find(Desktop::focusState()->window());
@@ -1455,6 +1461,13 @@ Result Controller::dispatch(const std::string &action) {
         return editContainer(ContainerEdit::Vertical);
     if (action == "layout balance")
         return editContainer(ContainerEdit::Balance);
+    if (action == "layout toggle") {
+        // Super+J on a card face: flip its apps between beside and stacked.
+        auto p = find(Desktop::focusState()->window());
+        const auto s = p && p->containerID ? state(*p) : std::nullopt;
+        if (!s) return {false, "Focus an app in a Hyprflip container first."};
+        return editContainer(s->vertical[s->active] ? ContainerEdit::Horizontal : ContainerEdit::Vertical);
+    }
     if (action.starts_with("arrange "))
         return arrangeFace(action.substr(8));
     if (action.starts_with("move ")) {
@@ -1484,7 +1497,7 @@ Result Controller::dispatch(const std::string &action) {
         return {true, "ok"};
     }
     return {false, "Unknown action. Use mark, pair, card, attach [horizontal|vertical], replace <old> <new>, release, unfold, "
-                   "layout <horizontal|vertical|balance>, other_side, "
+                   "layout <horizontal|vertical|balance|toggle>, other_side, "
                    "workspace <number> [silent], move <left|right|up|down>, cancel, "
                    "flip, peek [end], unpair, finish, or status."};
 }

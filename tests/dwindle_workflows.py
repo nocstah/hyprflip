@@ -138,6 +138,14 @@ hl.config({{general={{gaps_in=14,gaps_out=24}},animations={{enabled=false}},
     ipc.action('layout horizontal')
     windows = ipc.windows()
     assert windows[c]['at'][0] - windows[b]['at'][0] - windows[b]['size'][0] - 4 == 28, windows
+    # Super+J on a multi-app face flips it between beside and stacked.
+    assert ipc.call('repl', 'return hl.plugin.hyprflip.face_size()') == '2'
+    ipc.action('layout toggle')
+    windows = ipc.windows()
+    assert windows[c]['at'][1] > windows[b]['at'][1] and windows[c]['at'][0] == windows[b]['at'][0], windows
+    ipc.action('layout toggle')
+    windows = ipc.windows()
+    assert windows[c]['at'][0] - windows[b]['at'][0] - windows[b]['size'][0] - 4 == 28, windows
     capture('dwindle-back')
     passed('guided creation uses one native dwindle tile; panes retain desktop gaps beside a neighbor')
 

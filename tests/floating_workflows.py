@@ -115,6 +115,7 @@ try:
     assert stack()[-1] == card()['layouts'][card()['active']]['focused'], stack()
     ipc.action('flip')
     ipc.call('dispatch', f'hl.dsp.window.float({{window="address:{d}",action="disable"}})')
+    ipc.focus(b)
     passed('focusing or flipping a floating card raises every app of both faces above other floating windows')
 
     for mode in ('flip','vertical','slide','fade','dissolve','portal'):

@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Super+J on a native card face with several apps flips them between beside
+  and stacked, as it did for hy3 cards; elsewhere it is still Omarchy's
+  split toggle. New `layout toggle` action and Lua `face_size()`; guided
+  setup installs the binding.
+- Keep the background blurred behind translucent cards during slide, fade,
+  dissolve and portal. Those transitions draw a snapshot of the card, which
+  had turned blur off for every pane; the snapshot's leader now keeps its
+  blur and gives Hyprland a matte shaped like the turning card.
 - Fix a floating card turning behind another floating window. Focusing a card
   raised only the focused pane's own target, so a card could stay under other
   windows, and a flip passed behind them. Focus and face changes now raise

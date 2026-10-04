@@ -12,6 +12,11 @@ struct Pose {
     bool dirty = true;
     std::array<SP<Render::IFramebuffer>, 2> faces;
     SP<Render::IFramebuffer> composite;
+    // Hyprland asks each transformed window for its colour, then for a blur
+    // matte. contentDrawn tells the two apart; preWindowRender clears it
+    // before every draw of the leader.
+    SP<Render::IFramebuffer> matte;
+    bool contentDrawn = false;
     PHLWINDOWREF leader;
     float angle = 0;
     float perspective = 5.F;
@@ -38,6 +43,7 @@ class FlipTransformer final : public Render::IWindowTransformer {
     void preWindowRender(CSurfacePassElement::SRenderData *data) override;
 
   private:
+    SP<Render::IFramebuffer> matte();
     PHLWINDOWREF m_window;
     std::shared_ptr<Pose> m_pose;
     std::shared_ptr<FlipShader> m_shader;

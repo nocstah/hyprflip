@@ -32,6 +32,8 @@ class Controller {
     Result action(const std::string &action);
     std::string status();
     bool inContainer();
+    // Apps on the focused card's visible face; 0 outside multi-app cards.
+    size_t faceSize();
     bool protectsWorkspace(uint32_t workspace) const;
     // Narrower than protectsWorkspace: native cards may chill as one window.
     bool blocksChill(uint32_t workspace) const;

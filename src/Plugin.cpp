@@ -48,6 +48,10 @@ int otherSide(lua_State *L) {
     const std::string target = luaL_optstring(L, 1, "");
     return invoke(L, ("other_side" + (target.empty() ? "" : " " + target)).c_str());
 }
+int faceSize(lua_State *L) {
+    lua_pushinteger(L, static_cast<lua_Integer>(controller->faceSize()));
+    return 1;
+}
 int inContainer(lua_State *L) {
     lua_pushboolean(L, controller->inContainer());
     return 1;
@@ -159,6 +163,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE h) {
                                    {"replace", replace},
                                    {"other_side", otherSide},
                                    {"in_container", inContainer},
+                                   {"face_size", faceSize},
                                    {"protects_workspace", protectsWorkspace},
                                    {"card_box", cardBox},
                                    {"chill_blocked", chillBlocked},

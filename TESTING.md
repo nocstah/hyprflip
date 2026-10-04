@@ -1,5 +1,18 @@
 # Validation
 
+## Blur during snapshot transitions (2026-10-05)
+
+With translucent, blurred apps over dense text (foot needs
+`colors-dark.blur=yes`, since it opts out of compositor blur by default),
+background detail behind the card measured about 24 throughout slide and fade
+before the fix (sharp text) and about 1 after it (blurred), matching the
+resting card; flip already blurred. Mid-slide captures show both faces
+blurred and no matte leaking into colour. `tests/fullscreen_workflows.py` now
+uses its own headless output, and the floating stacking check returns focus to
+the card. Integration (18), motion (5), peek (19), floating (dwindle 10,
+hy3 10), fullscreen (13), card frames (10), workflows (10) and dwindle (7,
+including `layout toggle`) pass.
+
 ## Floating cards stay on top while turning (2026-10-04)
 
 Reproduced on the second GPU with two overlapping floating cards: the focused

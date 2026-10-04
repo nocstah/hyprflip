@@ -53,6 +53,8 @@ float field(vec2 p) {
 }
 void main() {
     if (mode == -1) { color = texture(source, screenUV); return; }
+    // Blur matte for a snapshot transition: Hyprland blurs where red is 1.
+    if (mode == -2) { color = vec4(vec3(clamp(texture(source, screenUV).a * 8.0, 0.0, 1.0)), 1.0); return; }
     color = vec4(0.0);
     if (mode >= 2) {
         if (any(greaterThan(abs(local), vec2(1.0)))) return;
@@ -276,11 +278,48 @@ FlipTransformer::FlipTransformer(PHLWINDOW window, std::shared_ptr<Pose> pose, s
 
 void FlipTransformer::preWindowRender(CSurfacePassElement::SRenderData *data) {
     if (snapshots(m_pose->mode) && !m_pose->failed) {
-        // The cached whole face provides color. Zero also disables native
-        // per-pane backdrop blur, which otherwise paints over the composite.
-        data->fadeAlpha = 0;
+        // The leader draws the cached whole card; other panes draw nothing,
+        // and zero alpha also turns off their own backdrop blur. The leader
+        // keeps its alpha, which is its blur strength, and serves a matte
+        // shaped like the composite, so the background stays blurred.
+        if (m_pose->leader != m_window)
+            data->fadeAlpha = 0;
+        else
+            m_pose->contentDrawn = false;
         data->decorate = false;
     }
+}
+
+SP<Render::IFramebuffer> FlipTransformer::matte() {
+    if (!m_pose->composite || !m_pose->composite->getTexture())
+        return nullptr;
+    if (!m_pose->matte) {
+        m_pose->matte = g_pHyprRenderer->createFB("Hyprflip transition matte");
+        if (!m_pose->matte->alloc(m_pose->composite->m_size.x, m_pose->composite->m_size.y, DRM_FORMAT_ABGR8888)) {
+            m_pose->matte.reset();
+            return nullptr;
+        }
+    }
+    GLState state;
+    auto guard = g_pHyprRenderer->bindTempFB(m_pose->matte);
+    glDisable(GL_BLEND);
+    glDisable(GL_SCISSOR_TEST);
+    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_STENCIL_TEST);
+    glDisable(GL_CULL_FACE);
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    glUseProgram(m_shader->program);
+    glBindVertexArray(m_shader->vao);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, m_pose->composite->getTexture()->m_texID);
+    glBindSampler(0, 0);
+    glUniform1i(m_shader->texture, 0);
+    glUniform1i(m_shader->mode, -2);
+    const std::array<float, 9> identity{1, 0, 0, 0, 1, 0, 0, 0, 1};
+    glUniformMatrix3fv(m_shader->matrix, 1, GL_FALSE, identity.data());
+    glUniformMatrix3fv(m_shader->composite, 1, GL_FALSE, identity.data());
+    glDrawArrays(GL_TRIANGLES, 0, 3);
+    return m_pose->matte;
 }
 
 SP<Render::IFramebuffer> FlipTransformer::transform(SP<Render::IFramebuffer> in) {
@@ -293,7 +332,15 @@ SP<Render::IFramebuffer> FlipTransformer::transform(SP<Render::IFramebuffer> in)
         return in;
     const bool snapshot = snapshots(m_pose->mode);
     if (snapshot && m_pose->leader != w) return in; // already cleared and rendered with zero alpha
-    if (snapshot && !m_pose->dirty && m_pose->composite) return m_pose->composite;
+    if (snapshot && m_pose->contentDrawn && m_pose->composite) {
+        // The second request this frame is Hyprland's blur matte.
+        if (auto matte = this->matte()) return matte;
+        return in;
+    }
+    if (snapshot && !m_pose->dirty && m_pose->composite) {
+        m_pose->contentDrawn = true;
+        return m_pose->composite;
+    }
     GLState state;
     if (!m_shader->initialize(m_pose->error)) {
         m_pose->failed = true;
@@ -358,6 +405,7 @@ SP<Render::IFramebuffer> FlipTransformer::transform(SP<Render::IFramebuffer> in)
     glUniform1f(m_shader->perspective, m_pose->perspective);
     glDrawArrays(GL_TRIANGLES, 0, 3);
     m_pose->dirty = false;
+    if (snapshot) m_pose->contentDrawn = true;
     return out;
 }
 } // namespace Hyprflip

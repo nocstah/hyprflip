@@ -112,12 +112,19 @@ try:
     assert not ipc.data('-j', 'plugin', 'list'), 'Use a fresh nested session without a demo flag'
     shutil.copy2(project / 'build/hyprflip.so', library)
     ipc.call('plugin', 'load', str(library)); loaded = True
-    output = ipc.data('-j', 'monitors')[0]['name']
-    config.write_text(original + '''
-hl.config({general={gaps_in=14,gaps_out=24},animations={enabled=false},
-    plugin={hyprflip={duration_ms=0,notifications=false}}})
+    # A headless output keeps the geometry independent of the desktop that
+    # hosts the nested session (see TESTING.md for NVIDIA desktops).
+    names = {m['name'] for m in ipc.data('-j', 'monitors')}
+    ipc.call('output', 'create', 'headless')
+    output = next(m['name'] for m in ipc.data('-j', 'monitors') if m['name'] not in names)
+    config.write_text(original + f'''
+hl.monitor({{output="{output}",mode="1280x800@60",position="2000x0",scale=1}})
+hl.workspace_rule({{workspace="81",monitor="{output}"}})
+hl.config({{general={{gaps_in=14,gaps_out=24}},animations={{enabled=false}},
+    plugin={{hyprflip={{duration_ms=0,notifications=false}}}}}})
 ''')
     ipc.call('reload'); assert not ipc.call('configerrors')
+    ipc.call('dispatch', f'hl.dsp.focus({{monitor="{output}"}})')
     ipc.call('dispatch', 'hl.dsp.focus({workspace=81})')
     assert ipc.status()['fullscreen_focus'], 'focus hook not installed'
 
@@ -286,4 +293,7 @@ finally:
         except Exception: pass
     try: config.write_text(original); ipc.call('reload')
     except Exception: pass
+    if output:
+        try: ipc.call('output', 'remove', output)
+        except Exception: pass
     (root / 'fullscreen-results.json').write_text(json.dumps(checks, indent=2))
