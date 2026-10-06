@@ -21,8 +21,8 @@ python3 scripts/install-setup.py
 
 The helper uses Omarchy's existing menus. The optional
 [OmaCards panel](https://github.com/nocstah/omacards) adds bar controls. Existing
-users should follow the [upgrade instructions](INSTALL.md); save and ungroup
-active native cards before updating the core.
+users should follow the [upgrade instructions](INSTALL.md); open dwindle and
+floating cards stay open through the update.
 
 ## Try one card
 

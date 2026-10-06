@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Updating no longer means ungrouping cards. `scripts/install.py` records open
+  dwindle and floating cards, reloads the core and rebuilds them with the same
+  apps, sides, proportions, focus and floating frame, through a new core
+  `restore` action. hy3 cards keep their dedicated updater.
+- `scripts/bootstrap.py` checks prerequisites (Hyprland 0.56.2 and matching
+  headers, a supported Hyprland commit, CMake, Ninja, pkg-config, C++, Lua 5.4,
+  GLES), naming the `pacman` packages for anything missing, then builds,
+  self-tests and runs both installers. `--json` streams one event per step for
+  panels.
 ## 0.3.0-rc.4 — 2026-10-05
 
 - Super+J on a native card face with several apps flips them between beside

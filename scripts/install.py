@@ -42,17 +42,35 @@ print(f"Plugin: {library}\nShortcuts: {module}\nLoad from: {main}")
 print("Super+Ctrl+Alt with M=mark, P=pair, F=flip, U=unpair, Escape=cancel")
 installed = any(p["name"] == "hyprflip" for p in json.loads(ctl("-j", "plugin", "list")))
 installed_state = json.loads(ctl("hyprflip", "status")) if installed else {}
-if installed_state.get("containers"):
-    raise SystemExit("Multi-app cards are active. Save and ungroup them before updating the core; their apps stay open. "
-                     "This installer preserves two-window native pairs. "
-                     "For hy3 cards, use the matching core/provider updater in docs/INSTALL.md.")
+
+
+def describe(card):
+    """A native card as the core's restore action expects it."""
+    x, y, width, height = card["box"]
+    line = [("floating" if card.get("floating") else "tiled"), str(card["active"]), str(int(bool(card.get("unfolded")))),
+            f"{x:.12g}", f"{y:.12g}", f"{width:.12g}", f"{height:.12g}"]
+    for name, face, layout in zip(("front", "back"), card["faces"], card["layouts"]):
+        line += [name, layout["axis"], layout["focused"]] + [f"{w}:{r:.12g}" for w, r in zip(face, layout["ratios"])]
+    return " ".join(line)
+
+
+cards = installed_state.get("containers", [])
+if any(not card.get("native_group") for card in cards):
+    raise SystemExit("hy3 cards are active. Use the matching core/provider updater in docs/INSTALL.md; "
+                     "this installer preserves native pairs and dwindle/floating cards.")
+if any(card.get("fullscreen") for card in cards):
+    raise SystemExit("Leave fullscreen on every card before updating; open cards are kept through the update.")
 saved_pairs = installed_state.get("pairs", [])
-if not saved_pairs and recovery.is_file():
+saved_cards = [describe(card) for card in cards]
+if not saved_pairs and not saved_cards and recovery.is_file():
     pending = json.loads(recovery.read_text())
     if pending.get("instance") == os.environ.get("HYPRLAND_INSTANCE_SIGNATURE"):
-        saved_pairs = pending["pairs"]
+        saved_pairs = pending.get("pairs", [])
+        saved_cards = pending.get("cards", [])
 if saved_pairs:
     print(f"Preserving {len(saved_pairs)} existing pair(s) through this update.")
+if saved_cards:
+    print(f"Keeping {len(saved_cards)} open card(s) through this update.")
 if args.dry_run:
     raise SystemExit(0)
 
@@ -75,10 +93,12 @@ try:
     # began. Native groups retain geometry, focus and current side on unload.
     if installed:
         ctl("hyprflip", "finish")
-        saved_pairs = json.loads(ctl("hyprflip", "status"))["pairs"] or saved_pairs
-    if saved_pairs:
+        current = json.loads(ctl("hyprflip", "status"))
+        saved_pairs = current["pairs"] or saved_pairs
+        saved_cards = [describe(card) for card in current.get("containers", [])] or saved_cards
+    if saved_pairs or saved_cards:
         atomic(recovery, json.dumps({"instance": os.environ.get("HYPRLAND_INSTANCE_SIGNATURE"),
-                                     "pairs": saved_pairs}).encode())
+                                     "pairs": saved_pairs, "cards": saved_cards}).encode())
     if installed:
         reply = ctl("plugin", "unload", str(library))
         if reply != "ok": raise RuntimeError(reply)
@@ -125,6 +145,11 @@ try:
             continue
         reply = ctl("hyprflip", "adopt", pair["front"], pair["back"])
         if not reply.startswith("ok:"): raise RuntimeError("Could not restore pair: " + reply)
+    # A card whose apps closed or changed meanwhile stays as separate windows.
+    for line in saved_cards:
+        reply = ctl("hyprflip", "restore " + line)
+        if not reply.startswith("ok:"):
+            print("Could not keep a card; its apps stay open as separate windows:", reply.removeprefix("error: "))
     errors = ctl("configerrors")
     if errors: raise RuntimeError(errors)
     recovery.unlink(missing_ok=True)
@@ -143,6 +168,10 @@ except Exception:
         # groups and the recovery file for the next successful upgrade.
         for pair in saved_pairs:
             ctl("hyprflip", "adopt", pair["front"], pair["back"])
+        # Older cores lack restore; their cards stay as open windows and the
+        # recovery file keeps them for the next successful update.
+        for line in saved_cards:
+            ctl("hyprflip", "restore " + line)
     except Exception:
         pass
     raise

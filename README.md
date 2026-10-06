@@ -92,8 +92,8 @@ two-window native pairs and customized settings are preserved during an update.
 The helper adds creation, editing and saved-card menus. Keep the workspace on
 **dwindle**; no additional layout plugin is needed.
 
-Before updating a core with active multi-app cards, save and ungroup those cards,
-then reopen them after the update. The installer refuses to unload active cards.
+Updating keeps open dwindle and floating cards: `python3 scripts/bootstrap.py`
+checks the prerequisites, builds, installs and rebuilds open cards afterwards.
 Existing hy3 users should follow the separate provider update instructions.
 
 Prefer hyprpm? Use the [hyprpm instructions](docs/INSTALL.md#hyprpm).

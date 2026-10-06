@@ -1328,6 +1328,66 @@ void Controller::onFrame(PHLMONITOR monitor) {
     }
     m_timer->updateTimeout(std::chrono::milliseconds(250));
 }
+// Rebuild a native card from the description the installer saved from
+// status before reloading the plugin:
+//   <tiled|floating> <active> <unfolded> <x> <y> <w> <h>
+//   front <horizontal|vertical> <focused> <address:ratio>...
+//   back  <horizontal|vertical> <focused> <address:ratio>...
+Result Controller::restore(const std::string &arguments) {
+    std::istringstream input(arguments);
+    std::string mode, token;
+    ContainerSnapshot snapshot;
+    if (!(input >> mode >> snapshot.active >> snapshot.unfolded >> snapshot.x >> snapshot.y >> snapshot.width >> snapshot.height) ||
+        (mode != "tiled" && mode != "floating") || snapshot.active > 1 || snapshot.unfolded > 1)
+        return {false, "Use restore <tiled|floating> <active> <unfolded> <x> <y> <w> <h> front ... back ..."};
+    int side = -1;
+    std::string address;
+    const auto parse = [](const std::string &text, uintptr_t &value) {
+        if (!text.starts_with("0x")) return false;
+        const auto [end, error] = std::from_chars(text.data() + 2, text.data() + text.size(), value, 16);
+        return error == std::errc{} && end == text.data() + text.size();
+    };
+    while (input >> token) {
+        if (token == "front" || token == "back") {
+            side = token == "back";
+            std::string axis, focused;
+            if (!(input >> axis >> focused) || (axis != "horizontal" && axis != "vertical") ||
+                !parse(focused, snapshot.focused[side]))
+                return {false, "Each face needs an axis and a focused app address."};
+            snapshot.vertical[side] = axis == "vertical";
+            continue;
+        }
+        const auto colon = token.find(':');
+        uintptr_t window = 0;
+        double ratio = 0;
+        if (side < 0 || colon == std::string::npos || snapshot.count[side] >= CONTAINER_MAX_PANES ||
+            !parse(token.substr(0, colon), window))
+            return {false, "Invalid app in the card description."};
+        const auto text = token.substr(colon + 1);
+        const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), ratio);
+        if (error != std::errc{} || end != text.data() + text.size() || !std::isfinite(ratio) || ratio <= 0)
+            return {false, "Invalid app proportion in the card description."};
+        snapshot.windows[side][snapshot.count[side]] = window;
+        snapshot.ratios[side][snapshot.count[side]++] = ratio;
+    }
+    if (!snapshot.count[0] || !snapshot.count[1])
+        return {false, "A card needs apps on both faces."};
+    for (unsigned s = 0; s < 2; ++s)
+        for (unsigned i = 0; i < snapshot.count[s]; ++i)
+            for (const auto &w : Desktop::windowState()->windows())
+                if (reinterpret_cast<uintptr_t>(w.get()) == snapshot.windows[s][i] && find(w))
+                    return {false, "An app in that card already belongs to another card."};
+    if (inputBusy())
+        return {false, "Finish the active grab or drag before restoring a card."};
+    if (!FloatingCards::canCreate(snapshot))
+        return {false, "Those apps are gone or no longer fit; they stay open as separate windows."};
+    m_mutating = true;
+    const auto id = FloatingCards::create(snapshot, mode == "floating");
+    if (id) m_pairs.push_back({m_nextID++, {}, {}, false, id, FloatingCards::EPOCH});
+    m_mutating = false;
+    reconcile();
+    return {id != 0, id ? "ok" : "The card could not be restored; its apps stay open."};
+}
 Result Controller::fullscreen() {
     if (inputBusy()) return {false, "Finish the active grab or drag before changing fullscreen."};
     auto p = find(Desktop::focusState()->window());
@@ -1392,6 +1452,7 @@ Result Controller::dispatch(const std::string &action) {
     reconcile();
     if (action == "floating") return floating();
     if (action == "fullscreen") return fullscreen();
+    if (action.starts_with("restore ")) return restore(action.substr(8));
     std::erase_if(m_reservations, [](const auto& entry) { return entry.second.until <= Clock::now(); });
     if (action.starts_with("reserve ")) {
         std::istringstream args(action.substr(8));

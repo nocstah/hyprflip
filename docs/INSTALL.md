@@ -76,9 +76,11 @@ It respects `XDG_CONFIG_HOME` for the configuration directory, backs up replaced
 files, preserves customized core settings and native pairs, and validates the
 reload. A failed installation restores the previous files. An existing
 hy3 installation must use the [container updater](#container-updates).
-Before a core-only update, save and ungroup any active native multi-app cards;
-their apps stay open. Reopen the saved definitions after installing. This
-installer refuses active cards before changing files or unloading the core.
+Open dwindle and floating cards stay open through a core update: the installer
+records each card, reloads the core and rebuilds it with the same apps, sides,
+proportions, focus and floating frame. A card whose apps closed meanwhile is
+left as separate open windows. Leave fullscreen first. The installer refuses
+active hy3 cards before changing files or unloading the core.
 
 Hold **Super+Ctrl+Alt**: M marks the front, P pairs the focused app as the back,
 F flips and U ungroups. Both windows must share a workspace and both be tiled or
@@ -382,21 +384,22 @@ and resize as a unit using the desktop's ordinary mouse bindings.
 
 ### Native updates
 
-From a supplied-installer checkout with native pairs only:
-
-Save and ungroup any multi-app cards first with **Super+Ctrl+Alt+U**; their apps
-stay open. The core-only installer preserves native two-window pairs. Reopen
-saved dwindle cards after the update. For active hy3 cards, use the matching
-core/provider updater below.
+From a supplied-installer checkout:
 
 ```sh
 git pull --ff-only
-make test
-python3 scripts/install.py --dry-run
-python3 scripts/install.py
+python3 scripts/bootstrap.py
 ```
 
-Customized core settings and native pairs are preserved. For hyprpm, use
+`bootstrap.py` checks the prerequisites (naming the packages to install if any
+are missing), builds and self-tests, then runs `scripts/install.py` and
+`scripts/install-setup.py`. `--check` only checks; `--json` reports each step as
+one JSON line for panels such as OmaCards. The installers can also be run by
+hand as before.
+
+Open dwindle and floating cards, native pairs and customized core settings are
+kept. Leave fullscreen first. For active hy3 cards, use the matching
+core/provider updater below. For hyprpm, use
 `hyprpm update` followed by `hyprpm reload` instead of the supplied installer.
 
 ### Container updates

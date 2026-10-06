@@ -1,5 +1,15 @@
 # Validation
 
+## Updates keep cards; one-command bootstrap (2026-10-06)
+
+`tests/install_cards.py` runs the real `scripts/install.py` against a nested
+session with a throwaway home: a fresh install, then an update with a tiled
+card (70/30 face) and an unfolded floating card open; both come back identical
+(3 checks). `scripts/bootstrap.py` ran end to end in a nested session whose
+config file the installers write: check, build, self-test, core and helper
+install, with all guided shortcuts registered. Unit tests cover the installer's
+card handoff and the bootstrap's failure reports (205 tests).
+
 ## Menu, portable and notification suites (2026-10-05)
 
 Run for the first time on this machine, in hy3 demo sessions on the second

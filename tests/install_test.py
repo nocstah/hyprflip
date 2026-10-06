@@ -48,6 +48,7 @@ class InstallerTest(unittest.TestCase):
         self.loaded = True
         self.pairs = [PAIR.copy()]
         self.containers = []
+        self.restored = []
         self.fail_adoption = False
         self.calls = []
 
@@ -68,6 +69,7 @@ class InstallerTest(unittest.TestCase):
         elif args == ["plugin", "unload", str(self.library)]:
             self.loaded = False
             self.pairs = []
+            self.containers = []
             reply = "ok"
         elif args == ["plugin", "load", str(self.library)]:
             self.assertTrue(self.library.is_file())
@@ -82,6 +84,9 @@ class InstallerTest(unittest.TestCase):
         elif args == ["-j", "clients"]:
             reply = [{"address": address, "grouped": list(PAIR.values())}
                      for address in PAIR.values()]
+        elif len(args) == 2 and args[0] == "hyprflip" and args[1].startswith("restore "):
+            self.restored.append(args[1].removeprefix("restore "))
+            reply = "ok: restored"
         elif args == ["hyprflip", "adopt", PAIR["front"], PAIR["back"]]:
             if self.library.read_bytes() == b"old plugin":
                 reply = "unknown request"
@@ -129,7 +134,7 @@ class InstallerTest(unittest.TestCase):
         self.assertTrue(self.loaded)
         self.assertEqual(self.pairs, [])
         self.assertEqual(json.loads(self.recovery.read_text()),
-                         {"instance": "test-instance", "pairs": [PAIR]})
+                         {"instance": "test-instance", "pairs": [PAIR], "cards": []})
 
         self.fail_adoption = False
         self.run_installer()
@@ -162,9 +167,20 @@ class InstallerTest(unittest.TestCase):
         self.assertEqual(self.calls, [["-j", "binds"], ["-j", "plugin", "list"],
                                      ["hyprflip", "status"]])
 
-    def test_active_containers_reject_native_upgrade_before_mutation(self):
+    def test_open_native_cards_are_restored_after_the_upgrade(self):
+        self.containers = [{"faces": [["0xc"], ["0xd", "0xe"]], "native_group": True, "floating": True,
+                            "active": 1, "unfolded": False, "box": [10, 20, 800, 600],
+                            "layouts": [{"axis": "horizontal", "focused": "0xc", "ratios": [1]},
+                                        {"axis": "vertical", "focused": "0xe", "ratios": [0.7, 0.3]}]}]
+        self.run_installer()
+        self.assertEqual(self.restored, ["floating 1 0 10 20 800 600 front horizontal 0xc 0xc:1 "
+                                         "back vertical 0xe 0xd:0.7 0xe:0.3"])
+        self.assertEqual(self.library.read_bytes(), b"new plugin")
+        self.assertFalse(self.recovery.exists())
+
+    def test_active_hy3_containers_reject_native_upgrade_before_mutation(self):
         self.containers = [{"faces": [["0xc"], ["0xd", "0xe"]]}]
-        with self.assertRaisesRegex(SystemExit, "Multi-app cards are active"):
+        with self.assertRaisesRegex(SystemExit, "hy3 cards are active"):
             self.run_installer()
         for path, content in self.originals.items():
             self.assertEqual(path.read_bytes(), content)

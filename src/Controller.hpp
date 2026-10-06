@@ -46,6 +46,7 @@ class Controller {
   private:
     Result floating();
     Result fullscreen();
+    Result restore(const std::string &arguments);
     struct Pair {
         uint64_t id;
         std::array<PHLWINDOWREF, 2> windows;
