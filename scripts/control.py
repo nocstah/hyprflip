@@ -14,6 +14,7 @@ from dataclasses import asdict
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import select
 import signal
@@ -80,6 +81,14 @@ def validate_context(ipc, expected):
 def snapshot(ipc):
     base = {'protocol': PROTOCOL, 'available': False, 'cards': [], 'saved': [],
             'error': '', 'library_error': '', 'context': None, 'capabilities': {}}
+    # The source commit bootstrap.py installed, if any; panels compare it with their pin.
+    env = ipc.env if ipc.env is not None else os.environ
+    recorded = Path(env.get('XDG_STATE_HOME', str(Path(env.get('HOME', str(Path.home()))) / '.local/state'))) / 'hyprflip/installed-commit'
+    try:
+        commit = recorded.read_text().strip()
+        base['installed_commit'] = commit if re.fullmatch(r'[0-9a-f]{40}', commit) else None
+    except OSError:
+        base['installed_commit'] = None
     try:
         windows, state = ipc.windows(), ipc.status()
         ctx = context(ipc, windows)

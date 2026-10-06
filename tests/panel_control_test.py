@@ -64,6 +64,15 @@ class PanelControlTest(unittest.TestCase):
         self.assertEqual(result['context']['anchor_label'], 'Terminal')
         self.assertEqual(self.ipc.mutations, [])
 
+    def test_snapshot_reports_the_installed_commit(self):
+        self.assertIsNone(control.snapshot(self.ipc)['installed_commit'])
+        recorded = Path(self.directory.name) / 'hyprflip/installed-commit'
+        recorded.parent.mkdir(parents=True, exist_ok=True)
+        recorded.write_text('2d80550226dcdb05d7895ca73a8124578a3623fe\n')
+        self.assertEqual(control.snapshot(self.ipc)['installed_commit'], '2d80550226dcdb05d7895ca73a8124578a3623fe')
+        recorded.write_text('not a commit\n')
+        self.assertIsNone(control.snapshot(self.ipc)['installed_commit'])
+
     def test_context_rejects_navigation_restart_and_reused_address(self):
         for mutation in ('workspace', 'focus', 'restart', 'pid'):
             with self.subTest(mutation=mutation):

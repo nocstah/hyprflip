@@ -11,6 +11,7 @@ Nothing here uses sudo. Missing packages are reported with the command to run.
 """
 import argparse
 import json
+import os
 from pathlib import Path
 import re
 import shutil
@@ -144,6 +145,19 @@ def install_helper():
     return 'Card menus, shortcuts and the OmaCards helper are installed'
 
 
+def record_commit():
+    """Remember which source commit is installed, so panels can offer updates."""
+    code, commit = run('git', 'rev-parse', 'HEAD')
+    if code or not re.fullmatch(r'[0-9a-f]{40}', commit.strip()):
+        return ''
+    state = Path(os.environ.get('XDG_STATE_HOME', Path.home() / '.local/state')) / 'hyprflip'
+    state.mkdir(parents=True, exist_ok=True)
+    temporary = state / 'installed-commit.new'
+    temporary.write_text(commit.strip() + '\n')
+    temporary.replace(state / 'installed-commit')
+    return commit.strip()
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--json', action='store_true', help='report each step as one JSON object per line')
@@ -161,7 +175,8 @@ def main():
     except Failed:
         report.emit(event='done', ok=False, checked_only=args.check)
         return 1
-    report.emit(event='done', ok=True, version=plugin_version(), checked_only=args.check)
+    commit = '' if args.check else record_commit()
+    report.emit(event='done', ok=True, version=plugin_version(), checked_only=args.check, **({'commit': commit} if commit else {}))
     return 0
 
 
