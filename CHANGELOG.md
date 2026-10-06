@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.3.0-rc.5 — 2026-10-06
+
 - Find app reveals apps in a fullscreen card instead of refusing. Native cards
   and pairs turn while fullscreen; hy3 cards, which cannot, leave fullscreen
   first. An unrelated fullscreen app on the workspace still asks you to leave
