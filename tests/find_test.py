@@ -23,6 +23,9 @@ class IPC(BaseIPC):
         super().focus(address)
         self.active = address
         self.workspace = self.clients[address]['workspace']['id']
+    def leave_fullscreen(self, address):
+        self.mutations.append(('leave fullscreen', address))
+        self.clients[address]['fullscreen'] = 0
     def action(self, action):
         assert action == 'flip', action
         super().action(action)
@@ -113,7 +116,7 @@ class FindTest(unittest.TestCase):
         ipc.snapshot['containers'] = []
         with self.assertRaisesRegex(w.SetupError, 'No cards are open'): w.Find(ipc, Picker()).prepare()
 
-    def test_fullscreen_native_card_reveals_its_own_apps_but_hy3_waits(self):
+    def test_fullscreen_card_reveals_its_own_apps(self):
         for native in (True, False):
             with self.subTest(native=native):
                 ipc = IPC()
@@ -122,12 +125,10 @@ class FindTest(unittest.TestCase):
                 ipc.clients['0xa']['fullscreen'] = 2
                 flow = w.Find(ipc, Picker('0xc'))
                 plan = flow.prepare()
-                if native:
-                    flow.apply(plan)
-                    self.assertEqual(ipc.mutations, [('focus', '0xa'), ('action', 'flip'), ('focus', '0xc')])
-                else:
-                    with self.assertRaisesRegex(w.SetupError, 'Leave fullscreen'): flow.apply(plan)
-                    self.assertEqual(ipc.mutations, [])
+                flow.apply(plan)
+                # hy3 cards cannot turn while fullscreen, so Find leaves it first.
+                leave = [] if native else [('leave fullscreen', '0xa')]
+                self.assertEqual(ipc.mutations, leave + [('focus', '0xa'), ('action', 'flip'), ('focus', '0xc')])
 
 
 if __name__ == '__main__': unittest.main()

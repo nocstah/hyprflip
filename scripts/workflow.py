@@ -305,6 +305,11 @@ class Hyprctl:
         self._save_preference('divider_color', color, 'divider_color', color, current, lambda c: '"%s"' % c,
                               'The divider color could not be applied.')
 
+    def leave_fullscreen(self, address):
+        if not re.fullmatch(r'0x[0-9a-fA-F]+', address):
+            raise SetupError('The selected window is no longer available.')
+        self.call('dispatch', f'hl.dsp.window.fullscreen({{window="address:{address}",action="unset"}})')
+
     def focused(self, *operations):
         # Keep focus validation and the action together; a pointer/app focus
         # event can otherwise arrive between separate hyprctl requests.
@@ -677,9 +682,10 @@ class Find:
                     or any(current.get(k) != original.get(k) for k in ('pid', 'class', 'initialClass', 'workspace'))):
                 raise SetupError('An app closed or moved. Open Find app again.')
         workspace = plan.windows[plan.address]['workspace']['id']
-        # Revealing focuses only this card's members, which a fullscreen native card allows.
-        if (any(w.get('fullscreen') and w['workspace']['id'] == workspace for w in windows.values())
-                and not (plan.kind == 'containers' and fullscreen_card_only(card, windows, workspace))):
+        # Revealing focuses only this card's members. Another app's fullscreen
+        # would end on focus, so it still blocks; the card's own is handled in apply.
+        fullscreen = {a for a, w in windows.items() if w.get('fullscreen') and w['workspace']['id'] == workspace}
+        if fullscreen - {a for face in card['faces'] for a in face}:
             raise SetupError('Leave fullscreen on the card’s workspace, then use Find app again.')
         return card, state
 
@@ -701,6 +707,14 @@ class Find:
             card, state = self.check(plan)
             if state.get('animating'):
                 raise SetupError('Another turn started. Open Find app again.')
+            # Native cards and pairs turn while fullscreen; hy3 cards cannot,
+            # so revealing a hidden app there leaves fullscreen first.
+            if (plan.kind == 'containers' and not card.get('native_group') and not card.get('unfolded')
+                    and card['active'] != side):
+                windows = self.ipc.windows()
+                for address in (a for face in card['faces'] for a in face):
+                    if windows.get(address, {}).get('fullscreen'):
+                        self.ipc.leave_fullscreen(address)
             if not card.get('unfolded') and card['active'] != side:
                 self.ipc.focused((card['current'], 'flip'))
         card = self.settled(plan)

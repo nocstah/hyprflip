@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Find app reveals apps in a fullscreen card instead of refusing. Native cards
+  and pairs turn while fullscreen; hy3 cards, which cannot, leave fullscreen
+  first. An unrelated fullscreen app on the workspace still asks you to leave
+  it, since focusing past it would end it anyway.
+- `bootstrap.py` records the installed source commit in
+  `$XDG_STATE_HOME/hyprflip/installed-commit`, and the helper snapshot reports
+  it as `installed_commit`, so OmaCards can offer updates.
 - Updating no longer means ungrouping cards. `scripts/install.py` records open
   dwindle and floating cards, reloads the core and rebuilds them with the same
   apps, sides, proportions, focus and floating frame, through a new core
