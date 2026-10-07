@@ -25,6 +25,11 @@ version = re.search(r"project\(hyprflip VERSION ([\d.]+)", (project / "CMakeList
 if not source.is_file() or not main.is_file():
     raise SystemExit("Build with make first; this installer requires an existing Hyprland Lua configuration.")
 
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from card_restore import describe, settle  # noqa: E402
+
+
 def ctl(*args):
     p = subprocess.run(["hyprctl", *args], capture_output=True, text=True, timeout=10)
     if p.returncode:
@@ -42,16 +47,6 @@ print(f"Plugin: {library}\nShortcuts: {module}\nLoad from: {main}")
 print("Super+Ctrl+Alt with M=mark, P=pair, F=flip, U=unpair, Escape=cancel")
 installed = any(p["name"] == "hyprflip" for p in json.loads(ctl("-j", "plugin", "list")))
 installed_state = json.loads(ctl("hyprflip", "status")) if installed else {}
-
-
-def describe(card):
-    """A native card as the core's restore action expects it."""
-    x, y, width, height = card["box"]
-    line = [("floating" if card.get("floating") else "tiled"), str(card["active"]), str(int(bool(card.get("unfolded")))),
-            f"{x:.12g}", f"{y:.12g}", f"{width:.12g}", f"{height:.12g}"]
-    for name, face, layout in zip(("front", "back"), card["faces"], card["layouts"]):
-        line += [name, layout["axis"], layout["focused"]] + [f"{w}:{r:.12g}" for w, r in zip(face, layout["ratios"])]
-    return " ".join(line)
 
 
 cards = installed_state.get("containers", [])
@@ -150,6 +145,11 @@ try:
         reply = ctl("hyprflip", "restore " + line)
         if not reply.startswith("ok:"):
             print("Could not keep a card; its apps stay open as separate windows:", reply.removeprefix("error: "))
+            continue
+        try:
+            settle(line)
+        except (RuntimeError, KeyError, StopIteration, TypeError, ValueError):
+            print("A card was kept, but its tile could not be returned to the same place.")
     errors = ctl("configerrors")
     if errors: raise RuntimeError(errors)
     recovery.unlink(missing_ok=True)

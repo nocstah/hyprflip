@@ -1,5 +1,16 @@
 # Validation
 
+## Tiled cards keep their tile through updates (2026-10-07)
+
+On the developer's desktop the panel installer updated to rc.5 and kept all 4
+open cards with identical faces, sides, focus, layouts and proportions; the
+3 floating cards kept their exact frames, but the tiled card came back stacked
+under its neighbour instead of beside it (839 px away). `tests/install_cards.py`
+now runs with a neighbouring tile on a 4K/1.5x output with smart and preserved
+splits, and displaces the restored tiled card with `togglesplit` and
+`swapsplit`; the correction returns it to within 4 px of its saved tile
+(4 checks).
+
 ## Updates keep cards; one-command bootstrap (2026-10-06)
 
 `tests/install_cards.py` runs the real `scripts/install.py` against a nested
