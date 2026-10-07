@@ -1,7 +1,7 @@
 # Default Omarchy beta test
 
 We are looking for a few people using Omarchy's default **dwindle** layout to
-try [Hyprflip 0.3.0-rc.5](https://github.com/nocstah/hyprflip/releases/tag/v0.3.0-rc.5).
+try [Hyprflip 0.3.0-rc.6](https://github.com/nocstah/hyprflip/releases/tag/v0.3.0-rc.6).
 No hy3 installation or layout change is needed. This preview targets
 **Hyprland 0.56.2** with matching headers and compiler.
 
@@ -11,7 +11,7 @@ Check `hyprctl version`, then follow the [requirements](INSTALL.md#requirements)
 From a terminal in your Hyprland session:
 
 ```sh
-git clone --branch v0.3.0-rc.5 https://github.com/nocstah/hyprflip.git
+git clone --branch v0.3.0-rc.6 https://github.com/nocstah/hyprflip.git
 cd hyprflip
 make test
 python3 scripts/install.py --dry-run

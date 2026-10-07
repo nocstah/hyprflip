@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.3.0-rc.6 — 2026-10-07
+
 - Keep a tiled card in its tile through an update. While a card is briefly
   separate tiles, dwindle (notably with `smart_split`) can reflow the
   workspace, so a card beside a neighbour came back stacked under it. The
