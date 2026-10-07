@@ -24,9 +24,10 @@ card handoff and the bootstrap's failure reports (205 tests).
 ## Menu, portable and notification suites (2026-10-05)
 
 Run for the first time on this machine, in hy3 demo sessions on the second
-GPU (`--containers --aquamarine`) with Fuzzel installed: menu workflows pass
-with `--backend fuzzel` (2 checks; Rofi and Wofi are not installed), portable
-workflows pass (5), and notification workflows pass.
+GPU (`--containers --aquamarine`): menu workflows pass with Fuzzel, Rofi and
+Wofi (4 checks: automatic Fuzzel selection, then real selection, text input and
+Escape for each backend), portable workflows pass (5), and notification
+workflows pass.
 
 ## Blur during snapshot transitions (2026-10-05)
 
