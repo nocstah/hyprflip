@@ -38,6 +38,21 @@ PHLWINDOW resolve(uintptr_t address) {
     return nullptr;
 }
 uintptr_t addr(PHLWINDOW w) { return reinterpret_cast<uintptr_t>(w.get()); }
+
+// Hyprland's tiled window target: gaps_in on every edge that does not touch
+// the work area (gaps_out is already outside it).
+CBox withInnerGaps(CBox box, const CBox &area, PHLWORKSPACE workspace) {
+    static auto value = CConfigValue<Config::IComplexConfigValue>("general:gaps_in");
+    auto rule = Config::workspaceRuleMgr()->getWorkspaceRuleFor(workspace);
+    auto g = rule.and_then([](auto r) { return r.m_gapsIn; })
+                 .value_or(*static_cast<Config::CCssGapData *>(value.ptr()));
+    const auto sticks = [](double a, double b) { return std::abs(a - b) < 2; };
+    const double left = sticks(box.x, area.x) ? 0 : g.m_left;
+    const double top = sticks(box.y, area.y) ? 0 : g.m_top;
+    const double right = sticks(box.x + box.w, area.x + area.w) ? 0 : g.m_right;
+    const double bottom = sticks(box.y + box.h, area.y + area.h) ? 0 : g.m_bottom;
+    return {box.x + left, box.y + top, std::max(1.0, box.w - left - right), std::max(1.0, box.h - top - bottom)};
+}
 HANDLE plugin = nullptr;
 CFunctionHook *focusHook = nullptr, *hitHook = nullptr;
 
@@ -412,6 +427,11 @@ void PaneTarget::setPositionGlobal(const STargetBox &box, uint8_t flags) {
     // fullscreen transfer, which reuses another member's pane).
     const auto full = c->fullscreenBox();
     CBox outer = full ? *full : box.visualBox.empty() ? box.logicalBox : box.visualBox;
+    // A tiled layout leaves the visual slot empty and lets Hyprland's window
+    // target add gaps_in on inner edges. Panes pass an explicit slot, which
+    // skips that step, so apply the same inset to the card first.
+    if (!full && !floating() && box.visualBox.empty() && m_space)
+        outer = withInnerGaps(outer, m_space->workArea(), w->m_workspace);
     if (floating() && !full && !c->adjusting) {
         auto min = c->minimum();
         if (outer.w < min.x || outer.h < min.y) {

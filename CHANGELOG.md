@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Keep `gaps_in` around tiled cards on dwindle. Hyprland only adds inner gaps
+  when a tiled window receives an empty visual slot, and card panes always pass
+  one, so a card touched a neighbouring card and sat 5 px from a normal window
+  with `gaps_in = 5`. Panes now inset a tiled card's slot by `gaps_in` (including
+  workspace rules) on every edge away from the work area, as Hyprland does.
 ## 0.3.0-rc.6 — 2026-10-07
 
 - Keep a tiled card in its tile through an update. While a card is briefly
