@@ -897,6 +897,16 @@ Result Controller::flip(std::optional<Transition> preview) {
         w->resetMotionBlur();
     }
     select(*p, source);
+    // Focus moves to the other face only when the turn ends. Until then
+    // inactive_opacity and dim_inactive would show the wallpaper through it,
+    // so every face turns at its focused opacity, undimmed.
+    static auto activeOpacity = CConfigValue<Config::FLOAT>("decoration:active_opacity");
+    for (const auto &ref : m_turn->windows)
+        if (auto member = ref.lock(); member && !Fullscreen::controller()->isFullscreen(member)) {
+            member->alpha(WINDOW_ALPHA_ACTIVE)->setValueAndWarp(
+                member->m_ruleApplicator->alpha().valueOrDefault().applyAlpha(*activeOpacity));
+            member->m_dimPercent->setValueAndWarp(0);
+        }
     if (p->containerID)
         if (auto api = provider(p->providerEpoch))
             api->animating(p->containerID, true);
