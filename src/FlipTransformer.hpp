@@ -33,12 +33,12 @@ class FlipShader {
     SP<Render::IFramebuffer> captureFace(const std::vector<PHLWINDOW> &windows, PHLMONITOR monitor, std::string &error);
     GLuint program = 0, vao = 0;
     GLint matrix = -1, composite = -1, rotation = -1, perspective = -1, texture = -1;
-    GLint secondTexture = -1, mode = -1, progress = -1, direction = -1, aspect = -1;
+    GLint secondTexture = -1, mode = -1, progress = -1, direction = -1, aspect = -1, backdrop = -1, useBackdrop = -1;
 };
 
 class FlipTransformer final : public Render::IWindowTransformer {
   public:
-    FlipTransformer(PHLWINDOW window, std::shared_ptr<Pose> pose, std::shared_ptr<FlipShader> shader);
+    FlipTransformer(PHLWINDOW window, std::shared_ptr<Pose> pose, std::shared_ptr<FlipShader> shader, bool glass = false);
     SP<Render::IFramebuffer> transform(SP<Render::IFramebuffer> in) override;
     void preWindowRender(CSurfacePassElement::SRenderData *data) override;
 
@@ -47,5 +47,6 @@ class FlipTransformer final : public Render::IWindowTransformer {
     PHLWINDOWREF m_window;
     std::shared_ptr<Pose> m_pose;
     std::shared_ptr<FlipShader> m_shader;
+    bool m_glass = false;
 };
 } // namespace Hyprflip

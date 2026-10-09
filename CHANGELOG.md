@@ -11,6 +11,11 @@
   face only when a turn ends, so with `inactive_opacity` below 1 or
   `dim_inactive` the incoming face turned translucent and dimmed, then faded
   up afterwards.
+- Keep glass faces frosted while they flip. Hyprflip suspends Hyprglass during
+  a turn, so a translucent glass face showed the sharp wallpaper through it.
+  In the flip transitions, faces that had Hyprglass now turn over Hyprland's
+  cached xray blur: one texture lookup per covered pixel, with no extra blur
+  pass or buffer. Other windows and the snapshot transitions are unchanged.
 ## 0.3.0-rc.6 — 2026-10-07
 
 - Keep a tiled card in its tile through an update. While a card is briefly

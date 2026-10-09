@@ -938,7 +938,7 @@ Result Controller::flip(std::optional<Transition> preview) {
     }
     for (unsigned i = 0; i < m_turn->windows.size(); ++i) {
         auto w = m_turn->windows[i].lock();
-        auto t = makeUnique<FlipTransformer>(w, pose, m_shader);
+        auto t = makeUnique<FlipTransformer>(w, pose, m_shader, m_turn->suppressedGlass[i]);
         m_turn->transformers[i] = t.get();
         w->m_transformers.emplace_back(std::move(t));
     }

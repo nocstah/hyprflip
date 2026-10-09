@@ -31,6 +31,8 @@ in vec2 screenUV;
 out vec4 color;
 uniform sampler2D source;
 uniform sampler2D secondSource;
+uniform sampler2D backdrop;
+uniform int useBackdrop;
 uniform int mode;
 uniform float progress;
 uniform float direction;
@@ -100,8 +102,13 @@ void main() {
     vec2 edge = clamp((1.0 - abs(vec2(x, y))) / max(fwidth(vec2(x, y)), vec2(0.00001)) + 0.5, 0.0, 1.0);
     if (divisor <= 0.00001 || edge.x * edge.y <= 0.0) return;
     if (any(lessThan(sampleUV, vec2(0.0))) || any(greaterThan(sampleUV, vec2(1.0)))) return;
+    float cover = edge.x * edge.y;
     color = (texture(source, sampleUV + dx + dy) + texture(source, sampleUV + dx - dy)
-           + texture(source, sampleUV - dx + dy) + texture(source, sampleUV - dx - dy)) * (0.25 * edge.x * edge.y);
+           + texture(source, sampleUV - dx + dy) + texture(source, sampleUV - dx - dy)) * (0.25 * cover);
+    // Glass faces lose their backdrop while turning. Put Hyprland's cached
+    // xray blur behind the covered pixels instead: one lookup, no blur pass.
+    if (useBackdrop == 1)
+        color += vec4(texture(backdrop, screenUV).rgb, 1.0) * max(cover - color.a, 0.0);
     // A single light field in card coordinates, shared by every pane. Fade it
     // out at rest and keep alpha untouched so the blur matte and transparent
     // margins retain the same coverage. This adds no texture samples or pass.
@@ -129,7 +136,7 @@ GLuint compile(GLenum type, const char *source, std::string &error) {
 
 // Restore real GL state, including bindings, so Hyprland's state caches remain valid.
 struct GLState {
-    GLint program, vao, activeTexture, texture[2], sampler[2], readFramebuffer;
+    GLint program, vao, activeTexture, texture[3], sampler[3], readFramebuffer;
     GLint blendSrcRGB, blendDstRGB, blendSrcAlpha, blendDstAlpha, blendEqRGB, blendEqAlpha;
     GLboolean blend, scissor, depth, stencil, cull, depthMask, colorMask[4];
     GLState() {
@@ -138,7 +145,7 @@ struct GLState {
         glGetBooleanv(GL_DEPTH_WRITEMASK, &depthMask);
         glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &vao);
         glGetIntegerv(GL_ACTIVE_TEXTURE, &activeTexture);
-        for (unsigned i = 0; i < 2; ++i) {
+        for (unsigned i = 0; i < 3; ++i) {
             glActiveTexture(GL_TEXTURE0 + i);
             glGetIntegerv(GL_TEXTURE_BINDING_2D, &texture[i]);
             glGetIntegerv(GL_SAMPLER_BINDING, &sampler[i]);
@@ -161,7 +168,7 @@ struct GLState {
         glBindFramebuffer(GL_READ_FRAMEBUFFER, readFramebuffer);
         glDepthMask(depthMask);
         glBindVertexArray(vao);
-        for (unsigned i = 0; i < 2; ++i) {
+        for (unsigned i = 0; i < 3; ++i) {
             glActiveTexture(GL_TEXTURE0 + i);
             glBindTexture(GL_TEXTURE_2D, texture[i]);
             glBindSampler(i, sampler[i]);
@@ -230,6 +237,8 @@ bool FlipShader::initialize(std::string &error) {
     progress = glGetUniformLocation(p, "progress");
     direction = glGetUniformLocation(p, "direction");
     aspect = glGetUniformLocation(p, "aspect");
+    backdrop = glGetUniformLocation(p, "backdrop");
+    useBackdrop = glGetUniformLocation(p, "useBackdrop");
     return true;
 }
 
@@ -273,8 +282,8 @@ SP<Render::IFramebuffer> FlipShader::captureFace(const std::vector<PHLWINDOW> &w
     return face;
 }
 
-FlipTransformer::FlipTransformer(PHLWINDOW window, std::shared_ptr<Pose> pose, std::shared_ptr<FlipShader> shader)
-    : m_window(window), m_pose(std::move(pose)), m_shader(std::move(shader)) {}
+FlipTransformer::FlipTransformer(PHLWINDOW window, std::shared_ptr<Pose> pose, std::shared_ptr<FlipShader> shader, bool glass)
+    : m_window(window), m_pose(std::move(pose)), m_shader(std::move(shader)), m_glass(glass) {}
 
 void FlipTransformer::preWindowRender(CSurfacePassElement::SRenderData *data) {
     if (snapshots(m_pose->mode) && !m_pose->failed) {
@@ -393,6 +402,15 @@ SP<Render::IFramebuffer> FlipTransformer::transform(SP<Render::IFramebuffer> in)
         glBindSampler(1, 0);
         glUniform1i(m_shader->secondTexture, 1);
     }
+    const auto &blur = monitor->resources()->m_blurFB;
+    const bool backdrop = m_glass && !snapshot && blur && blur->getTexture();
+    if (backdrop) {
+        glActiveTexture(GL_TEXTURE2);
+        glBindTexture(GL_TEXTURE_2D, blur->getTexture()->m_texID);
+        glBindSampler(2, 0);
+        glUniform1i(m_shader->backdrop, 2);
+    }
+    glUniform1i(m_shader->useBackdrop, backdrop ? 1 : 0);
     glUniform1i(m_shader->mode, static_cast<int>(m_pose->mode));
     glUniform1f(m_shader->progress, m_pose->progress);
     glUniform1f(m_shader->direction, m_pose->direction);
