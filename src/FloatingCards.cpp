@@ -214,6 +214,12 @@ struct Card {
                 return s;
         return {};
     }
+    // The group's target reads its current window with no bounds check, and
+    // a group toggle (SUPER+G) can empty the group while the card still holds
+    // it. Ask only while the group has a current window.
+    bool floats() const {
+        return group && group->size() && group->getCurrentIdx() < group->size() && group->current() && group->m_target->floating();
+    }
     bool valid() const {
         if (!alive || !group || faces[0].empty() || faces[1].empty() || group->size() != targets.size())
             return false;
@@ -347,7 +353,7 @@ struct Card {
     // face first, focused app last), so a turn never passes behind another
     // window that sits between its faces.
     void raise() {
-        if (!alive || !group || !group->m_target->floating())
+        if (!alive || !floats())
             return;
         std::vector<PHLWINDOW> order;
         for (unsigned s : {active ^ 1u, active})
@@ -371,12 +377,12 @@ struct Card {
             }
     }
     void refresh() {
-        if (!alive || !group || changing)
+        if (!alive || !group || !group->size() || changing)
             return;
         // Edits may have updated the group's logical box. Let the tiled
         // algorithm restore its visual slot (including outer/neighbor gaps)
         // before splitting it into panes.
-        if (!group->m_target->floating() && group->m_target->space())
+        if (!floats() && group->m_target->space())
             group->m_target->space()->recalculate();
         else
             group->m_target->recalc();
@@ -543,7 +549,7 @@ bool attach(uint64_t id, uintptr_t address, uint32_t side, bool vertical) {
     const bool fullscreen = c->bare();
     auto box = fullscreen ? *c->fullscreenBox() : c->group->m_target->position();
     // A fullscreen card keeps its fullscreen area; a floating one grows to fit.
-    const bool floating = c->group->m_target->floating() && !fullscreen;
+    const bool floating = c->floats() && !fullscreen;
     if (floating) {
         auto min = c->minimum();
         box.w = std::max(box.w, min.x);
@@ -626,7 +632,7 @@ bool move(uint64_t id, uint32_t dir) {
     auto c = get(id);
     if (!c || !c->valid())
         return false;
-    if (c->group->m_target->floating()) {
+    if (c->floats()) {
         Vector2D delta{dir == 'r' ? 40. : dir == 'l' ? -40. : 0., dir == 'd' ? 40. : dir == 'u' ? -40. : 0.};
         g_layoutManager->moveTarget(delta, c->group->m_target);
     } else
@@ -643,7 +649,7 @@ bool unfold(uint64_t id, bool value) {
     auto sizedBox = [&]() {
         auto box = c->group->m_target->position();
         const auto min = c->minimum();
-        if (c->group->m_target->floating() && !c->bare()) {
+        if (c->floats() && !c->bare()) {
             box.w = std::max(box.w, min.x);
             box.h = std::max(box.h, min.y);
         }
@@ -690,7 +696,7 @@ bool arrange(uint64_t id, uint32_t side, bool vertical, uint32_t count, const ui
     c->vertical[side] = vertical;
     auto box = c->group->m_target->position();
     auto min = c->minimum();
-    if (c->group->m_target->floating() && !c->bare()) {
+    if (c->floats() && !c->bare()) {
         box.w = std::max(box.w, min.x);
         box.h = std::max(box.h, min.y);
     }
@@ -1024,7 +1030,7 @@ bool setStyle(uint64_t id, double header, double gap, double divider) {
 }
 bool place(uint64_t id, CBox box) {
     auto c = get(id);
-    if (!c || !c->valid() || !c->group->m_target->floating() || c->bare() || box.w < 1 || box.h < 1)
+    if (!c || !c->valid() || !c->floats() || c->bare() || box.w < 1 || box.h < 1)
         return false;
     const auto min = c->minimum();
     box.w = std::max(box.w, min.x);
