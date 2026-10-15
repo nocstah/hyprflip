@@ -8,6 +8,7 @@
 #include <unistd.h>
 #include <hyprutils/os/Process.hpp>
 #include <format>
+#include <hyprland/src/config/ConfigManager.hpp>
 #include <hyprland/src/desktop/Workspace.hpp>
 #include <hyprland/src/desktop/state/FocusState.hpp>
 #include <hyprland/src/desktop/state/WindowState.hpp>
@@ -888,9 +889,9 @@ Result Controller::flip(std::optional<Transition> preview) {
         // Hyprglass 1.0 draws its background outside the transformed pass.
         // Its public opt-out tag prevents a stationary rectangle behind the
         // card. Preserve an existing opt-out; restore only tags we introduced.
-        if (!w->m_ruleApplicator->m_tagKeeper.isTagged("hyprglass_disabled") &&
-            std::ranges::any_of(w->m_windowDecorations,
-                                [](const auto &deco) { return deco->getDisplayName() == "HyprGlass"; })) {
+        // Hyprglass decorates every window, but draws glass only where it is
+        // enabled; other windows keep Hyprland's own blur while turning.
+        if (glassy(w)) {
             m_turn->suppressedGlass[i] = w->m_ruleApplicator->m_tagKeeper.applyTag("+hyprglass_disabled");
             w->m_ruleApplicator->propertiesChanged(Desktop::Rule::RULE_PROP_TAG);
         }
@@ -946,6 +947,19 @@ Result Controller::flip(std::optional<Transition> preview) {
     damage(*p);
     m_timer->updateTimeout(std::chrono::milliseconds(250));
     return {true, "ok"};
+}
+bool Controller::glassy(PHLWINDOW w) {
+    const auto &tags = w->m_ruleApplicator->m_tagKeeper;
+    if (tags.isTagged("hyprglass_disabled") ||
+        std::ranges::none_of(w->m_windowDecorations,
+                             [](const auto &deco) { return deco->getDisplayName() == "HyprGlass"; }))
+        return false;
+    if (tags.isTagged("hyprglass_enabled"))
+        return true;
+    // Hyprglass's own option, read in place: the plugin may be reloaded.
+    const auto global = Config::mgr()->getConfigValue("plugin:hyprglass:enabled");
+    return global.dataptr && global.type && *global.type == typeid(Config::INTEGER) &&
+           **reinterpret_cast<Config::INTEGER *const *>(global.dataptr);
 }
 Result Controller::unpair() {
     if (inputBusy())

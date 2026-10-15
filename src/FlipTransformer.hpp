@@ -33,7 +33,7 @@ class FlipShader {
     SP<Render::IFramebuffer> captureFace(const std::vector<PHLWINDOW> &windows, PHLMONITOR monitor, std::string &error);
     GLuint program = 0, vao = 0;
     GLint matrix = -1, composite = -1, rotation = -1, perspective = -1, texture = -1;
-    GLint secondTexture = -1, mode = -1, progress = -1, direction = -1, aspect = -1, backdrop = -1, useBackdrop = -1;
+    GLint secondTexture = -1, mode = -1, progress = -1, direction = -1, aspect = -1, backdrop = -1, useBackdrop = -1, pane = -1;
 };
 
 class FlipTransformer final : public Render::IWindowTransformer {

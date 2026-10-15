@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Fix a face with several apps losing all but one of them during a flip. The
+  glass backdrop a pane turns over covered the whole card, so the last pane
+  drawn frosted over the others: they vanished into a stationary blur and
+  popped back when the turn ended. The backdrop now stays inside each pane's
+  own area. It is also only applied to windows Hyprglass actually frosts
+  (tagged `hyprglass_enabled`, or its global `enabled`); Hyprglass decorates
+  every window, so plain translucent apps had been getting it too.
+
 ## 0.3.0-rc.7 — 2026-10-09
 
 - Keep `gaps_in` around tiled cards on dwindle. Hyprland only adds inner gaps

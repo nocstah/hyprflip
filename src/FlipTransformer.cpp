@@ -33,6 +33,7 @@ uniform sampler2D source;
 uniform sampler2D secondSource;
 uniform sampler2D backdrop;
 uniform int useBackdrop;
+uniform vec4 pane; // this window's own rectangle in card coordinates: min, max
 uniform int mode;
 uniform float progress;
 uniform float direction;
@@ -100,6 +101,7 @@ void main() {
     // pass and the compositor's blur matte. No temporal smearing or snapshots.
     vec2 dx = dFdx(sampleUV) * (0.25 * abs(s)), dy = dFdy(sampleUV) * (0.25 * abs(s));
     vec2 edge = clamp((1.0 - abs(vec2(x, y))) / max(fwidth(vec2(x, y)), vec2(0.00001)) + 0.5, 0.0, 1.0);
+    vec2 inside = clamp(min(point - pane.xy, pane.zw - point) / max(fwidth(point), vec2(0.00001)) + 0.5, 0.0, 1.0);
     if (divisor <= 0.00001 || edge.x * edge.y <= 0.0) return;
     if (any(lessThan(sampleUV, vec2(0.0))) || any(greaterThan(sampleUV, vec2(1.0)))) return;
     float cover = edge.x * edge.y;
@@ -107,8 +109,10 @@ void main() {
            + texture(source, sampleUV - dx + dy) + texture(source, sampleUV - dx - dy)) * (0.25 * cover);
     // Glass faces lose their backdrop while turning. Put Hyprland's cached
     // xray blur behind the covered pixels instead: one lookup, no blur pass.
+    // Each pane of a face turns the whole card, so frost only this window's
+    // own pane; a pane drawn later would otherwise cover the ones before it.
     if (useBackdrop == 1)
-        color += vec4(texture(backdrop, screenUV).rgb, 1.0) * max(cover - color.a, 0.0);
+        color += vec4(texture(backdrop, screenUV).rgb, 1.0) * max(cover * inside.x * inside.y - color.a, 0.0);
     // A single light field in card coordinates, shared by every pane. Fade it
     // out at rest and keep alpha untouched so the blur matte and transparent
     // margins retain the same coverage. This adds no texture samples or pass.
@@ -239,6 +243,7 @@ bool FlipShader::initialize(std::string &error) {
     aspect = glGetUniformLocation(p, "aspect");
     backdrop = glGetUniformLocation(p, "backdrop");
     useBackdrop = glGetUniformLocation(p, "useBackdrop");
+    pane = glGetUniformLocation(p, "pane");
     return true;
 }
 
@@ -411,6 +416,13 @@ SP<Render::IFramebuffer> FlipTransformer::transform(SP<Render::IFramebuffer> in)
         glUniform1i(m_shader->backdrop, 2);
     }
     glUniform1i(m_shader->useBackdrop, backdrop ? 1 : 0);
+    if (backdrop) {
+        const CBox card = m_pose->containerBox.value_or(w->getFullWindowBoundingBox());
+        const CBox own = w->geometricBox(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
+        const auto corner = [&card](Vector2D p) { return (p - card.pos()) / card.size() * 2.0 - Vector2D{1, 1}; };
+        const auto low = corner(own.pos()), high = corner(own.pos() + own.size());
+        glUniform4f(m_shader->pane, low.x, low.y, high.x, high.y);
+    }
     glUniform1i(m_shader->mode, static_cast<int>(m_pose->mode));
     glUniform1f(m_shader->progress, m_pose->progress);
     glUniform1f(m_shader->direction, m_pose->direction);

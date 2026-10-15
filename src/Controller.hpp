@@ -120,6 +120,7 @@ class Controller {
     std::string unavailable(PHLWINDOW window) const;
     bool inputBusy() const;
     std::string animationFallback(PHLWINDOW a, PHLWINDOW b) const;
+    static bool glassy(PHLWINDOW w);
     void onClose(PHLWINDOW window);
     void onFocus(PHLWINDOW window);
     void settleInput();
