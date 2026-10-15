@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.3.0-rc.8 — 2026-10-15
+
+- Fix Hyprland aborting after Super+G on a floating card. Toggling the group
+  could empty the card's group while the card still held it, and the next
+  focus read its missing current window (`out_of_range`).
 - Fix a face with several apps losing all but one of them during a flip. The
   glass backdrop a pane turns over covered the whole card, so the last pane
   drawn frosted over the others: they vanished into a stationary blur and
