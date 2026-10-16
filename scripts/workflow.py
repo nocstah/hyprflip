@@ -1805,6 +1805,23 @@ class Saved(Setup):
             members = {a: windows[a] for face in card['faces'] for a in face}
             return SavedPlan('goto', name, recipe, workspace=workspace, focus=focus,
                              card=deepcopy(card), windows=deepcopy(members))
+        # An open card that still holds part of this setup is completed in
+        # place, as Reopen missing apps would, instead of competing for apps.
+        partial = [(c, chosen) for c in state.get('containers', []) if state.get('repair_cards')
+                   and not c.get('fullscreen')
+                   and (chosen := self.surviving_slots(recipe, c, windows))]
+        if partial:
+            index = '0' if len(partial) == 1 else self.menu.choose('Which open card should get the missing apps?', [
+                Choice(str(i), 'Workspace ' + workspace_name(windows[c['current']]), self.describe(recipe))
+                for i, (c, _) in enumerate(partial)])
+            if index not in map(str, range(len(partial))): raise Cancelled()
+            card, chosen = partial[int(index)]
+            anchor = card['current']
+            if self.ipc.data('-j', 'activewindow').get('address') != anchor: self.ipc.focus(anchor)
+            members = {a: windows[a] for face in card['faces'] for a in face}
+            edit = EditPlan(anchor, deepcopy(card), deepcopy(members), action='repair')
+            Edit(self.ipc, self.menu).validate(edit)
+            return self.prepare_open(name, recipe, windows[anchor]['workspace']['id'], anchor, edit=edit, chosen=chosen)
         return self.prepare_open(name, recipe, workspace, focus)
 
     def prepare_manage(self, edit=None):

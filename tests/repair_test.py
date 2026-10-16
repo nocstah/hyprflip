@@ -168,6 +168,32 @@ class RepairTest(unittest.TestCase):
         with self.assertRaisesRegex(setup.SetupError, 'already open but unavailable'): self.prepare()
         self.assertEqual(self.ipc.mutations, [])
 
+    def test_opening_the_saved_card_completes_its_partial_open_card(self):
+        self.ipc.remove('0xc'); self.ipc.focus('0xa')
+        self.ipc.clients['0xe'] = dict(self.original['0xa'], address='0xe', pid=95, **{'class': 'other', 'initialClass': 'other'})
+        self.ipc.active = '0xe'
+        before = deepcopy(self.ipc.card)
+        flow = setup.Saved(self.ipc, Menu())
+        plan = flow.prepare_named('Comms', self.recipe, 2, '0xe')
+        self.assertEqual((plan.action, plan.focus, plan.chosen), ('repair', '0xa', ['0xa', '0xb', None, '0xd']))
+        self.assertEqual(self.ipc.active, '0xa')
+        self.apply(flow, plan)
+        self.assertEqual(self.ipc.card['faces'], [['0xa'], ['0xb', '0x2c', '0xd']])
+        self.assertEqual(self.ipc.card['id'], before['id'])
+        self.assertEqual(self.ipc.card['current'], '0xa')
+
+    def test_opening_the_saved_card_still_refuses_apps_held_by_other_cards(self):
+        self.ipc.remove('0xc', close=False)
+        self.ipc.snapshot['containers'].append(dict(id=2, faces=[['0xc'],['0xe']]))
+        flow = setup.Saved(self.ipc, Menu())
+        with self.assertRaisesRegex(setup.SetupError, 'already open but unavailable'):
+            flow.prepare_named('Comms', self.recipe, 2, self.ipc.active)
+        self.ipc.snapshot['containers'].pop(); self.ipc.remove('0xc')
+        self.ipc.card['fullscreen'] = True
+        with self.assertRaisesRegex(setup.SetupError, 'already open but unavailable'):
+            flow.prepare_named('Comms', self.recipe, 2, self.ipc.active)
+        self.assertEqual(self.ipc.mutations, [])
+
     def test_changed_card_during_launch_aborts_before_layout_mutation(self):
         self.ipc.remove('0xc'); flow, plan = self.prepare()
         def launch(entry):

@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Opening a saved card now completes an open card that still holds part of
+  it, instead of failing with “… is already open but unavailable”. With Gmail
+  and Telegram open as a card and WhatsApp closed, opening the saved card
+  goes to that card and reopens WhatsApp in its slot, as Reopen missing apps
+  does. Apps must still be on their saved sides; a fullscreen card, or an app
+  held by a different card, is left alone as before.
+
 ## 0.3.0-rc.8 — 2026-10-15
 
 - Fix Hyprland aborting after Super+G on a floating card. Toggling the group
