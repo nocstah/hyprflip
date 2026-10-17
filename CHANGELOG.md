@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.0-rc.9 — 2026-10-17
 
 - Keep window titles off command lines. The Omarchy menu receives its rows
   as a command-line argument, which other local users can read from `/proc`,
