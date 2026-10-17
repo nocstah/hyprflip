@@ -155,22 +155,59 @@ class SetupTest(unittest.TestCase):
             first.finish(); second.check(); second.finish()
             self.assertFalse(second.current.exists())
 
-    def test_menu_round_trip_keeps_titles_out_of_shell_code(self):
+    def omarchy_choose(self, choices, pick, env=None):
+        """Run OmarchyMenu.choose against a fake shell that selects row `pick`; return (value, argv)."""
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             request = setup.Request(root, 'instance'); request.start()
-            title = 'Backticks `touch nope` and $(touch nope)'
-            choice = setup.Choice('0xb', 'Brave', title)
+            commands = []
             def run(command, **kwargs):
                 self.assertEqual(command[:4], ['omarchy-shell', 'shell', 'summon', 'omarchy.menu'])
+                commands.append(command)
                 payload = json.loads(command[4])
-                self.assertEqual(payload['options'], ['\tBrave\t' + title])
-                Path(payload['selectionFile']).write_text('Brave\t' + title + '\n')
+                Path(payload['selectionFile']).write_text(payload['options'][pick].removeprefix('\t') + '\n')
                 Path(payload['doneFile']).touch()
                 return subprocess.CompletedProcess(command, 0, 'ok\n', '')
             with patch('subprocess.run', side_effect=run):
-                self.assertEqual(setup.OmarchyMenu(root, request).choose('Choose', [choice]), '0xb')
+                value = setup.OmarchyMenu(root, request, env).choose('Choose', choices)
             request.finish()
+            return value, commands[0]
+
+    def test_menu_round_trip_keeps_details_out_of_shell_code(self):
+        detail = 'Backticks `touch nope` and $(touch nope)'
+        value, command = self.omarchy_choose([setup.Choice('0xb', 'Brave', detail)], 0)
+        self.assertEqual(value, '0xb')
+        self.assertEqual(json.loads(command[4])['options'], ['\tBrave\t' + detail])
+
+    def test_window_titles_never_reach_a_command_line(self):
+        # Another local user can read every process's argv from /proc.
+        windows = [{'address': '0xa', 'class': 'brave-browser', 'title': 'Q3 salaries.xlsx', 'floating': True},
+                   {'address': '0xb', 'class': 'brave-browser', 'title': 'Inbox (3) – private@example.com'},
+                   {'address': '0xc', 'class': 'foot', 'title': 'ssh secret-host'}]
+        choices = setup.window_choices(windows, arranging=True)
+        for pick, expected in enumerate(('0xa', '0xb', '0xc')):
+            value, command = self.omarchy_choose(choices, pick)
+            self.assertEqual(value, expected)
+            argv = '\0'.join(command)
+            for window in windows:
+                self.assertNotIn(window['title'], argv)
+        self.assertEqual(json.loads(command[4])['options'],
+                         ['\tBrave\tResizes to fit card', '\tBrave', '\tTerminal'])
+        same = [setup.Choice('0xa', 'Brave', title='One'), setup.Choice('0xb', 'Brave', title='Two')]
+        value, command = self.omarchy_choose(same, 1)
+        self.assertEqual(json.loads(command[4])['options'], ['\tBrave', '\tBrave (2)'])
+        self.assertEqual(value, '0xb')
+
+    def test_window_titles_in_the_omarchy_menu_are_opt_in(self):
+        choices = setup.window_choices([{'address': '0xa', 'class': 'foot', 'title': 'One', 'floating': True},
+                                        {'address': '0xb', 'class': 'foot', 'title': 'Two'}], arranging=True)
+        for value in ('', '0', 'off'):
+            _, command = self.omarchy_choose(choices, 0, {'HYPRFLIP_MENU_TITLES': value})
+            self.assertNotIn('One', command[4])
+        value, command = self.omarchy_choose(choices, 1, {'HYPRFLIP_MENU_TITLES': '1'})
+        self.assertEqual(json.loads(command[4])['options'],
+                         ['\tTerminal\tResizes to fit card · One', '\tTerminal\tTwo'])
+        self.assertEqual(value, '0xb')
 
 
 if __name__ == '__main__': unittest.main()

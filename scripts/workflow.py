@@ -402,25 +402,32 @@ def app_name(window):
                   'foot': 'Terminal', 'kitty': 'Terminal', 'Alacritty': 'Terminal'}.get(name, name), 60)
 
 
+def joined(*parts):
+    return ' · '.join(part for part in parts if part)
+
+
 @dataclass(frozen=True)
 class Choice:
     value: str
     label: str
     detail: str = ''
+    # A window title. Menus that take rows on stdin show it; the Omarchy menu
+    # does not unless HYPRFLIP_MENU_TITLES is set, because its rows travel on
+    # command lines other users can read.
+    title: str = ''
 
 
 def window_choices(windows, arranging=False):
     result, seen = [], set()
     for window in windows:
-        label, detail = app_name(window), clean(window.get('title') or 'Open window')
-        if arranging and window.get('floating'):
-            detail = 'Resizes to fit card · ' + detail
+        label, title = app_name(window), clean(window.get('title') or 'Open window')
+        detail = 'Resizes to fit card' if arranging and window.get('floating') else ''
         original, number = label, 1
-        while (label, detail) in seen:
+        while (label, detail, title) in seen:
             number += 1
             label = f'{original} ({number})'
-        seen.add((label, detail))
-        result.append(Choice(window['address'], label, detail))
+        seen.add((label, detail, title))
+        result.append(Choice(window['address'], label, detail, title))
     return result
 
 
@@ -494,12 +501,21 @@ class OmarchyMenu:
 
     def choose(self, prompt, choices):
         # The shell accepts <icon> TAB <label> TAB <detail> and returns label/detail.
-        rows = ['\t' + c.label + ('\t' + c.detail if c.detail else '') for c in choices]
-        selected = self.request_value(prompt, rows)
+        # Rows reach it as a command-line argument, so they carry titles only on
+        # request; windows the title would have told apart are numbered instead.
+        titles = self.env.get('HYPRFLIP_MENU_TITLES', '').strip().lower() in ('1', 'true', 'yes', 'on')
+        keys = {}
         for choice in choices:
-            if selected == choice.label + ('\t' + choice.detail if choice.detail else ''):
-                return choice.value
-        raise SetupError('That window selection changed. Open setup again.')
+            detail = joined(choice.detail, choice.title) if titles else choice.detail
+            label, number = choice.label, 1
+            while label + ('\t' + detail if detail else '') in keys:
+                number += 1
+                label = f'{choice.label} ({number})'
+            keys[label + ('\t' + detail if detail else '')] = choice.value
+        selected = self.request_value(prompt, ['\t' + key for key in keys])
+        if selected not in keys:
+            raise SetupError('That window selection changed. Open setup again.')
+        return keys[selected]
 
 
 class DesktopMenu:
@@ -569,7 +585,8 @@ class DesktopMenu:
     def choose(self, prompt, choices):
         if not choices:
             raise Cancelled()
-        rows = [clean(c.label, 120) + (' — ' + clean(c.detail, 240) if c.detail else '') for c in choices]
+        rows = [clean(c.label, 120) + (' — ' + clean(joined(c.detail, c.title), 240) if c.detail or c.title else '')
+                for c in choices]
         selected = self.run(prompt, rows)
         if not re.fullmatch(r'[0-9]{1,8}', selected) or int(selected) >= len(choices):
             raise SetupError('That selection is no longer available. Open Hyprflip again.')
@@ -659,10 +676,9 @@ class Find:
         for choice in window_choices([windows[a] for a in ordered]):
             _, card, _, side = targets[choice.value]
             visible = card.get('unfolded') or card['active'] == side
-            detail = (f'Workspace {workspace_name(windows[choice.value])} · '
-                      + ('Front' if side == 0 else 'Back') + (' · Visible' if visible else ' · Hidden')
-                      + ' · ' + choice.detail)
-            choices.append(Choice(choice.value, choice.label, detail))
+            choices.append(replace(choice, detail=joined(f'Workspace {workspace_name(windows[choice.value])}',
+                                                         'Front' if side == 0 else 'Back',
+                                                         'Visible' if visible else 'Hidden', choice.detail)))
         address = self.menu.choose('Find an app in your cards', choices)
         if address not in targets:
             raise SetupError('That app is no longer available. Open Find app again.')
@@ -784,7 +800,7 @@ class Setup:
             source = window['workspace']['id']
             if source != workspace:
                 groups.setdefault(source, []).append(window)
-        choices = list(leading) + [Choice(c.value, prefix + c.label, c.detail) for c in window_choices(local, arranging=True)]
+        choices = list(leading) + [replace(c, label=prefix + c.label) for c in window_choices(local, arranging=True)]
         for source, apps in sorted(groups.items()):
             names = ', '.join(dict.fromkeys(app_name(w) for w in apps))
             choices.append(Choice(f'workspace:{source}', f'Add from workspace {workspace_name(apps[0])}',
@@ -1104,7 +1120,7 @@ class Edit(Setup):
                     choices.append(Choice('other_side', 'Move an app to the other side…',
                                           clean('Join ' + ', '.join(app_name(windows[a]) for a in other), 100)))
             choices += [Choice('release:' + c.value, f'Remove {c.label} from card',
-                              ('Focused app · ' if c.value == anchor else '') + 'Keep open · ' + c.detail)
+                              joined('Focused app' if c.value == anchor else '', 'Keep open', c.detail), c.title)
                        for c in window_choices([windows[anchor]] + [windows[a] for a in face if a != anchor])]
             prompt = (f'Edit card: this side is full ({limit} apps)' if len(face) >= limit
                       else f'Edit card: {len(face)} apps on this side')
@@ -1148,7 +1164,7 @@ class Edit(Setup):
                             if 0 <= destination < len(face):
                                 neighbor = app_name(windows[face[destination]])
                                 choices.append(Choice(f'{index}:{destination}', f'Move {choice.label} {direction}',
-                                    ('Before ' if step < 0 else 'After ') + neighbor + ' · ' + choice.detail))
+                                    joined(('Before ' if step < 0 else 'After ') + neighbor, choice.detail), choice.title))
                     selected = self.menu.choose('Reorder apps on this side', choices)
                     if selected not in {c.value for c in choices}: raise SetupError('Choose a move from the card menu.')
                     index, destination = map(int, selected.split(':'))
@@ -1156,7 +1172,7 @@ class Edit(Setup):
                 order = tuple(order)
         if action == 'other_side':
             removal = self.menu.choose('Move to the other side',
-                [Choice(c.value, c.label, ('Focused app · ' if c.value == anchor else '') + c.detail)
+                [replace(c, detail=joined('Focused app' if c.value == anchor else '', c.detail))
                  for c in window_choices([windows[anchor]] + [windows[a] for a in face if a != anchor])])
             if removal not in face: raise SetupError('That app is no longer on this side. Open the card menu again.')
         candidate = None
@@ -1175,7 +1191,7 @@ class Edit(Setup):
             workspace = members[anchor]['workspace']['id']
             if action == 'replace':
                 removal = face[0] if len(face) == 1 else self.menu.choose('App to replace', [
-                    Choice(c.value, c.label, ('Focused app · ' if c.value == anchor else '') + c.detail)
+                    replace(c, detail=joined('Focused app' if c.value == anchor else '', c.detail))
                     for c in window_choices([windows[anchor]] + [windows[a] for a in face if a != anchor])])
                 if removal not in face: raise SetupError('That app is no longer on this side. Open Edit card again.')
             candidates = list(self.eligible(windows, state).values())
@@ -1914,8 +1930,8 @@ class Saved(Setup):
             choices = [Choice('restore', 'Restore card here', f'Workspace {workspace} · {len(chosen)} apps')]
             for index, ((side, _, _), address) in enumerate(zip(slots, chosen)):
                 w = windows[address]
-                detail = f'Workspace {workspace_name(w)} · ' + clean(w.get('title', ''), 85)
-                choices.append(Choice(str(index), f'{"Front" if side == 0 else "Back"} · {app_name(w)}', detail))
+                choices.append(Choice(str(index), f'{"Front" if side == 0 else "Back"} · {app_name(w)}',
+                                      f'Workspace {workspace_name(w)}', clean(w.get('title', ''), 85)))
             choices.append(Choice('cancel', 'Cancel', 'Keep the current arrangement'))
             answer = self.menu.choose(f'Restore “{name}”: review apps', choices)
             if answer == 'restore': break

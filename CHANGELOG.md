@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Keep window titles off command lines. The Omarchy menu receives its rows
+  as a command-line argument, which other local users can read from `/proc`,
+  so app pickers there no longer include window titles: every candidate
+  window's title was exposed, not just the chosen one's. Rows show the app,
+  workspace and status, and two windows of the same app are numbered.
+  Fuzzel, Rofi and Wofi read rows on stdin and still show titles. Set
+  `HYPRFLIP_MENU_TITLES=1` to show titles in the Omarchy menu on a computer
+  only you use.
 - Opening a saved card now completes an open card that still holds part of
   it, instead of failing with “… is already open but unavailable”. With Gmail
   and Telegram open as a card and WhatsApp closed, opening the saved card

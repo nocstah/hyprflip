@@ -310,6 +310,13 @@ To make a preference persistent, add `hl.env("HYPRFLIP_MENU", "rofi")` to your
 Hyprland Lua configuration and reload. With `auto`, C/L prefer OmaCards when
 its panel is available, then the native Omarchy menu, then a portable picker.
 `--legacy` bypasses the OmaCards panel while retaining automatic menu detection.
+
+App pickers in the Omarchy menu list apps by name, workspace and status, and
+number two windows of the same app, without their window titles. The menu
+receives its rows as a command-line argument, which other users on the same
+computer can read while it opens. Fuzzel, Rofi and Wofi read rows privately
+and show titles. On a computer only you use, add
+`hl.env("HYPRFLIP_MENU_TITLES", "1")` to show titles in the Omarchy menu too.
 `--backend-only` needs no shell or picker; install one to use its menu commands.
 
 Add `--mouse-flip` to both installer commands to opt into
