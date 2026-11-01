@@ -85,6 +85,25 @@ another kind of group or requiring users to manage a layout tree.
 - Find an open app on either face with Super+Ctrl+Alt+K, including cards on other
   workspaces. Optional modifier + middle-click flips the focused card.
 
+## To do: remove hy3
+
+Decided 2026-11-01: hy3 support is no longer needed. Cards run on Hyprland's
+own dwindle with the core alone, and that is what is used. Until the removal,
+hy3 suites are not run and new features need no hy3 path; refusing hy3 cards
+is enough. Strip later:
+
+- The core: the hy3 lookup in `provider()` (native cards keep their own API
+  table), the provider epochs, `CONTAINER_SYMBOL`, the hy3-only refusals and
+  the `pair` path that asks for a hy3 workspace.
+- `integrations/hy3`, `scripts/build-containers`,
+  `examples/containers-trial.lua`, the `--containers` demo in
+  `tests/nested_session.py`, and the hy3 suites and branches in `tests/`.
+- The hy3 items under "Before a wider container preview" below, and the docs
+  that describe hy3 as a backend (README, INSTALL, CONTAINERS, SAVED_CARDS,
+  TRANSITIONS, PANEL_API, SCRIPTING, BETA).
+- OmaCards: its hy3 mentions and pin checks (`tests/pin_check.py`,
+  `tests/run-native.py`).
+
 ## Before a wider container preview
 
 - The reproduced native-group migration crash has a pinned hy3 lifetime fix;
