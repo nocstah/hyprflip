@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.0-rc.10 — 2026-11-01
 
 - Drive a card by its id without taking the focus: `card <id> show
   <front|back>`, `card <id> flip` and `card <id> workspace <workspace>
