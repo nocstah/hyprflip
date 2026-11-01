@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Updating the core with scripts/install.py keeps open native cards, in a disposable compositor."""
+"""Updating the core with scripts/install.py keeps open native cards and leaves parked ones as separate
+windows, in a disposable compositor."""
 import argparse
 import json
 import os
@@ -85,6 +86,14 @@ hl.config({{animations={{enabled=false}},general={{gaps_in=14,gaps_out=24}},
     ipc.call('eval', 'hl.config({plugin={hyprflip={duration_ms=0,notifications=false}}})')
     passed('a fresh install loads the plugin from the disposable home')
 
+    # A card another program parked out of sight. It is built on a workspace
+    # of its own, so workspace 95's layout is what it would be without it.
+    ipc.call('dispatch', 'hl.dsp.focus({workspace=96})')
+    parked = [spawn('parked-front'), spawn('parked-back')]
+    ipc.focused((parked[0], 'mark'), (parked[1], 'card'))
+    hidden = next(card['id'] for card in ipc.status()['containers'] if parked[0] in sum(card['faces'], []))
+    ipc.action(f'card {hidden} workspace special:park silent')
+
     ipc.call('dispatch', 'hl.dsp.focus({workspace=95})')
     # A neighbouring tile, so the card's place in the layout matters.
     neighbor = spawn('neighbor')
@@ -98,7 +107,10 @@ hl.config({{animations={{enabled=false}},general={{gaps_in=14,gaps_out=24}},
     ipc.call('eval', f'hl.plugin.hyprflip.card_place("{d}", 300, 150, 700, 500)')
     ipc.focus(d); ipc.action('unfold')
     time.sleep(.3)
-    before = {tuple(x for f in card['faces'] for x in f): (shape(card), card['box']) for card in ipc.status()['containers']}
+    cards = ipc.status()['containers']
+    assert [sorted(sum(card['faces'], [])) for card in cards if card['workspace']['special']] == [sorted(parked)], cards
+    before = {tuple(x for f in card['faces'] for x in f): (shape(card), card['box']) for card in cards
+              if not card['workspace']['special']}
     assert len(before) == 2 and any(s['floating'] and s['unfolded'] for s, _ in before.values()), before
 
     # With smart_split, re-inserted tiles split whatever is under the cursor.
@@ -113,6 +125,16 @@ hl.config({{animations={{enabled=false}},general={{gaps_in=14,gaps_out=24}},
         assert after[members][0] == described, (described, after[members][0])
         assert all(abs(p - q) <= 4 for p, q in zip(after[members][1], box)), (described['floating'], box, after[members][1])
     passed('an update keeps a tiled 70/30 card beside its neighbour and an unfolded floating card exactly as they were')
+
+    # The update rebuilt only those two: the parked card's apps stay where it
+    # was, as separate windows, for the program that parked it to rebuild.
+    assert 'Leaving 1 hidden card(s) as separate windows; the program that parked them rebuilds them.' in out, out
+    assert 'Could not keep a card' not in out, out
+    windows = ipc.windows()
+    for address in parked:
+        window = windows[address]
+        assert window['workspace']['name'] == 'special:park' and not window['grouped'] and window['acceptsInput'], window
+    passed('an update leaves a card parked on special:park as separate windows there and says how many')
 
     # Dwindle can reflow a workspace while a tiled card is briefly separate
     # tiles. Displace the card deliberately; the installer's correction must

@@ -25,7 +25,8 @@ class InstallerTest(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
         self.project = self.root / "project"
-        for relative in ("scripts/install.py", "CMakeLists.txt", "examples/hyprflip.lua", "examples/module-path.lua"):
+        for relative in ("scripts/install.py", "scripts/card_restore.py", "CMakeLists.txt", "examples/hyprflip.lua",
+                         "examples/module-path.lua"):
             target = self.project / relative
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(ROOT / relative, target)
@@ -49,6 +50,7 @@ class InstallerTest(unittest.TestCase):
         self.pairs = [PAIR.copy()]
         self.containers = []
         self.restored = []
+        self.recovery_at_unload = None
         self.fail_adoption = False
         self.calls = []
 
@@ -67,6 +69,8 @@ class InstallerTest(unittest.TestCase):
         elif args == ["hyprflip", "finish"]:
             reply = "ok: settled"
         elif args == ["plugin", "unload", str(self.library)]:
+            # What a failed update would retry from.
+            self.recovery_at_unload = json.loads(self.recovery.read_text()) if self.recovery.exists() else None
             self.loaded = False
             self.pairs = []
             self.containers = []
@@ -102,12 +106,13 @@ class InstallerTest(unittest.TestCase):
         return subprocess.CompletedProcess(command, 0, reply, "")
 
     def run_installer(self, *arguments):
+        self.output = io.StringIO()
         with patch.object(Path, "home", return_value=self.home), \
                 patch.dict(os.environ, {"XDG_CONFIG_HOME": str(self.config),
                                         "HYPRLAND_INSTANCE_SIGNATURE": "test-instance"}), \
                 patch.object(sys, "argv", ["install.py", *arguments]), \
                 patch("subprocess.run", side_effect=self.hyprctl), \
-                contextlib.redirect_stdout(io.StringIO()):
+                contextlib.redirect_stdout(self.output):
             runpy.run_path(str(self.project / "scripts/install.py"), run_name="__main__")
 
     def test_upgrade_restores_pairs_and_preserves_custom_settings(self):
@@ -175,6 +180,25 @@ class InstallerTest(unittest.TestCase):
         self.run_installer()
         self.assertEqual(self.restored, ["floating 1 0 10 20 800 600 front horizontal 0xc 0xc:1 "
                                          "back vertical 0xe 0xd:0.7 0xe:0.3"])
+        self.assertEqual(self.library.read_bytes(), b"new plugin")
+        self.assertFalse(self.recovery.exists())
+
+    def test_update_leaves_parked_cards_out_of_restore_and_recovery(self):
+        def card(front, back, workspace, **state):
+            return {"faces": [[front], [back]], "native_group": True, "floating": False, "fullscreen": False,
+                    "active": 0, "unfolded": False, "box": [10, 20, 800, 600], "workspace": workspace,
+                    "layouts": [{"axis": "horizontal", "focused": front, "ratios": [1]},
+                                {"axis": "horizontal", "focused": back, "ratios": [1]}], **state}
+        # The fullscreen check covers the cards an update keeps, not a parked one.
+        self.containers = [card("0xc", "0xd", {"id": 3, "name": "3", "special": False}),
+                           card("0xe", "0xf", {"id": -98, "name": "special:park", "special": True}, fullscreen=True)]
+        self.run_installer()
+        shown = "tiled 0 0 10 20 800 600 front horizontal 0xc 0xc:1 back horizontal 0xd 0xd:1"
+        self.assertEqual(self.restored, [shown])
+        self.assertEqual(self.recovery_at_unload, {"instance": "test-instance", "pairs": [PAIR], "cards": [shown]})
+        self.assertIn("Keeping 1 open card(s) through this update.\n"
+                      "Leaving 1 hidden card(s) as separate windows; the program that parked them rebuilds them.\n",
+                      self.output.getvalue())
         self.assertEqual(self.library.read_bytes(), b"new plugin")
         self.assertFalse(self.recovery.exists())
 

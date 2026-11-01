@@ -11,6 +11,7 @@ from pathlib import Path
 import signal
 import shutil
 import subprocess
+import sys
 import time
 
 parser = argparse.ArgumentParser(description=__doc__)
@@ -21,6 +22,8 @@ demo_flags.add_argument("--native-cards", action="store_true", help="Open an int
 parser.add_argument("--aquamarine", type=Path,
                     help="Aquamarine build with tests/aquamarine-render-node.patch: render on a non-NVIDIA GPU (see TESTING.md)")
 parser.add_argument("--render-node", type=Path, help="render node for --aquamarine (default: first non-NVIDIA)")
+parser.add_argument("--notify-recorder", action="store_true",
+                    help="record desktop notifications in <directory>/notify-send.log, one JSON list of arguments per line")
 args = parser.parse_args()
 demo = args.containers or args.native_cards
 root = args.directory.resolve()
@@ -76,6 +79,19 @@ env.update(
 )
 for key in ("HYPRLAND_INSTANCE_SIGNATURE", "DISPLAY", "DBUS_SESSION_BUS_ADDRESS"):
     env.pop(key, None)
+notify_log = root / "notify-send.log"
+if args.notify_recorder:
+    # Hyprflip runs the first notify-send on the compositor's PATH. This one
+    # only appends its arguments to the log; without a session bus, nothing
+    # from the nested session reaches the user's desktop in any case.
+    recorder = root / "bin/notify-send"
+    recorder.parent.mkdir(mode=0o700, exist_ok=True)
+    recorder.write_text(f"#!{sys.executable} -I\nimport json, sys\n"
+                        f"with open({str(notify_log)!r}, 'a') as log:\n"
+                        "    log.write(json.dumps(sys.argv[1:]) + '\\n')\n")
+    recorder.chmod(0o700)
+    notify_log.write_text("")
+    env["PATH"] = os.pathsep.join([str(recorder.parent), env.get("PATH", os.defpath)])
 config = root / "hyprland.lua"
 base_config = '''hl.monitor({output="",mode="1280x800@60",position="auto",scale=1})
 hl.config({
@@ -125,6 +141,8 @@ try:
     if socket is None:
         raise RuntimeError("Timed out waiting for nested compositor")
     connection = {k: env[k] for k in ("XDG_RUNTIME_DIR", "WAYLAND_DISPLAY", "HYPRLAND_INSTANCE_SIGNATURE")}
+    if args.notify_recorder:
+        connection["notify_log"] = str(notify_log)
     (root / "session.json").write_text(json.dumps(connection))
     time.sleep(1)
     if demo:

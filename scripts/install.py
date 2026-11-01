@@ -49,7 +49,14 @@ installed = any(p["name"] == "hyprflip" for p in json.loads(ctl("-j", "plugin", 
 installed_state = json.loads(ctl("hyprflip", "status")) if installed else {}
 
 
-cards = installed_state.get("containers", [])
+def shown(containers):
+    # A card parked on a special workspace stays as separate windows: restore
+    # cannot rebuild it there, and the program that parked it rebuilds it.
+    return [card for card in containers if not card.get("workspace", {}).get("special")]
+
+
+containers = installed_state.get("containers", [])
+cards = shown(containers)
 if any(not card.get("native_group") for card in cards):
     raise SystemExit("hy3 cards are active. Use the matching core/provider updater in docs/INSTALL.md; "
                      "this installer preserves native pairs and dwindle/floating cards.")
@@ -57,7 +64,7 @@ if any(card.get("fullscreen") for card in cards):
     raise SystemExit("Leave fullscreen on every card before updating; open cards are kept through the update.")
 saved_pairs = installed_state.get("pairs", [])
 saved_cards = [describe(card) for card in cards]
-if not saved_pairs and not saved_cards and recovery.is_file():
+if not saved_pairs and not containers and recovery.is_file():
     pending = json.loads(recovery.read_text())
     if pending.get("instance") == os.environ.get("HYPRLAND_INSTANCE_SIGNATURE"):
         saved_pairs = pending.get("pairs", [])
@@ -66,6 +73,9 @@ if saved_pairs:
     print(f"Preserving {len(saved_pairs)} existing pair(s) through this update.")
 if saved_cards:
     print(f"Keeping {len(saved_cards)} open card(s) through this update.")
+if len(cards) < len(containers):
+    print(f"Leaving {len(containers) - len(cards)} hidden card(s) as separate windows; "
+          "the program that parked them rebuilds them.")
 if args.dry_run:
     raise SystemExit(0)
 
@@ -86,11 +96,13 @@ def atomic(path, data):
 try:
     # Capture after settling: a turn may have been active when installation
     # began. Native groups retain geometry, focus and current side on unload.
+    # A card parked meanwhile stays out as well.
     if installed:
         ctl("hyprflip", "finish")
         current = json.loads(ctl("hyprflip", "status"))
         saved_pairs = current["pairs"] or saved_pairs
-        saved_cards = [describe(card) for card in current.get("containers", [])] or saved_cards
+        if current.get("containers"):
+            saved_cards = [describe(card) for card in shown(current["containers"])]
     if saved_pairs or saved_cards:
         atomic(recovery, json.dumps({"instance": os.environ.get("HYPRLAND_INSTANCE_SIGNATURE"),
                                      "pairs": saved_pairs, "cards": saved_cards}).encode())
