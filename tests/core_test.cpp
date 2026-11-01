@@ -1,4 +1,5 @@
 #include "AccentColor.hpp"
+#include "InputGuard.hpp"
 #include "SplitLayout.hpp"
 #include "Timeline.hpp"
 #include <cstdlib>
@@ -24,6 +25,24 @@ int main() {
     require(!parseAccent("") && !parseAccent("F78DBB") && !parseAccent("#F78DB") && !parseAccent("#F78DBBAA") &&
                 !parseAccent("#G78DBB"),
             "accent rejects anything but #RRGGBB");
+    // Keyboard and menu actions wait for any input in progress. Actions by id
+    // wait only for input that their move would disturb.
+    const auto input = [](std::initializer_list<bool InputState::*> set) {
+        InputState state{};
+        for (const auto field : set)
+            state.*field = true;
+        return state;
+    };
+    require(!interactiveBusy(input({})) && !scriptedBusy(input({})), "idle input refuses nothing");
+    for (const auto field :
+         {&InputState::locked, &InputState::grab, &InputState::dnd, &InputState::constrained, &InputState::held})
+        require(interactiveBusy(input({field})), "keyboard and menu actions wait for any input in progress");
+    require(!scriptedBusy(input({&InputState::locked})), "a locked screen does not stop actions by id");
+    require(!scriptedBusy(input({&InputState::held})), "a button held over another window does not stop actions by id");
+    for (const auto field : {&InputState::grab, &InputState::dnd, &InputState::constrained})
+        require(scriptedBusy(input({field})), "a grab, drag-and-drop or constrained pointer stops actions by id");
+    require(scriptedBusy(input({&InputState::held, &InputState::heldOverTarget})),
+            "a button held over the card stops actions by id");
     Timeline t(280);
     require(!t.finished() && !t.secondSide() && t.angle() == 0, "initial front");
     t.advance(139);
@@ -116,5 +135,5 @@ int main() {
             }
         }
     }
-    std::cout << "Face size constraints, timeline, reversals, stalls and perspective bounds passed\n";
+    std::cout << "Face size constraints, input guards, timeline, reversals, stalls and perspective bounds passed\n";
 }

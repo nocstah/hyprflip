@@ -3,6 +3,7 @@
 #include "CardFrames.hpp"
 #include "CardDrop.hpp"
 #include "FlipTransformer.hpp"
+#include "InputGuard.hpp"
 #include "Timeline.hpp"
 #include <array>
 #include <chrono>
@@ -112,10 +113,13 @@ class Controller {
     Result endPeek();
     bool canReturnPeek() const;
     Result unpair();
+    // Dissolves a card or pair where it is, leaving its apps as windows.
+    Result ungroup(Pair &pair);
     Result attach(bool vertical);
     Result release();
     Result workspace(uint32_t destination, bool follow);
-    Result moveCard(Pair &pair, const std::string &destination, bool follow);
+    // scripted: the silent move by id, guarded by scriptBusy instead of inputBusy.
+    Result moveCard(Pair &pair, const std::string &destination, bool follow, bool scripted = false);
     Result move(char direction);
     Result unfold();
     Result editContainer(ContainerEdit operation, const std::string &target = "");
@@ -123,6 +127,10 @@ class Controller {
     Result replacePane(const std::string &arguments);
     std::string unavailable(PHLWINDOW window) const;
     bool inputBusy() const;
+    InputState input(const std::vector<PHLWINDOW> &targets) const;
+    // Input that an id-addressed silent action on these windows would disturb.
+    bool scriptBusy(const std::vector<PHLWINDOW> &targets) const;
+    std::vector<PHLWINDOW> members(const Pair &pair) const;
     std::string animationFallback(PHLWINDOW a, PHLWINDOW b) const;
     static bool glassy(PHLWINDOW w);
     void onClose(PHLWINDOW window);

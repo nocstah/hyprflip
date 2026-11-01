@@ -27,6 +27,7 @@
 #include <hyprland/src/protocols/XDGShell.hpp>
 #include <hyprland/src/protocols/core/Compositor.hpp>
 #include <hyprland/src/protocols/core/DataDevice.hpp>
+#include <hyprland/src/protocols/core/Subcompositor.hpp>
 #include <hyprland/src/render/Renderer.hpp>
 #include <hyprland/src/render/decorations/IHyprWindowDecoration.hpp>
 #include <limits>
@@ -77,6 +78,26 @@ bool fits(PHLWINDOW w, Vector2D size) {
 }
 bool sameBox(const CBox &a, const CBox &b) {
     return std::abs(a.x - b.x) < 1 && std::abs(a.y - b.y) < 1 && std::abs(a.w - b.w) < 1 && std::abs(a.h - b.h) < 1;
+}
+// The window the seat's pointer focus belongs to, read as CardFrames reads it.
+// A subsurface or popup stands for its window; layers and locks have none.
+PHLWINDOW pointerWindow() {
+    auto surface = g_pSeatManager->m_state.pointerFocus.lock();
+    for (int depth = 0; depth < 32 && surface && surface->m_role && surface->m_role->role() == SURFACE_ROLE_SUBSURFACE;
+         ++depth) {
+        const auto subsurface = static_cast<CSubsurfaceRole *>(surface->m_role.get())->m_subsurface.lock();
+        surface = subsurface ? subsurface->m_parent.lock() : nullptr;
+    }
+    const auto owner = CWLSurface::fromResource(surface);
+    const auto view = owner ? owner->view() : nullptr;
+    if (const auto popup = CPopup::fromView(view)) {
+        const auto head = popup->popupHead();
+        for (const auto &w : Desktop::windowState()->windows())
+            if (head && w->m_popupHead == head)
+                return w;
+        return nullptr;
+    }
+    return CWindow::fromView(view);
 }
 } // namespace
 
@@ -615,10 +636,25 @@ void Controller::finish(bool applyDestination) {
     m_turn.reset();
     m_timer->updateTimeout(std::nullopt);
 }
-bool Controller::inputBusy() const {
+bool Controller::inputBusy() const { return interactiveBusy(input({})); }
+InputState Controller::input(const std::vector<PHLWINDOW> &targets) const {
     const auto grab = g_pSeatManager->m_seatGrab;
-    return g_pSessionLockManager->isSessionLocked() || (grab && (grab->m_keyboard || grab->m_pointer)) ||
-           PROTO::data->dndActive() || g_pInputManager->isConstrained() || g_pInputManager->hasHeldButtons();
+    const bool held = g_pInputManager->hasHeldButtons();
+    const auto over = held && !targets.empty() ? pointerWindow() : nullptr;
+    return {.locked = g_pSessionLockManager->isSessionLocked(),
+            .grab = grab && (grab->m_keyboard || grab->m_pointer),
+            .dnd = PROTO::data->dndActive(),
+            .constrained = g_pInputManager->isConstrained(),
+            .held = held,
+            .heldOverTarget = over && std::ranges::find(targets, over) != targets.end()};
+}
+bool Controller::scriptBusy(const std::vector<PHLWINDOW> &targets) const { return scriptedBusy(input(targets)); }
+std::vector<PHLWINDOW> Controller::members(const Pair &p) const {
+    std::vector<PHLWINDOW> result;
+    if (const auto s = state(p))
+        for (const auto &face : s->faces)
+            result.insert(result.end(), face.begin(), face.end());
+    return result;
 }
 std::string Controller::unavailable(PHLWINDOW w) const {
     if (!w || !w->m_isMapped)
@@ -992,18 +1028,22 @@ Result Controller::unpair() {
     auto p = find(Desktop::focusState()->window());
     if (!p)
         return {false, "This window is not a Hyprflip pair."};
+    ungroup(*p);
+    return {true, "Unpaired. All windows are available in the layout."};
+}
+Result Controller::ungroup(Pair &p) {
     finish();
-    const auto id = p->id;
-    auto g = p->group.lock();
+    const auto id = p.id;
+    auto g = p.group.lock();
     m_mutating = true;
-    discardContainer(*p);
+    discardContainer(p);
     if (g) {
-        g->setLocked(p->previousLock);
+        g->setLocked(p.previousLock);
         g->destroy();
     }
     m_mutating = false;
     std::erase_if(m_pairs, [id](const Pair &pair) { return pair.id == id; });
-    return {true, "Unpaired. All windows are available in the layout."};
+    return {true, "ok"};
 }
 
 Result Controller::attach(bool vertical) {
@@ -1115,10 +1155,10 @@ Result Controller::workspace(uint32_t destination, bool follow) {
         return {false, "Focus a multi-app card to move it as a unit."};
     return moveCard(*p, std::to_string(destination), follow);
 }
-Result Controller::moveCard(Pair &card, const std::string &destination, bool follow) {
+Result Controller::moveCard(Pair &card, const std::string &destination, bool follow, bool scripted) {
     if (!workspaceName(destination))
         return {false, "Use a workspace number, name:<name>, special or special:<name>."};
-    if (inputBusy())
+    if (scripted ? scriptBusy(members(card)) : inputBusy())
         return {false, "Finish the active grab or drag before moving the card."};
     finish();
     auto s = state(card);
@@ -1184,7 +1224,7 @@ Result Controller::show(Pair &p, unsigned side) {
     return {true, "ok"};
 }
 Result Controller::cardAction(const std::string &arguments) {
-    static constexpr auto USAGE = "Use card <id> flip, card <id> show <front|back> or "
+    static constexpr auto USAGE = "Use card <id> flip, card <id> show <front|back>, card <id> ungroup or "
                                   "card <id> workspace <number|name:<name>|special[:<name>]> [silent].";
     std::istringstream input(arguments);
     std::string text, verb, value, extra;
@@ -1201,13 +1241,22 @@ Result Controller::cardAction(const std::string &arguments) {
         return flip(std::nullopt, p);
     if (verb == "show" && input >> value && (value == "front" || value == "back") && !(input >> extra))
         return show(*p, value == "back");
+    // Another program takes its card apart, parked or on screen; the focus stays.
+    if (verb == "ungroup" && !(input >> extra)) {
+        const auto windows = members(*p);
+        if (std::ranges::any_of(windows, [](const auto &w) { return Fullscreen::controller()->isFullscreen(w); }))
+            return {false, "Leave fullscreen before ungrouping the card."};
+        if (scriptBusy(windows))
+            return {false, "Finish the active grab or drag before ungrouping the card."};
+        return ungroup(*p);
+    }
     if (verb == "workspace" && input >> value) {
         const bool silent = bool(input >> extra);
         if (silent && (extra != "silent" || input >> extra))
             return {false, USAGE};
         if (!p->containerID)
             return {false, "Only a multi-app card moves as a unit; move a pair's windows with Hyprland."};
-        return moveCard(*p, value, !silent);
+        return moveCard(*p, value, !silent, silent);
     }
     return {false, USAGE};
 }
@@ -1490,12 +1539,16 @@ Result Controller::restore(const std::string &arguments) {
     }
     if (!snapshot.count[0] || !snapshot.count[1])
         return {false, "A card needs apps on both faces."};
+    std::vector<PHLWINDOW> apps;
     for (unsigned s = 0; s < 2; ++s)
         for (unsigned i = 0; i < snapshot.count[s]; ++i)
             for (const auto &w : Desktop::windowState()->windows())
-                if (reinterpret_cast<uintptr_t>(w.get()) == snapshot.windows[s][i] && find(w))
-                    return {false, "An app in that card already belongs to another card."};
-    if (inputBusy())
+                if (reinterpret_cast<uintptr_t>(w.get()) == snapshot.windows[s][i]) {
+                    if (find(w))
+                        return {false, "An app in that card already belongs to another card."};
+                    apps.push_back(w);
+                }
+    if (quiet ? scriptBusy(apps) : inputBusy())
         return {false, "Finish the active grab or drag before restoring a card."};
     if (!FloatingCards::canCreate(snapshot))
         return {false, "Those apps are gone or no longer fit; they stay open as separate windows."};
@@ -1688,7 +1741,7 @@ Result Controller::dispatch(const std::string &action) {
                    "layout <horizontal|vertical|balance|toggle>, other_side, "
                    "workspace <number> [silent], move <left|right|up|down>, cancel, "
                    "flip, peek [end], unpair, finish, restore [quiet] ..., "
-                   "card <id> <flip|show <front|back>|workspace <workspace> [silent]>, or status."};
+                   "card <id> <flip|show <front|back>|ungroup|workspace <workspace> [silent]>, or status."};
 }
 namespace {
 // notify-send on PATH, for desktop notifications through the user's daemon.
@@ -1797,7 +1850,7 @@ std::string Controller::status() {
            ",\"card_dividers\":" + (m_frames ? m_frames->dividers() : "[]") +
            ",\"native_cards\":true,\"hy3_provider\":" + (provider() ? "true" : "false") +
            ",\"floating_cards\":true,\"workspace_protection\":true,\"container_provider\":true" +
-           ",\"layout_controls\":true,\"repair_cards\":true,\"pane_replacement\":true" +
+           ",\"layout_controls\":true,\"repair_cards\":true,\"card_ungroup\":true,\"pane_replacement\":true" +
            ",\"container_max_panes\":" + std::to_string(CONTAINER_MAX_PANES) + "}";
 }
 } // namespace Hyprflip

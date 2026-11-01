@@ -179,7 +179,10 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE h) {
                      if (action == "status")
                          return controller->status();
                      auto r = controller->action(action);
-                     controller->notify(r);
+                     // Calls by id and quiet restores come from another program,
+                     // which reads the reply; they never notify the desktop.
+                     if (!action.starts_with("card ") && !action.starts_with("restore quiet "))
+                         controller->notify(r);
                      return (r.ok ? "ok: " : "error: ") + r.message;
                  }});
     if (!command)
