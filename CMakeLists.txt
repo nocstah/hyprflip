@@ -24,5 +24,9 @@ if(BUILD_TESTING)
   target_include_directories(core_test PRIVATE src)
   target_compile_options(core_test PRIVATE -Wall -Wextra -Wpedantic)
   add_test(NAME core COMMAND core_test)
+  # The compositor provides Hyprland's symbols, never the plugin's own: a
+  # declared function left in an anonymous namespace links, then fails when
+  # Hyprland first calls it.
+  add_test(NAME own_symbols COMMAND sh -c "! nm -C -u \"$<TARGET_FILE:hyprflip>\" | grep 'Hyprflip::'")
 endif()
 install(TARGETS hyprflip LIBRARY DESTINATION lib/hyprland/plugins)

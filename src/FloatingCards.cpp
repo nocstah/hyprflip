@@ -10,6 +10,7 @@
 #include <hyprland/src/desktop/state/WindowState.hpp>
 #include <hyprland/src/desktop/view/Group.hpp>
 #include <hyprland/src/desktop/view/Window.hpp>
+#include <hyprland/src/helpers/MiscFunctions.hpp>
 #include <hyprland/src/layout/LayoutManager.hpp>
 #include <hyprland/src/layout/space/Space.hpp>
 #include <hyprland/src/layout/target/Target.hpp>
@@ -609,25 +610,7 @@ bool release(uint64_t id, uintptr_t address) {
         return true;
     });
 }
-bool workspace(uint64_t id, uint32_t destination, bool follow) {
-    auto c = get(id);
-    if (!c || !c->valid())
-        return false;
-    auto origin = c->group->m_target->workspace();
-    auto target = State::workspaceState()->query().id(destination).run();
-    if (!target)
-        target = State::workspaceState()->create(destination, origin->monitorID(), std::to_string(destination));
-    if (!target)
-        return false;
-    c->group->m_target->assignToSpace(target->m_space);
-    c->refresh();
-    if (follow) {
-        target->m_monitor->changeWorkspace(target);
-        select(id, c->active, true);
-    } else
-        Desktop::focusState()->fullWindowFocus(origin->getFocusCandidate(), Desktop::FOCUS_REASON_KEYBIND);
-    return true;
-}
+bool workspace(uint64_t id, uint32_t destination, bool follow) { return moveTo(id, std::to_string(destination), follow); }
 bool move(uint64_t id, uint32_t dir) {
     auto c = get(id);
     if (!c || !c->valid())
@@ -815,6 +798,35 @@ const ContainerAPI API{CONTAINER_ABI_VERSION,
                        replace,
                        animating};
 } // namespace
+bool moveTo(uint64_t id, const std::string &destination, bool follow) {
+    auto c = get(id);
+    if (!c || !c->valid())
+        return false;
+    const auto named = getWorkspaceIDNameFromString(destination);
+    if (named.id == WORKSPACE_INVALID)
+        return false;
+    auto origin = c->group->m_target->workspace();
+    auto target = State::workspaceState()->query().id(named.id).run();
+    if (!target)
+        target = State::workspaceState()->create(named.id, origin->monitorID(), named.name);
+    if (!target)
+        return false;
+    const auto focused = Desktop::focusState()->window();
+    const bool inside = focused && c->side(focused).has_value();
+    if (target != origin) {
+        c->group->m_target->assignToSpace(target->m_space);
+        c->refresh();
+    }
+    if (follow) {
+        if (target->m_isSpecialWorkspace)
+            target->m_monitor->setSpecialWorkspace(target);
+        else
+            target->m_monitor->changeWorkspace(target);
+        select(id, c->active, true);
+    } else if (inside && target != origin)
+        Desktop::focusState()->fullWindowFocus(origin->getFocusCandidate(), Desktop::FOCUS_REASON_KEYBIND);
+    return true;
+}
 const ContainerAPI *api() { return &API; }
 bool canCreate(const ContainerSnapshot &snapshot) {
     Card proposed;
@@ -836,7 +848,7 @@ bool canCreate(const ContainerSnapshot &snapshot) {
     return proposed.fits(
         {snapshot.x, snapshot.y, std::max(snapshot.width, minimum.x), std::max(snapshot.height, minimum.y)});
 }
-uint64_t create(const ContainerSnapshot &snapshot, bool floating) {
+uint64_t create(const ContainerSnapshot &snapshot, bool floating, bool focus) {
     if (!canCreate(snapshot))
         return 0;
     auto c = std::make_shared<Card>();
@@ -894,7 +906,7 @@ uint64_t create(const ContainerSnapshot &snapshot, bool floating) {
     cards.emplace(id, c);
     if (floating)
         c->group->m_target->setPositionGlobal({.logicalBox = c->initial, .visualBox = {}});
-    select(id, c->active, true);
+    select(id, c->active, focus);
     c->refresh();
     return id;
 }

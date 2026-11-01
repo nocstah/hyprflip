@@ -376,6 +376,7 @@ CI alone does not establish compositor or GPU compatibility.
 
 - [Install, update, troubleshoot and remove](docs/INSTALL.md)
 - [Container behavior, direct commands and Lua API](docs/CONTAINERS.md)
+- [Driving cards from other programs](docs/SCRIPTING.md) — status, a quiet restore, actions by card id
 - [Saved cards, launchers and hold to peek](docs/SAVED_CARDS.md)
 - [Find hidden apps and optional mouse flip](docs/FIND_APPS.md)
 - [Transitions and Chill compatibility](docs/TRANSITIONS.md)

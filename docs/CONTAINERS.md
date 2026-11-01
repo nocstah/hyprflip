@@ -388,6 +388,7 @@ from the parent desktop.
 | `unpair` | Turn both faces into ordinary visible splits |
 | `cancel` | Clear the pending mark |
 | `status` | Report native `pairs` and experimental `containers` separately |
+| `card <id> …`, `restore [quiet] …` | Act on a card by its id, or build one, without taking the focus ([scripting](SCRIPTING.md)) |
 
 Lua exposes `hl.plugin.hyprflip.attach("horizontal")`, `release()` and
 `workspace(2, follow)`, `move("left")`, `unfold()`, `floating()` and `in_container()` alongside
@@ -412,10 +413,12 @@ into visible splits; the experimental updater reconstructs them explicitly.
 - Unfold places rows of three or more apps above one another and columns beside
   one another. Mixed split directions use the card's proportions. Application
   size limits can select the alternate arrangement or refuse the unfold.
-- Workspace moves accept positive numeric IDs. Tiled hy3 cards require hy3 at
-  the destination; floating cards can move as a native group. Saved-card opening
-  through the helper requires a hy3 destination. Named/special workspace moves
-  are deferred. Floating cards support whole-card dragging and resizing.
+- Shortcut and Lua workspace moves accept positive numeric IDs. Tiled hy3 cards
+  require hy3 at the destination; floating cards can move as a native group.
+  Saved-card opening through the helper requires a hy3 destination. A native
+  card moves to named and special workspaces by its id
+  ([driving cards from other programs](SCRIPTING.md)). Floating cards support
+  whole-card dragging and resizing.
 - Layout navigation uses hy3's model. This does not make dwindle support nested
   containers, and does not automatically replace existing movement shortcuts.
 - The hy3 tab bar is visible at rest and hidden during a turn; floating cards

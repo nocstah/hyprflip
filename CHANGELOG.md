@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- Drive a card by its id without taking the focus: `card <id> show
+  <front|back>`, `card <id> flip` and `card <id> workspace <workspace>
+  [silent]`. A native card can now move to named and special workspaces, so a
+  program can park it out of sight; Find and drag-to-add already leave such
+  cards out. `restore quiet` builds a card and leaves the focus where it is,
+  and `status` names each card's workspace. See
+  [driving cards from other programs](docs/SCRIPTING.md).
+- A card turned while the focus is elsewhere gets its resting opacity and dim
+  back when the turn ends.
+
 ## 0.3.0-rc.9 — 2026-10-17
 
 - Keep window titles off command lines. The Omarchy menu receives its rows

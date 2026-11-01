@@ -2,14 +2,16 @@
 #include "ContainerABI.hpp"
 #include <hyprland/src/desktop/DesktopTypes.hpp>
 #include <hyprutils/math/Box.hpp>
+#include <string>
 
 namespace Hyprflip::FloatingCards {
 inline constexpr uint64_t EPOCH = 0x484650464c4f4154ULL;
 // Space between the panes of a fullscreen card, filled by a divider line.
 inline constexpr double FULLSCREEN_DIVIDER = 2;
 const ContainerAPI *api();
-// A native outer group can occupy a dwindle tile or float as one unit.
-uint64_t create(const ContainerSnapshot &snapshot, bool floating = true);
+// A native outer group can occupy a dwindle tile or float as one unit. Without
+// focus the card leaves the focus where it is.
+uint64_t create(const ContainerSnapshot &snapshot, bool floating = true, bool focus = true);
 bool canCreate(const ContainerSnapshot &snapshot);
 void closing(PHLWINDOW window);
 void focused(PHLWINDOW window);
@@ -24,4 +26,8 @@ bool setStyle(uint64_t id, double header, double gap, double divider);
 bool fullscreen(uint64_t id);
 // Sets a floating card's whole frame; false for tiled or fullscreen cards.
 bool place(uint64_t id, Hyprutils::Math::CBox box);
+// Moves a card to a workspace as Hyprland names it: a number, name:<name>,
+// special or special:<name>. Focus goes along only when it follows; a silent
+// move takes the focus off the card only when it was there.
+bool moveTo(uint64_t id, const std::string &destination, bool follow);
 } // namespace Hyprflip::FloatingCards

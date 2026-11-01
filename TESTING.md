@@ -1,5 +1,25 @@
 # Validation
 
+## Cards driven by id (2026-11-01)
+
+In a nested session with only the core loaded (Aquamarine 0.15.1 with the
+render-node patch, on the second GPU), `tests/card_id_workflows.py` passes 7
+checks. A quiet restore builds a tiled card beside a working tile without
+moving the focus or the workspace, and moves the focus to the shown side when
+it takes in the focused app. `card <id> show` and `flip` turn a card without
+taking the focus (animated, no fallback) and carry the focus along when it was
+on the card. The card parks on `special:park` and comes back, and Find leaves
+it out while parked; it follows to a numbered workspace and moves silently to
+a named one and back. Malformed actions and unknown ids change nothing, and
+unloading releases the card's apps. Floating (dwindle 10) and unfold (5) pass.
+Dwindle stops at its first check on this machine with rc.9 too (attaching the
+850 px GTK fixture: "This split is too small"), so it was not run further; hy3
+suites were not run.
+
+CTest's new `own_symbols` check fails on the first build of this change, whose
+`moveTo` sat in an anonymous namespace: the plugin linked, and the nested
+Hyprland aborted with a symbol lookup error at the first parked move.
+
 ## Tiled cards keep their tile through updates (2026-10-07)
 
 On the developer's desktop the panel installer updated to rc.5 and kept all 4

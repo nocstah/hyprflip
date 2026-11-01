@@ -104,7 +104,10 @@ class Controller {
     Result mark(const std::string &target = {});
     Result pair(bool multiApp = false);
     Result adopt(const std::string &front, const std::string &back);
-    Result flip(std::optional<Transition> preview = std::nullopt);
+    // A card addressed by its id (target) turns without taking the focus.
+    Result flip(std::optional<Transition> preview = std::nullopt, Pair *target = nullptr);
+    Result show(Pair &pair, unsigned side);
+    Result cardAction(const std::string &arguments);
     Result peek();
     Result endPeek();
     bool canReturnPeek() const;
@@ -112,6 +115,7 @@ class Controller {
     Result attach(bool vertical);
     Result release();
     Result workspace(uint32_t destination, bool follow);
+    Result moveCard(Pair &pair, const std::string &destination, bool follow);
     Result move(char direction);
     Result unfold();
     Result editContainer(ContainerEdit operation, const std::string &target = "");

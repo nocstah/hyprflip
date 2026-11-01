@@ -40,6 +40,24 @@ namespace {
 std::string address(PHLWINDOW w) {
     return w ? std::format("\"0x{:x}\"", reinterpret_cast<uintptr_t>(w.get())) : "null";
 }
+// A workspace the way the card actions take it: a number, name:<name>,
+// special or special:<name>. Hyprland's relative forms (+1, e-1, previous)
+// depend on the focus, so they are refused.
+bool workspaceName(std::string_view text) {
+    const auto name = [](std::string_view value) {
+        return !value.empty() && value.size() <= 64 &&
+               std::ranges::all_of(value, [](unsigned char c) { return std::isalnum(c) || c == '-' || c == '_' || c == '.'; });
+    };
+    if (text == "special")
+        return true;
+    if (text.starts_with("special:"))
+        return name(text.substr(8));
+    if (text.starts_with("name:"))
+        return name(text.substr(5));
+    uint32_t number = 0;
+    const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), number);
+    return error == std::errc{} && end == text.data() + text.size() && number && number <= INT32_MAX;
+}
 std::string quote(const std::string &value) {
     std::string out = "\"";
     for (unsigned char c : value) {
@@ -586,6 +604,14 @@ void Controller::finish(bool applyDestination) {
         if (auto api = provider(p->providerEpoch))
             api->animating(p->containerID, false);
     detach();
+    // A turn shows every face at its focused opacity, undimmed. A card turned
+    // by its id while the focus is elsewhere gets no focus change to give its
+    // apps their resting look back.
+    const auto focused = Desktop::focusState()->window();
+    if (std::ranges::none_of(m_turn->windows, [&](const auto &ref) { return ref.lock() == focused; }))
+        for (const auto &ref : m_turn->windows)
+            if (auto w = ref.lock())
+                w->updateDecorationValues();
     m_turn.reset();
     m_timer->updateTimeout(std::nullopt);
 }
@@ -804,9 +830,8 @@ Result Controller::endPeek() {
     auto s = p ? state(*p) : std::nullopt;
     return s && s->active != pending.source ? flip() : Result{true, "ok"};
 }
-Result Controller::flip(std::optional<Transition> preview) {
-    auto w = Desktop::focusState()->window();
-    auto p = find(w);
+Result Controller::flip(std::optional<Transition> preview, Pair *target) {
+    auto p = target ? target : find(Desktop::focusState()->window());
     if (!p || !valid(*p))
         return {false, "This window has no reverse side. Use mark, then pair."};
     if (inputBusy())
@@ -1088,38 +1113,103 @@ Result Controller::workspace(uint32_t destination, bool follow) {
     auto p = find(Desktop::focusState()->window());
     if (!p || !p->containerID)
         return {false, "Focus a multi-app card to move it as a unit."};
+    return moveCard(*p, std::to_string(destination), follow);
+}
+Result Controller::moveCard(Pair &card, const std::string &destination, bool follow) {
+    if (!workspaceName(destination))
+        return {false, "Use a workspace number, name:<name>, special or special:<name>."};
+    if (inputBusy())
+        return {false, "Finish the active grab or drag before moving the card."};
     finish();
-    auto s = state(*p);
+    auto s = state(card);
     if (!s)
         return {false, "This card changed. Pair its windows again."};
+    // 0 for named and special workspaces, which only native cards reach.
+    uint32_t number = 0;
+    std::from_chars(destination.data(), destination.data() + destination.size(), number);
+    const bool native = card.providerEpoch == FloatingCards::EPOCH;
+    if (!number && !native)
+        return {false, "Hy3 cards move to numbered workspaces only."};
     // A native card joins a chilled destination the way a new app does, when
     // Chill (Omachill 1.5+) offers join. Otherwise the move is refused.
-    const bool chilled = std::ranges::any_of(Desktop::windowState()->windows(), [&](const auto& window) {
-        return window->m_isMapped && window->m_isFloating && window->m_workspace && window->m_workspace->m_id == destination &&
+    const bool chilled = number && std::ranges::any_of(Desktop::windowState()->windows(), [&](const auto& window) {
+        return window->m_isMapped && window->m_isFloating && window->m_workspace && window->m_workspace->m_id == number &&
             window->m_ruleApplicator->m_tagKeeper.isTagged("chillmode");
     });
-    const bool joins = chilled && p->providerEpoch == FloatingCards::EPOCH &&
+    const bool joins = chilled && native &&
         HyprlandAPI::invokeHyprctlCommand("repl", "return tostring(chillmode ~= nil and chillmode.join ~= nil)").starts_with("true");
     if (chilled && !joins)
-        return {false, "Turn off Chill mode on workspace " + std::to_string(destination) +
+        return {false, "Turn off Chill mode on workspace " + std::to_string(number) +
                        " before moving the card there. The card stayed in place."};
     for (const auto &w : s->windows())
         if (Fullscreen::controller()->isFullscreen(w.lock()))
             return {false, "Leave fullscreen before moving this container."};
-    auto api = provider(p->providerEpoch);
-    const auto id = p->id;
-    m_movingWorkspace = destination;
+    auto api = provider(card.providerEpoch);
+    const auto id = card.id;
+    if (number) m_movingWorkspace = number;
     m_mutating = true;
-    const bool ok = api && api->workspace(p->containerID, destination, follow);
+    const bool ok = number ? api && api->workspace(card.containerID, number, follow)
+                           : FloatingCards::moveTo(card.containerID, destination, follow);
     m_mutating = false;
     m_movingWorkspace.reset();
     reconcile();
     // reconcile() may drop pairs; look the card up again.
     if (auto *moved = ok && joins ? find(id) : nullptr)
-        if (const auto card = state(*moved))
+        if (const auto after = state(*moved))
             HyprlandAPI::invokeHyprctlCommand("eval", "if chillmode and chillmode.join then chillmode.join(" +
-                                                          address(card->focused[card->active]) + ") end");
+                                                          address(after->focused[after->active]) + ") end");
     return {ok, ok ? "ok" : "The card could not move to that workspace. Hy3 cards require a hy3 destination."};
+}
+Result Controller::show(Pair &p, unsigned side) {
+    if (inputBusy())
+        return {false, "Finish the active grab or drag before turning the card."};
+    finish();
+    auto s = state(p);
+    if (!s)
+        return {false, "This card changed. Pair its windows again."};
+    for (const auto &ref : s->windows())
+        if (p.providerEpoch != FloatingCards::EPOCH && Fullscreen::controller()->isFullscreen(ref.lock()))
+            return {false, "Leave fullscreen before turning this container."};
+    if (s->unfolded) {
+        auto api = provider(p.providerEpoch);
+        m_mutating = true;
+        const bool ok = api && api->unfold(p.containerID, false);
+        m_mutating = false;
+        if (!ok)
+            return {false, "The layout could not fold this card."};
+    } else if (s->active == side)
+        return {true, "ok"};
+    select(p, side);
+    damage(p);
+    return {true, "ok"};
+}
+Result Controller::cardAction(const std::string &arguments) {
+    static constexpr auto USAGE = "Use card <id> flip, card <id> show <front|back> or "
+                                  "card <id> workspace <number|name:<name>|special[:<name>]> [silent].";
+    std::istringstream input(arguments);
+    std::string text, verb, value, extra;
+    uint64_t id = 0;
+    if (!(input >> text >> verb))
+        return {false, USAGE};
+    const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), id);
+    if (error != std::errc{} || end != text.data() + text.size() || !id)
+        return {false, USAGE};
+    auto *p = find(id);
+    if (!p || !valid(*p))
+        return {false, "No card has id " + text + ". Read the ids from status."};
+    if (verb == "flip" && !(input >> extra))
+        return flip(std::nullopt, p);
+    if (verb == "show" && input >> value && (value == "front" || value == "back") && !(input >> extra))
+        return show(*p, value == "back");
+    if (verb == "workspace" && input >> value) {
+        const bool silent = bool(input >> extra);
+        if (silent && (extra != "silent" || input >> extra))
+            return {false, USAGE};
+        if (!p->containerID)
+            return {false, "Only a multi-app card moves as a unit; move a pair's windows with Hyprland."};
+        return moveCard(*p, value, !silent);
+    }
+    return {false, USAGE};
 }
 std::optional<CBox> Controller::cardBox(const std::string &window) const {
     if (m_stopping) return std::nullopt;
@@ -1361,9 +1451,13 @@ Result Controller::restore(const std::string &arguments) {
     std::istringstream input(arguments);
     std::string mode, token;
     ContainerSnapshot snapshot;
-    if (!(input >> mode >> snapshot.active >> snapshot.unfolded >> snapshot.x >> snapshot.y >> snapshot.width >> snapshot.height) ||
+    input >> mode;
+    const bool quiet = mode == "quiet";
+    if (quiet)
+        input >> mode;
+    if (!(input >> snapshot.active >> snapshot.unfolded >> snapshot.x >> snapshot.y >> snapshot.width >> snapshot.height) ||
         (mode != "tiled" && mode != "floating") || snapshot.active > 1 || snapshot.unfolded > 1)
-        return {false, "Use restore <tiled|floating> <active> <unfolded> <x> <y> <w> <h> front ... back ..."};
+        return {false, "Use restore [quiet] <tiled|floating> <active> <unfolded> <x> <y> <w> <h> front ... back ..."};
     int side = -1;
     std::string address;
     const auto parse = [](const std::string &text, uintptr_t &value) {
@@ -1405,8 +1499,15 @@ Result Controller::restore(const std::string &arguments) {
         return {false, "Finish the active grab or drag before restoring a card."};
     if (!FloatingCards::canCreate(snapshot))
         return {false, "Those apps are gone or no longer fit; they stay open as separate windows."};
+    // A quiet restore leaves the focus alone, unless it is on one of the card's
+    // apps: it then goes to the shown side, never staying on a hidden one.
+    const auto focused = reinterpret_cast<uintptr_t>(Desktop::focusState()->window().get());
+    bool member = false;
+    for (unsigned s = 0; s < 2; ++s)
+        for (unsigned i = 0; i < snapshot.count[s]; ++i)
+            member |= focused && snapshot.windows[s][i] == focused;
     m_mutating = true;
-    const auto id = FloatingCards::create(snapshot, mode == "floating");
+    const auto id = FloatingCards::create(snapshot, mode == "floating", !quiet || member);
     if (id) m_pairs.push_back({m_nextID++, {}, {}, false, id, FloatingCards::EPOCH});
     m_mutating = false;
     reconcile();
@@ -1510,6 +1611,8 @@ Result Controller::dispatch(const std::string &action) {
         return pair();
     if (action == "card")
         return pair(true);
+    if (action.starts_with("card "))
+        return cardAction(action.substr(5));
     if (action.starts_with("adopt ")) {
         std::istringstream arguments(action.substr(6));
         std::string front, back, extra;
@@ -1584,7 +1687,8 @@ Result Controller::dispatch(const std::string &action) {
     return {false, "Unknown action. Use mark, pair, card, attach [horizontal|vertical], replace <old> <new>, release, unfold, "
                    "layout <horizontal|vertical|balance|toggle>, other_side, "
                    "workspace <number> [silent], move <left|right|up|down>, cancel, "
-                   "flip, peek [end], unpair, finish, or status."};
+                   "flip, peek [end], unpair, finish, restore [quiet] ..., "
+                   "card <id> <flip|show <front|back>|workspace <workspace> [silent]>, or status."};
 }
 namespace {
 // notify-send on PATH, for desktop notifications through the user's daemon.
@@ -1672,7 +1776,10 @@ std::string Controller::status() {
             json += ']';
         }
         json += "],\"native_group\":" + std::string(p.providerEpoch == FloatingCards::EPOCH ? "true" : "false") +
-                ",\"fullscreen\":" + std::string(std::ranges::any_of(s->windows(), [](const auto &w) { return Fullscreen::controller()->isFullscreen(w.lock()); }) ? "true" : "false") + ",\"floating\":" + std::string(s->focused[s->active]->m_isFloating ? "true" : "false") + ",\"layouts\":[";
+                ",\"fullscreen\":" + std::string(std::ranges::any_of(s->windows(), [](const auto &w) { return Fullscreen::controller()->isFullscreen(w.lock()); }) ? "true" : "false") + ",\"floating\":" + std::string(s->focused[s->active]->m_isFloating ? "true" : "false");
+        const auto space = s->focused[s->active]->m_workspace;
+        json += ",\"workspace\":{\"id\":" + std::to_string(space ? space->m_id : 0) + ",\"name\":" + quote(space ? space->m_name : "") +
+                ",\"special\":" + (space && space->m_isSpecialWorkspace ? "true" : "false") + "},\"layouts\":[";
         for (unsigned side = 0; side < 2; ++side) {
             if (side) json += ',';
             json += "{\"axis\":" + quote(s->vertical[side] ? "vertical" : "horizontal") +
