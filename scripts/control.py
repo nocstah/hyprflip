@@ -4,6 +4,8 @@
 snapshot emits one JSON object. run accepts --request JSON and emits JSON lines.
 Questions require {"reply": id, "value": choice}; focus handoffs require
 {"resume": id}. {"cancel": true} cancels the operation, including launch waits.
+unattended takes one --request JSON, asks nothing and prints one JSON line; a
+SIGTERM cancels it until its batch goes out.
 No user-controlled string is evaluated as a command.
 """
 import argparse
@@ -11,7 +13,6 @@ from collections import deque
 from contextlib import nullcontext
 from copy import deepcopy
 from dataclasses import asdict
-import hashlib
 import json
 import os
 import re
@@ -27,11 +28,8 @@ import shortcuts
 
 PROTOCOL = 1
 MAX_MESSAGE = 65536
-
-
-def digest(value):
-    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(',', ':'),
-                                     ensure_ascii=True, allow_nan=False).encode()).hexdigest()
+# Shared with unattended stores, so OmaCards' tokens stay the same.
+digest = w.digest
 
 
 def identity(window):
@@ -512,13 +510,151 @@ def run_operation(ipc, payload, menu):
         return flow.apply(plan) or ''
 
 
+# A signal only sets this while an unattended action runs. The action looks
+# at it where stopping still leaves every app where it was.
+interrupted = False
+
+
+def interrupt(*_):
+    global interrupted
+    interrupted = True
+
+
+ADDRESS = re.compile(r'0x[0-9a-fA-F]{1,16}')
+# The fields each unattended action takes besides protocol and action, and those it needs.
+FIELDS = {'capabilities': set(), 'list': {'store', 'name'}, 'delete': {'store', 'name', 'token', 'lock_ms'},
+          'open': {'store', 'name', 'recipe', 'workspace', 'bind', 'owned', 'focus', 'launch', 'timeout_ms', 'lock_ms'},
+          'save': {'store', 'name', 'card', 'members', 'previous', 'base', 'keep', 'floating', 'owned', 'lock_ms'}}
+REQUIRED = {'capabilities': set(), 'list': {'store'}, 'delete': {'store', 'name', 'token'},
+            'open': {'workspace'}, 'save': {'store', 'name', 'card', 'members', 'previous'}}
+
+
+def unattended_request(payload, env):
+    """The request, checked before anything asks Hyprland or reads a store.
+
+    Raises Unfinished with the code that says what is wrong.
+    """
+    def number(value, low, high): return type(value) is int and low <= value <= high
+    def addresses(value, low):
+        return (isinstance(value, list) and low <= len(value) <= 10 and len(set(map(str, value))) == len(value) and
+                all(isinstance(a, str) and ADDRESS.fullmatch(a) for a in value))
+    def untitled(recipe):
+        # A definition that travels in a request never carries a title.
+        try:
+            w.RecipeStore.validate(recipe)
+        except (ValueError, KeyError, TypeError, AttributeError):
+            return False
+        return all(app['title'] == '' for face in recipe['faces'] for app in face['apps'])
+
+    if not isinstance(payload, dict) or type(payload.get('protocol')) is not int or payload['protocol'] != PROTOCOL:
+        raise w.Unfinished('invalid_request')
+    action = payload.get('action')
+    if (not isinstance(action, str) or action not in FIELDS or set(payload) - FIELDS[action] - {'protocol', 'action'} or
+            REQUIRED[action] - set(payload)):
+        raise w.Unfinished('invalid_request')
+    get = payload.get
+    if 'name' in payload and not w.RecipeStore.valid_name(payload['name']): raise w.Unfinished('invalid_name')
+    if 'lock_ms' in payload and not number(payload['lock_ms'], 0, 30000): raise w.Unfinished('invalid_request')
+    if 'owned' in payload and not (isinstance(payload['owned'], list) and len(payload['owned']) <= 8 and
+                                   all(isinstance(c, str) and 0 < len(c) <= 512 for c in payload['owned'])):
+        raise w.Unfinished('invalid_request')
+    if action == 'delete' and not (isinstance(payload['token'], str) and re.fullmatch(r'[0-9a-f]{64}', payload['token'])):
+        raise w.Unfinished('invalid_request')
+    if action == 'open':
+        # A stored definition by name, from the caller's store, or one in the request.
+        if ('name' in payload) == ('recipe' in payload) or 'name' in payload and 'store' not in payload:
+            raise w.Unfinished('invalid_request')
+        if 'recipe' in payload and not untitled(payload['recipe']): raise w.Unfinished('invalid_request')
+        if not number(payload['workspace'], 1, 2**31 - 1): raise w.Unfinished('unsupported_workspace')
+        if ('bind' in payload and not addresses(payload['bind'], 0) or
+                get('focus') is not None and not (isinstance(payload['focus'], str) and ADDRESS.fullmatch(payload['focus'])) or
+                type(get('launch', True)) is not bool or 'timeout_ms' in payload and not number(payload['timeout_ms'], 1000, 60000)):
+            raise w.Unfinished('invalid_request')
+    if action == 'save':
+        previous, keep = payload['previous'], get('keep', [])
+        if (not number(payload['card'], 1, 2**63 - 1) or not addresses(payload['members'], 1) or
+                previous is not None and not (isinstance(previous, str) and re.fullmatch(r'[0-9a-f]{64}', previous)) or
+                'base' in payload and (previous is not None or not untitled(payload['base'])) or
+                get('floating') is not None and type(payload['floating']) is not bool):
+            raise w.Unfinished('invalid_request')
+        # Closed apps to keep, each by its place in the definition it replaces, which there must be.
+        if (not isinstance(keep, list) or len(keep) > 10 or
+                not all(isinstance(k, dict) and set(k) == {'face', 'index'} and number(k['face'], 0, 1) and
+                        number(k['index'], 0, 4) for k in keep) or
+                len({(k['face'], k['index']) for k in keep}) != len(keep) or keep and previous is None and 'base' not in payload):
+            raise w.Unfinished('invalid_request')
+    # Never the library, nor a file anyone else could write or swap.
+    if 'store' in payload and not w.RecipeStore.valid_path(payload['store'], env): raise w.Unfinished('invalid_store')
+    return payload
+
+
+def run_unattended(raw, ipc, env):
+    """Runs one unattended request and returns its reply and exit code. It never raises.
+
+    No reply carries an exception's text or a window title: each code has a
+    fixed message, and labels name apps by their labels.
+    """
+    def failed(code, labels=(), **details):
+        return {'protocol': PROTOCOL, 'ok': False, 'code': code, 'message': w.Unfinished.MESSAGES[code],
+                'labels': list(labels), 'launched': [], **details}, 1
+    try:
+        if not isinstance(raw, str) or len(raw.encode('utf-8', 'surrogateescape')) > MAX_MESSAGE:
+            raise w.Unfinished('invalid_request')
+        try:
+            payload = json.loads(raw)
+        except (ValueError, RecursionError) as error:
+            raise w.Unfinished('invalid_request') from error
+        request = unattended_request(payload, env)
+        if not env.get('XDG_RUNTIME_DIR') or not env.get('HYPRLAND_INSTANCE_SIGNATURE'): raise w.Unfinished('unavailable')
+        flow, action = w.Unattended(ipc, request.get('store')), request['action']
+        def cancelled(): return interrupted
+        if action == 'capabilities': result = flow.capabilities()
+        elif action == 'list': result = flow.listing(request.get('name'))
+        elif action == 'delete': result = flow.delete(request['name'], request['token'], request.get('lock_ms', 5000), cancelled)
+        elif action == 'open': result = flow.open(request, cancelled)
+        else: result = flow.save(request, cancelled)
+        return {'protocol': PROTOCOL, 'ok': True, **result}, 0
+    except w.Unfinished as stop:
+        return failed(stop.code, stop.labels, **stop.details)
+    except w.CoreUnavailable:
+        # Hyprland answered, without a core: that is no reason to try again soon.
+        return failed('unavailable')
+    except (w.SetupError, OSError, subprocess.TimeoutExpired):
+        return failed('hyprland')
+    except Exception:
+        return failed('internal')
+
+
+def print_unattended(reply, code):
+    """Prints the reply as one line and returns the exit code; a reader that went away gets nothing more."""
+    try:
+        line = json.dumps(reply, ensure_ascii=True, allow_nan=False)
+    except (TypeError, ValueError):
+        line, code = json.dumps({'protocol': PROTOCOL, 'ok': False, 'code': 'internal',
+                                 'message': w.Unfinished.MESSAGES['internal'], 'labels': [], 'launched': []}), 1
+    try:
+        print(line, flush=True)
+    except BrokenPipeError:
+        # Python would try stdout again at exit; it goes to /dev/null instead.
+        os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
+        return 1
+    return code
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('command', choices=('snapshot', 'run', 'accent-color'))
+    parser.add_argument('command', choices=('snapshot', 'run', 'accent-color', 'unattended'))
     parser.add_argument('--request', default='{}')
     parser.add_argument('--color', help='accent-color: the theme accent as #RRGGBB')
     args = parser.parse_args()
     ipc = w.Hyprctl()
+    if args.command == 'unattended':
+        # A reader that goes away is a failed print, never a signal; SIGTERM
+        # and SIGINT only ask the action to stop where it safely can.
+        signal.signal(signal.SIGPIPE, signal.SIG_IGN)
+        signal.signal(signal.SIGTERM, interrupt)
+        signal.signal(signal.SIGINT, interrupt)
+        return print_unattended(*run_unattended(args.request, ipc, os.environ))
     if args.command == 'snapshot':
         print(json.dumps(snapshot(ipc), ensure_ascii=False, allow_nan=False))
         return 0

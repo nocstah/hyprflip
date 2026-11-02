@@ -15,6 +15,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -33,6 +34,14 @@ class Cancelled(Exception):
 
 class MenuUnavailable(SetupError):
     pass
+
+
+class Busy(SetupError):
+    pass
+
+
+class CoreUnavailable(SetupError):
+    """Hyprland answered, but not as a Hyprflip core does: none is loaded."""
 
 
 def fullscreen_card_only(card, windows, workspace):
@@ -120,6 +129,12 @@ TRANSITIONS = {
 # prefix so a web app still matches after the default browser changes.
 WEB_APP_CLASS = re.compile(r'(?:brave|chrome|chromium|google-chrome|msedge|microsoft-edge|vivaldi|opera|helium)-(.+__.*)')
 
+# hyprctl's own last line when a request got no answer from Hyprland. After a
+# batch it still exits 0 (0.56), so these are read from its output.
+NO_ANSWER = re.compile(r"(Couldn't .+|HYPRLAND_INSTANCE_SIGNATURE was not set!.+) \([1-6]\)")
+# A special workspace that Hyprctl.move reaches by its name.
+SPECIAL_NAME = re.compile(r'special:[A-Za-z0-9_.-]{1,56}')
+
 
 class Hyprctl:
     def __init__(self, env=None):
@@ -137,7 +152,8 @@ class Hyprctl:
         try:
             return json.loads(self.call(*args))
         except ValueError as error:
-            raise SetupError('Hyprflip is unavailable. Load the container plugin and try again.') from error
+            # Such as "unknown request": Hyprland has no hyprflip command to run.
+            raise CoreUnavailable('Hyprflip is unavailable. Load the container plugin and try again.') from error
 
     def windows(self):
         return {w['address']: w for w in self.data('-j', 'clients')}
@@ -147,6 +163,22 @@ class Hyprctl:
 
     def action(self, action):
         return self.call('hyprflip', action)
+
+    def batch(self, commands):
+        # One request that Hyprland runs whole, with one reply per command. A
+        # refused command is just its reply; only a request that got no answer
+        # raises. Hyprland splits the request on ';' outside brackets.
+        if not commands or any(not isinstance(c, str) or not c.strip() or set(c) & set(';[]') for c in commands):
+            raise SetupError('The card action is unavailable.')
+        try:
+            result = subprocess.run(['hyprctl', '--batch', ' ; '.join(commands)], env=self.env,
+                                    capture_output=True, text=True, timeout=8)
+        except (OSError, subprocess.TimeoutExpired) as error:
+            raise SetupError('Hyprland is not responding.') from error
+        output = result.stdout.strip()
+        if result.returncode or NO_ANSWER.fullmatch(output.rpartition('\n')[2]):
+            raise SetupError('Hyprland is not responding.')
+        return [reply.strip() for reply in output.split('\n\n\n')] if output else []
 
     def save_transition(self, mode):
         if mode not in TRANSITIONS:
@@ -340,13 +372,17 @@ class Hyprctl:
         self.call('eval', '\n'.join(chunks))
 
     def move(self, address, workspace):
-        if not re.fullmatch(r'0x[0-9a-fA-F]+', address) or not 0 < workspace < 2**31:
+        # A workspace number, or a special workspace by its name: an app taken
+        # from one goes back there if the card cannot be made.
+        special = isinstance(workspace, str)
+        if (not re.fullmatch(r'0x[0-9a-fA-F]+', address) or
+                not (SPECIAL_NAME.fullmatch(workspace) if special else 0 < workspace < 2**31)):
             raise SetupError('The selected app or workspace is no longer available.')
         self.call('dispatch', f'hl.dsp.window.move({{window="address:{address}",workspace="{workspace}",follow=false}})')
         deadline = time.monotonic() + 3
         while time.monotonic() < deadline:
             window = self.windows().get(address)
-            if window and window['workspace']['id'] == workspace:
+            if window and window['workspace']['name' if special else 'id'] == workspace:
                 return
             time.sleep(.04)
         raise SetupError('The app could not move to the card workspace. Open the picker and try again.')
@@ -446,9 +482,24 @@ class Request:
         self.token = uuid.uuid4().hex
 
     @contextmanager
-    def exclusive(self):
+    def exclusive(self, timeout=None, cancelled=None):
+        # Menus wait for the lock. A program that cannot wait gives a timeout
+        # in seconds and gets Busy instead; cancelled() is asked between tries.
         with self.lock.open('a') as handle:
-            fcntl.flock(handle, fcntl.LOCK_EX)
+            if timeout is None and cancelled is None:
+                fcntl.flock(handle, fcntl.LOCK_EX)
+            else:
+                deadline = time.monotonic() + (math.inf if timeout is None else timeout)
+                while True:
+                    if cancelled and cancelled():
+                        raise Cancelled()
+                    try:
+                        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                        break
+                    except BlockingIOError:
+                        if time.monotonic() >= deadline:
+                            raise Busy('Another card change is still in progress. Try again in a moment.')
+                        time.sleep(.05)
             yield
 
     def start(self):
@@ -745,13 +796,15 @@ class Setup:
     def __init__(self, ipc, menu):
         self.ipc, self.menu = ipc, menu
 
-    def eligible(self, windows, state, workspace=None):
+    def eligible(self, windows, state, workspace=None, special=False):
+        # The menus offer apps on numbered workspaces only; with special, apps
+        # waiting on a special workspace count too.
         owned = {a for card in state.get('containers', []) for face in card['faces'] for a in face}
         owned.update(a for pair in state.get('pairs', []) for a in (pair['front'], pair['back']))
         return {a: w for a, w in windows.items() if a not in owned and w.get('mapped', True)
                 and (not w.get('floating') or state.get('workspace_protection'))
                 and not any(w.get(k) for k in ('pinned', 'grouped', 'fullscreen', 'hidden'))
-                and w['workspace']['id'] > 0 and (workspace is None or w['workspace']['id'] == workspace)}
+                and (special or w['workspace']['id'] > 0) and (workspace is None or w['workspace']['id'] == workspace)}
 
     @contextmanager
     def reserve(self, selected, state, destination=None):
@@ -760,7 +813,9 @@ class Setup:
             if state.get('workspace_protection'):
                 workspaces = {w['workspace']['id'] for w in selected.values()}
                 if destination is not None: workspaces.add(destination)
-                for workspace in sorted(workspaces):
+                # Only numbered workspaces take a lease; an app leaving a
+                # special workspace needs none.
+                for workspace in sorted(w for w in workspaces if w > 0):
                     token = uuid.uuid4().hex
                     tokens.append(token)
                     self.ipc.action(f'reserve {workspace} {token}')
@@ -782,7 +837,8 @@ class Setup:
         failures = []
         for original in reversed(tiled):
             try:
-                current = self.eligible(self.ipc.windows(), self.ipc.status()).get(original['address'])
+                # An app that went back to a special workspace floats again there.
+                current = self.eligible(self.ipc.windows(), self.ipc.status(), special=True).get(original['address'])
                 if current and all(current[k] == original[k] for k in ('pid', 'class')):
                     self.ipc.restore_float(original)
             except (SetupError, OSError, subprocess.TimeoutExpired):
@@ -836,7 +892,9 @@ class Setup:
                 current = self.eligible(self.ipc.windows(), self.ipc.status()).get(address)
                 if (current and current['workspace']['id'] == workspace
                         and all(current[k] == original[k] for k in ('pid', 'class'))):
-                    self.ipc.move(address, original['workspace']['id'])
+                    origin = original['workspace']
+                    # A special workspace is reached by its name.
+                    self.ipc.move(address, origin['id'] if origin['id'] > 0 else origin['name'])
             except (SetupError, OSError, subprocess.TimeoutExpired):
                 failures.append(workspace_name(original))
         if failures:
@@ -1389,13 +1447,15 @@ class DesktopApps:
         return (isinstance(value, str) and 8 < len(value) <= 512 and value.endswith('.desktop') and
                 '/' not in value and '\\' not in value and clean(value, 512) == value)
 
-    def infer(self, app):
+    def infer(self, app, by_label=True):
         if entry := self.apps.get(app.get('desktop_id')): return entry
         classes = {c.casefold() for c in (app['class'], app['initial_class']) if c}
         entries = [e for e in self.apps.values() if e.id[:-8].casefold() in classes or
                    (e.wm_class and e.wm_class.casefold() in classes)]
         if len(entries) == 1: return entries[0]
-        if entries: return None
+        # A label can name an unrelated launcher, so programs that launch
+        # without asking anyone never guess by it.
+        if entries or not by_label: return None
         entries = [e for e in self.apps.values() if e.name.casefold() == app['label'].casefold()]
         return entries[0] if len(entries) == 1 else None
 
@@ -1448,16 +1508,71 @@ class Opening:
             self.directory.cleanup()
 
 
+def digest(value):
+    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(',', ':'),
+                                     ensure_ascii=True, allow_nan=False).encode()).hexdigest()
+
+
 class RecipeStore:
-    """Small, versioned data file. Names and window titles are never commands."""
-    def __init__(self, env=None):
-        env = os.environ if env is None else env
-        self.root = Path(env.get('XDG_STATE_HOME', str(Path(env.get('HOME', Path.home())) / '.local/state'))) / 'hyprflip'
-        self.path = self.root / 'cards.json'
+    """Small, versioned data file. Names and window titles are never commands.
+
+    The user's library is the default. Another program can keep a separate
+    store at a path valid_path accepts; it never mixes with the library, and
+    with titles=False it never keeps a window title.
+    """
+    def __init__(self, env=None, path=None, titles=True):
+        if path is None:
+            env = os.environ if env is None else env
+            self.root = Path(env.get('XDG_STATE_HOME', str(Path(env.get('HOME', Path.home())) / '.local/state'))) / 'hyprflip'
+            self.path = self.root / 'cards.json'
+        else:
+            self.path = Path(path)
+            self.root = self.path.parent
+        # The lock and temporary files sit beside the file, named after it:
+        # cards.lock and cards-<uuid> for the library.
+        self.separate, self.titles = path is not None, titles
+
+    @staticmethod
+    def valid_path(path, env=None):
+        """Whether another program may keep a separate store at this path.
+
+        It must be a plain absolute path to a .json file, in a real directory
+        of the caller's own that nobody else can write, and neither the user's
+        library nor a file beside it.
+        """
+        if not isinstance(path, str) or not os.path.isabs(path) or os.path.normpath(path) != path: return False
+        if not re.fullmatch(r'[A-Za-z0-9_.-]{1,64}\.json', os.path.basename(path)): return False
+        try:
+            directory = os.lstat(os.path.dirname(path))
+            if not stat.S_ISDIR(directory.st_mode) or directory.st_uid != os.getuid() or directory.st_mode & 0o022:
+                return False
+            try:
+                existing = os.lstat(path)
+            except FileNotFoundError:
+                pass
+            else:
+                if not stat.S_ISREG(existing.st_mode) or existing.st_nlink != 1 or existing.st_uid != os.getuid():
+                    return False
+            library = RecipeStore(env)
+            return (Path(path).resolve() != library.path.resolve() and
+                    Path(path).parent.resolve() != library.root.resolve())
+        except (OSError, ValueError, RuntimeError):
+            return False  # Includes a NUL byte, an unencodable name and a symlink loop.
 
     @staticmethod
     def valid_name(name):
         return isinstance(name, str) and bool(name) and len(name) <= 64 and clean(name, 65) == name
+
+    @staticmethod
+    def untitled(recipe):
+        """A copy of the recipe in which no app keeps its window title."""
+        try:
+            recipe = deepcopy(recipe)
+            for face in recipe['faces']:
+                for app in face['apps']: app['title'] = ''
+        except (KeyError, TypeError) as error:
+            raise ValueError() from error  # Malformed, as validate() would report it.
+        return recipe
 
     @staticmethod
     def validate(recipe):
@@ -1488,7 +1603,8 @@ class RecipeStore:
                 if not self.valid_name(name): raise ValueError()
                 self.validate(recipe)
             return data['cards']
-        except (ValueError, KeyError, TypeError, UnicodeError) as error:
+        except (ValueError, KeyError, TypeError, UnicodeError, RecursionError) as error:
+            # RecursionError: JSON nested deeper than the parser goes.
             raise SetupError(f'Saved cards could not be read. Check {self.path}; it has not been overwritten.') from error
 
     def update(self, name, recipe, previous):
@@ -1499,10 +1615,14 @@ class RecipeStore:
         # atomic write. Concurrent changes to either name must not be lost.
         for name in expected.keys() | replacements.keys():
             if not self.valid_name(name): raise SetupError('Use a card name between 1 and 64 characters.')
+        if not self.titles:
+            # A safety net: callers blank titles first, but none is ever written.
+            replacements = {name: None if recipe is None else self.untitled(recipe) for name, recipe in replacements.items()}
         for recipe in replacements.values():
             if recipe is not None: self.validate(recipe)
-        self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
-        with (self.root / 'cards.lock').open('a') as lock:
+        # A separate store's directory is its program's own; only the library makes one.
+        if not self.separate: self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
+        with (self.root / (self.path.stem + '.lock')).open('a') as lock:
             fcntl.flock(lock, fcntl.LOCK_EX)
             cards = self.read()
             if any(cards.get(name) != previous for name, previous in expected.items()):
@@ -1511,7 +1631,7 @@ class RecipeStore:
                 if recipe is None: cards.pop(name, None)
                 else: cards[name] = recipe
             if len(cards) > 100: raise SetupError('You have 100 saved cards. Delete an unused one before saving another.')
-            temporary = self.root / ('cards-' + uuid.uuid4().hex)
+            temporary = self.root / (self.path.stem + '-' + uuid.uuid4().hex)
             try:
                 descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
                 with os.fdopen(descriptor, 'w') as handle:
@@ -1596,9 +1716,16 @@ class Saved(Setup):
                     sites(window.get('class'), window.get('initialClass')))
 
     @staticmethod
+    def parked(card):
+        # A hidden card waits on a special workspace for the program that
+        # parked it; the menus never offer, complete or reveal it.
+        return bool(card.get('workspace', {}).get('special'))
+
+    @staticmethod
     def open_cards(recipe, windows, state):
         result = []
         for card in state.get('containers', []):
+            if Saved.parked(card): continue
             matched = []
             for face, members in zip(recipe['faces'], card['faces']):
                 if len(face['apps']) != len(members): break
@@ -1660,6 +1787,24 @@ class Saved(Setup):
             raise SetupError('The card layout changed. Open Reopen missing apps again.')
         return windows, state
 
+    @staticmethod
+    def blend(order, live, inserted, floor=0.0):
+        """Shares for a face whose live apps take inserted ones back, in order.
+
+        Inserted apps keep their saved shares and the live apps divide the rest
+        in their current proportions. With a floor, the inserted shares first
+        shrink together, if needed, so the live apps keep at least floor times
+        their number between them. The result sums to 1.
+        """
+        total = sum(inserted.values())
+        room = max(0., 1 - floor * len(live))
+        if total > room:
+            inserted = {key: share * room / total for key, share in inserted.items()}
+            total = room
+        ratios = [live[key] * (1 - total) if key in live else inserted[key] for key in order]
+        scale = sum(ratios)
+        return [ratio / scale for ratio in ratios]
+
     def repair_reserved(self, plan, selected, arrangement):
         windows, state = self.validate_repair(plan)
         original = plan.edit
@@ -1673,10 +1818,8 @@ class Saved(Setup):
         for side, target in enumerate(targets):
             members = original.card['faces'][side]
             old = before['faces'][side]
-            missing = sum(r for a, r in zip(target['windows'], target['ratios']) if a not in members)
-            weights = dict(zip(members, old['ratios']))
-            target['ratios'] = [weights[a] * (1 - missing) if a in weights else r
-                                for a, r in zip(target['windows'], target['ratios'])]
+            missing = {a: r for a, r in zip(target['windows'], target['ratios']) if a not in members}
+            target['ratios'] = self.blend(target['windows'], dict(zip(members, old['ratios'])), missing)
             if len(members) > 1: target['axis'] = old['axis']
         expected = deepcopy(original.card['faces'])
         marked, moved, tiled, attempted = state.get('marked'), [], [], []
@@ -1824,7 +1967,7 @@ class Saved(Setup):
         # An open card that still holds part of this setup is completed in
         # place, as Reopen missing apps would, instead of competing for apps.
         partial = [(c, chosen) for c in state.get('containers', []) if state.get('repair_cards')
-                   and not c.get('fullscreen')
+                   and not c.get('fullscreen') and not self.parked(c)
                    and (chosen := self.surviving_slots(recipe, c, windows))]
         if partial:
             index = '0' if len(partial) == 1 else self.menu.choose('Which open card should get the missing apps?', [
@@ -1977,7 +2120,11 @@ class Saved(Setup):
                 match = self.choose_window('Choose ' + app['label'], candidates, workspace)
                 if match not in {w['address'] for w in candidates}: raise Cancelled()
             if not candidates:
-                if any(self.same_app(app, w) for a, w in windows.items() if a not in chosen):
+                held = {a for a, w in windows.items() if a not in chosen and self.same_app(app, w)}
+                hidden = {a for card in state.get('containers', []) if self.parked(card) for face in card['faces'] for a in face}
+                if held & hidden:
+                    raise SetupError(app['label'] + ' is held by a hidden card. Close it or bring that card back, then try again.')
+                if held:
                     raise SetupError(app['label'] + ' is already open but unavailable. Leave fullscreen or release it from its card, then try again.')
                 launchers[index] = catalog.infer(app) or self.choose_launcher(app, catalog)
             chosen[index] = match
@@ -2012,6 +2159,48 @@ class Saved(Setup):
         if focus and (self.ipc.data('-j', 'activeworkspace')['id'] != plan.workspace or
                       self.ipc.data('-j', 'activewindow').get('address') not in (None, plan.focus)):
             raise SetupError('Focus changed. Open Saved cards again on the workspace you want.')
+
+    @staticmethod
+    def identify_launched(apps, launchers, processes, chosen, eligible, baseline):
+        """Give each launched slot the new window that is unmistakably its own.
+
+        chosen is filled in place, from eligible windows absent from baseline.
+        Returns the slots whose launch exited with an error before a window of
+        theirs appeared.
+        """
+        failed = []
+        for index, entry in launchers.items():
+            if chosen[index]: continue
+            keys = {entry.wm_class, entry.id[:-8]} - {''}
+            candidates = [w for a, w in eligible.items() if a not in baseline and a not in chosen and
+                (Saved.same_app(apps[index], w) or w.get('class') in keys or w.get('initialClass') in keys)]
+            exact = [w for w in candidates if clean(w.get('title', ''), 512) == apps[index]['title']]
+            # Two windows from the same app may start in either
+            # order. A lone early window is not proof of its slot.
+            classes = {apps[index]['class'], apps[index]['initial_class']} - {''}
+            ambiguous_slots = any(i != index and not chosen[i] and
+                (classes & {apps[i]['class'], apps[i]['initial_class']} or entry.id == other.id)
+                for i, other in launchers.items())
+            match = exact[0]['address'] if len(exact) == 1 else None
+            if match is None and len(candidates) == 1 and not ambiguous_slots:
+                match = candidates[0]['address']
+            if match:
+                chosen[index] = match
+            elif processes[index].poll() not in (None, 0):
+                failed.append(index)
+        return failed
+
+    @staticmethod
+    def remember_opened(recipe, launchers, chosen, windows):
+        """The recipe with each launched app's launcher and its new window's identity."""
+        remembered = deepcopy(recipe)
+        saved_apps = [app for face in remembered['faces'] for app in face['apps']]
+        for index, entry in launchers.items():
+            w = windows[chosen[index]]
+            saved_apps[index].update(desktop_id=entry.id, **{'class': w.get('class', '')[:512],
+                'initial_class': w.get('initialClass', '')[:512], 'title': clean(w.get('title', ''), 512),
+                'label': app_name(w)})
+        return remembered
 
     def apply_open(self, plan, timeout=20):
         request = getattr(self.menu, 'request', None)
@@ -2059,26 +2248,12 @@ class Saved(Setup):
                     workspace = self.ipc.data('-j', 'activeworkspace')['id']
                     windows, state = self.ipc.windows(), self.ipc.status()
                     eligible = self.eligible(windows, state)
-                    for index, entry in plan.launchers.items():
-                        if chosen[index]: continue
-                        keys = {entry.wm_class, entry.id[:-8]} - {''}
-                        candidates = [w for a, w in eligible.items() if a not in baseline and a not in chosen and
-                            (self.same_app(apps[index], w) or w.get('class') in keys or w.get('initialClass') in keys)]
-                        exact = [w for w in candidates if clean(w.get('title', ''), 512) == apps[index]['title']]
-                        # Two windows from the same app may start in either
-                        # order. A lone early window is not proof of its slot.
-                        classes = {apps[index]['class'], apps[index]['initial_class']} - {''}
-                        ambiguous_slots = any(i != index and not chosen[i] and
-                            (classes & {apps[i]['class'], apps[i]['initial_class']} or entry.id == other.id)
-                            for i, other in plan.launchers.items())
-                        match = exact[0]['address'] if len(exact) == 1 else None
-                        if match is None and len(candidates) == 1 and not ambiguous_slots:
-                            match = candidates[0]['address']
-                        if match:
-                            chosen[index] = match
-                            selected[match] = deepcopy(windows[match])
-                        elif processes[index].poll() not in (None, 0):
-                            raise SetupError('Could not launch ' + apps[index]['label'] + '. Open it yourself, then try the saved card again.')
+                    failed = self.identify_launched(apps, plan.launchers, processes, chosen, eligible, baseline)
+                    for index in plan.launchers:
+                        if chosen[index] and chosen[index] not in selected:
+                            selected[chosen[index]] = deepcopy(windows[chosen[index]])
+                    if failed:
+                        raise SetupError('Could not launch ' + apps[failed[0]]['label'] + '. Open it yourself, then try the saved card again.')
                     if hasattr(progress, 'update'):
                         progress.update([app['label'] for app, address in zip(apps, chosen) if not address])
                     allowed_focus = active in (None, plan.focus, *chosen)
@@ -2121,13 +2296,7 @@ class Saved(Setup):
                         if original_focus and self.ipc.data('-j', 'activewindow').get('address') != plan.focus:
                             self.restore_focus(original_focus)
                         raise
-                remembered = deepcopy(plan.recipe)
-                saved_apps = [app for face in remembered['faces'] for app in face['apps']]
-                for index, entry in plan.launchers.items():
-                    w = selected[chosen[index]]
-                    saved_apps[index].update(desktop_id=entry.id, **{'class': w.get('class', '')[:512],
-                        'initial_class': w.get('initialClass', '')[:512], 'title': clean(w.get('title', ''), 512),
-                        'label': app_name(w)})
+                remembered = self.remember_opened(plan.recipe, plan.launchers, chosen, selected)
                 if remembered != plan.recipe:
                     try: self.store.update(plan.name, remembered, plan.recipe)
                     except (SetupError, OSError):
@@ -2144,6 +2313,27 @@ class Saved(Setup):
             raise SetupError(f'Workspace {destination} needs a supported card layout (dwindle or optional hy3).')
         return replace(plan, workspace=destination, focus=self.ipc.data('-j', 'activewindow').get('address'))
 
+    @staticmethod
+    def remember_launchers(recipe, reference, catalog, by_label=True, owned=()):
+        """Give each app of a captured recipe its launcher, in place.
+
+        The one the reference remembered for that app wins, then one inferred
+        from the catalog. An app whose class is owned by the caller, which
+        opens it itself, never gets one.
+        """
+        old_apps = [app for face in (reference or {}).get('faces', []) for app in face['apps']]
+        for face in recipe['faces']:
+            for app in face['apps']:
+                if {app['class'], app['initial_class']} & set(owned) - {''}:
+                    app.pop('desktop_id', None)
+                    continue
+                previous = [old for old in old_apps if Saved.same_app(old,
+                            {'class': app['class'], 'initialClass': app['initial_class']})]
+                exact = [old for old in previous if old['title'] == app['title']]
+                identifiers = {old.get('desktop_id') for old in (exact or previous)} - {None}
+                if len(identifiers) == 1: app['desktop_id'] = identifiers.pop()
+                elif entry := catalog.infer(app, by_label): app['desktop_id'] = entry.id
+
     def apply(self, plan):
         if plan.action == 'settings':
             self.store.update(plan.name, plan.recipe, plan.previous)
@@ -2154,16 +2344,7 @@ class Saved(Setup):
             # A resize while naming the card must not save stale proportions.
             recipe = self.capture(plan.edit.card, windows)
             if (plan.previous or {}).get('workspace'): recipe['workspace'] = plan.previous['workspace']
-            catalog = DesktopApps(getattr(self.ipc, 'env', None))
-            old_apps = [app for face in (plan.previous or {}).get('faces', []) for app in face['apps']]
-            for face in recipe['faces']:
-                for app in face['apps']:
-                    previous = [old for old in old_apps if self.same_app(old,
-                                {'class': app['class'], 'initialClass': app['initial_class']})]
-                    exact = [old for old in previous if old['title'] == app['title']]
-                    identifiers = {old.get('desktop_id') for old in (exact or previous)} - {None}
-                    if len(identifiers) == 1: app['desktop_id'] = identifiers.pop()
-                    elif entry := catalog.infer(app): app['desktop_id'] = entry.id
+            self.remember_launchers(recipe, plan.previous, DesktopApps(getattr(self.ipc, 'env', None)))
             self.store.update(plan.name, recipe, plan.previous)
             if plan.action == 'update': return f'Updated “{plan.name}”.'
             return f'Saved “{plan.name}”. Open it from the card menu whenever you need it.'
@@ -2198,6 +2379,556 @@ class Saved(Setup):
                 if original_focus: self.restore_focus(original_focus)
                 raise
         return f'Restored “{plan.name}”.'
+
+
+class Unfinished(Exception):
+    """An unattended action that stopped short, with a stable code for the program that asked.
+
+    The message is fixed for each code, and labels names apps by their labels:
+    neither ever carries a window title or an exception's text. details go into
+    the reply as they are, such as launched, stranded or slots.
+    """
+    MESSAGES = {
+        'invalid_request': 'Hyprflip cannot read that request.',
+        'invalid_store': 'Keep cards in a private folder of your own, outside the Hyprflip library.',
+        'store_unreadable': 'The saved cards could not be read. The file has not been overwritten.',
+        'not_found': 'No card is saved under that name.',
+        'invalid_name': 'Use a card name between 1 and 64 characters.',
+        'unavailable': 'Cards cannot open here. Load a Hyprflip core with native cards and card ungroup.',
+        'unsupported_workspace': 'Cards open on numbered dwindle workspaces only.',
+        'fullscreen': 'Leave fullscreen, then try again.',
+        'incomplete': 'A side of the card has no app to show.',
+        'in_card': 'That app already belongs to a card or group.',
+        'busy': 'Another card change is still in progress. Try again in a moment.',
+        'changed': 'An app closed, moved or changed. Try again.',
+        'conflict': 'That saved card changed. Read it again.',
+        'refused': 'Hyprflip could not make the card. Its apps went back where they were.',
+        'rollback_failed': 'Hyprflip could not make the card, and some of its apps could not go back where they were.',
+        'not_native': 'Only native cards can be saved this way.',
+        'no_card': 'No card has that id.',
+        'limit': 'There are 100 saved cards. Delete one before saving another.',
+        'cancelled': 'Cancelled before any app moved. Launched apps stay open.',
+        'hyprland': 'Hyprland is not responding.',
+        'internal': 'The card action failed unexpectedly.',
+    }
+
+    def __init__(self, code, labels=(), **details):
+        super().__init__(self.MESSAGES[code])
+        self.code, self.labels, self.details = code, list(labels), details
+
+
+class NoMenu:
+    """The menu of an action nobody watches: asking anything is a mistake in the code."""
+    def choose(self, prompt, choices): raise RuntimeError('An unattended action asked a question.')
+    def input(self, prompt): raise RuntimeError('An unattended action asked a question.')
+    def opening(self, name, labels): raise RuntimeError('An unattended action showed its progress.')
+
+
+class Unattended(Saved):
+    """Cards another program opens and saves by itself, with nobody at a menu.
+
+    control.run_unattended checks each request first. An open takes only the
+    windows its caller binds, launches an app only from a stored launcher or one
+    its class names, and builds the card in one batch that leaves the keyboard,
+    the workspace and the pointer where they are. The store is the caller's own
+    file, which never keeps a window title.
+    """
+    def __init__(self, ipc, store_path):
+        super().__init__(ipc, NoMenu())
+        self.store_path = store_path
+        self.env = ipc.env if getattr(ipc, 'env', None) is not None else os.environ
+
+    @property
+    def store(self):
+        # Never the user's library: the caller's own file, which run_unattended
+        # accepted with valid_path, or none at all.
+        if self.store_path is None: raise Unfinished('invalid_store')
+        return RecipeStore(path=self.store_path, titles=False)
+
+    @staticmethod
+    def token(recipe):
+        # A definition stays the same whatever its windows were called.
+        return digest(RecipeStore.untitled(recipe))
+
+    @staticmethod
+    def capture(card, windows):
+        """Saved.capture, with every title blank before anything compares or digests it."""
+        return RecipeStore.untitled(Saved.capture(card, windows))
+
+    def bindable(self, windows, state):
+        """Windows a caller may bind: loose and usable, on a numbered or a special workspace.
+
+        Only where an app can go back if the core refuses the card: a named
+        workspace, or a special one whose name move() cannot reach, is not.
+        """
+        return {a: w for a, w in self.eligible(windows, state, special=True).items()
+                if w['workspace']['id'] > 0 or SPECIAL_NAME.fullmatch(w['workspace'].get('name', ''))}
+
+    @staticmethod
+    def focus_command(address):
+        """A focus that leaves the pointer where it is, as one function Hyprland runs whole.
+
+        Hyprland's focus puts the pointer in the middle of the window it focuses,
+        even one that already has the keyboard, unless cursor:no_warps is on. This
+        turns it on for this focus alone and back to the boolean it was, under
+        pcall, so a failed focus never leaves it on. It has no ';', so a batch
+        could carry it too.
+        """
+        return ('function() local focus = hl.dsp.focus({ window = "address:' + address + '" }) '
+                'local was = hl.get_config("cursor.no_warps") == true hl.config({ cursor = { no_warps = true } }) '
+                'local ok, err = pcall(hl.dispatch, focus) hl.config({ cursor = { no_warps = was } }) '
+                'if not ok then error(err) end end')
+
+    def give_back(self, address):
+        """Gives the keyboard back to a window without moving the pointer, and never raises.
+
+        The window that already has the keyboard gets nothing: any focus would
+        put the pointer in its middle. Any other gets one no-warp focus, then up
+        to 300 ms for the keyboard to arrive. Returns whether it did.
+        """
+        try:
+            if not isinstance(address, str) or not re.fullmatch(r'0x[0-9a-fA-F]{1,16}', address): return False
+            if self.ipc.data('-j', 'activewindow').get('address') == address: return True
+            try: self.ipc.call('dispatch', self.focus_command(address))
+            except (SetupError, OSError, subprocess.TimeoutExpired): pass  # Where the keyboard is decides.
+            deadline = time.monotonic() + .3
+            while self.ipc.data('-j', 'activewindow').get('address') != address:
+                if time.monotonic() >= deadline: return False
+                time.sleep(.03)
+            return True
+        except Exception:
+            return False
+
+    def keep_keyboard(self, focus, ours):
+        """Gives the keyboard back to focus when one of the card's apps took it and focus is still in view.
+
+        Returns whether the keyboard is where the caller left it, or at least on
+        none of the card's apps. A member of the card never gets it back: that
+        would turn the card.
+        """
+        try:
+            active = self.ipc.data('-j', 'activewindow').get('address')
+            if active == focus or active not in ours: return True
+            windows, current = self.ipc.windows(), self.ipc.data('-j', 'activeworkspace')['id']
+            if focus in ours or focus not in windows or windows[focus]['workspace']['id'] != current: return False
+            return self.give_back(focus)
+        except (SetupError, OSError, subprocess.TimeoutExpired, KeyError, TypeError, AttributeError):
+            return False
+
+    @contextmanager
+    def locked(self, lock_ms, cancelled):
+        """The menus' request lock, waited for lock_ms at most. A menu waiting for an answer keeps its turn."""
+        request = Request(Path(self.env['XDG_RUNTIME_DIR']), self.env['HYPRLAND_INSTANCE_SIGNATURE'])
+        try:
+            with request.exclusive(lock_ms / 1000, cancelled):
+                yield
+        except Busy as error:
+            raise Unfinished('busy') from error
+        except Cancelled as error:
+            raise Unfinished('cancelled') from error
+
+    def cards(self):
+        try:
+            return self.store.read()
+        except (SetupError, OSError) as error:
+            raise Unfinished('store_unreadable') from error
+
+    def write(self, name, stored, recipe):
+        """Replaces the definition that was read as stored, or removes it with None."""
+        try:
+            self.store.change({name: stored}, {name: recipe})
+        except (SetupError, ValueError, OSError) as error:
+            # The store says why only in words; reading it again gives the caller a code.
+            try:
+                current = self.store.read()
+            except (SetupError, OSError):
+                raise Unfinished('store_unreadable') from error
+            if current.get(name) != stored: raise Unfinished('conflict') from error
+            if stored is None and recipe is not None and len(current) >= 100: raise Unfinished('limit') from error
+            raise Unfinished('store_unreadable') from error
+
+    @staticmethod
+    def slot(app, **details):
+        # An app of a definition as a caller sees it: never its title.
+        return {'class': app['class'], 'initial_class': app['initial_class'], 'label': app['label'],
+                'launcher': 'desktop_id' in app, **details}
+
+    @staticmethod
+    def places(recipe):
+        """The slot numbers of each face, counted front face first."""
+        places, offset = [], 0
+        for face in recipe['faces']:
+            places.append(list(range(offset, offset + len(face['apps']))))
+            offset += len(face['apps'])
+        return places
+
+    def slots(self, recipe, chosen, missing):
+        """Each slot of the definition: the window in it, or why there is none."""
+        return [[self.slot(recipe['faces'][side]['apps'][j], address=chosen[i],
+                           **({'missing': missing[i]} if i in missing else {})) for j, i in enumerate(indexes)]
+                for side, indexes in enumerate(self.places(recipe))]
+
+    @staticmethod
+    def launches(apps, launchers, processes, chosen):
+        """The apps this request started, so that the caller knows their windows when they come late."""
+        return [{'class': apps[i]['class'], 'initial_class': apps[i]['initial_class'], 'wm_class': launchers[i].wm_class,
+                 'desktop_id': launchers[i].id, 'address': chosen[i]} for i in sorted(processes)]
+
+    def capabilities(self):
+        try:
+            state = self.ipc.status()
+        except CoreUnavailable:
+            state = {}  # No core loaded is an answer too: no cards. Not reaching Hyprland is not.
+        state = state if isinstance(state, dict) else {}
+        panes = state.get('container_max_panes')
+        return {'result': 'capabilities', 'actions': ['capabilities', 'list', 'delete', 'open', 'save'],
+                'core': state.get('native_cards') is True and state.get('card_ungroup') is True,
+                'max_panes': panes if type(panes) is int else 0}
+
+    def listing(self, name=None):
+        cards = self.cards()
+        if name is not None: cards = {name: cards[name]} if name in cards else {}
+        return {'result': 'list', 'cards': {name: {
+            'token': self.token(recipe), 'active': recipe['active'], 'floating': bool(recipe.get('floating')),
+            'faces': [[self.slot(app) for app in face['apps']] for face in recipe['faces']]}
+            for name, recipe in cards.items()}}
+
+    def delete(self, name, token, lock_ms=5000, cancelled=None):
+        with self.locked(lock_ms, cancelled):
+            stored = self.cards().get(name)
+            if stored is None: return {'result': 'absent'}
+            if self.token(stored) != token: raise Unfinished('conflict')
+            self.write(name, stored, None)
+        return {'result': 'deleted'}
+
+    @staticmethod
+    def move_command(address, workspace):
+        if not re.fullmatch(r'0x[0-9a-fA-F]{1,16}', address) or type(workspace) is not int or not 0 < workspace < 2**31:
+            raise SetupError('The card action is unavailable.')
+        return f'dispatch hl.dsp.window.move({{window="address:{address}",workspace="{workspace}",follow=false}})'
+
+    @staticmethod
+    def restore_line(arrangement, box, floating):
+        """The core's quiet restore of an arrangement, as card_restore.describe words a card's."""
+        if not all(type(v) in (int, float) and math.isfinite(v) for v in box):
+            raise SetupError('The card action is unavailable.')
+        line = (f'restore quiet {"floating" if floating else "tiled"} {arrangement["active"]} 0 ' +
+                ' '.join(f'{v:.12g}' for v in box))
+        for side, face in zip(('front', 'back'), arrangement['faces']):
+            if not all(re.fullmatch(r'0x[0-9a-fA-F]{1,16}', a) for a in face['windows']):
+                raise SetupError('The card action is unavailable.')
+            line += (f' {side} {face["axis"]} {face["windows"][face["focus"]]}' +
+                     ''.join(f' {a}:{r:.12g}' for a, r in zip(face['windows'], face['ratios'])))
+        return line
+
+    def box(self, arrangement, floating, workspace, windows):
+        """A tiled card's box is its front app's tile there, or else the screen's free area; a floating
+        card keeps its front app's size, centred on that screen."""
+        front = windows[arrangement['faces'][0]['windows'][0]]
+        if not floating and front['workspace']['id'] == workspace: return [*front['at'], *front['size']]
+        monitors = {w['id']: w.get('monitorID') for w in self.ipc.data('-j', 'workspaces')}
+        monitor = next((m for m in self.ipc.data('-j', 'monitors') if m['id'] == monitors.get(workspace)), None)
+        if monitor is None: return [*front['at'], *front['size']]
+        width, height = monitor['width'] / monitor['scale'], monitor['height'] / monitor['scale']
+        if monitor.get('transform', 0) % 2: width, height = height, width
+        left, top, right, bottom = monitor.get('reserved', [0, 0, 0, 0])
+        x, y, width, height = monitor['x'] + left, monitor['y'] + top, width - left - right, height - top - bottom
+        if not floating: return [x, y, width, height]
+        return [x + (width - front['size'][0]) / 2, y + (height - front['size'][1]) / 2, *front['size']]
+
+    def roll_back(self, moved, workspace, tiled):
+        """Sends moved apps back where they came from and floats again those tiled for the card.
+
+        Returns None when every app is back, otherwise the addresses of those
+        that are still out of place.
+        """
+        failed = False
+        for undo, arguments in ((self.restore_imports, (moved, workspace)), (self.restore_floats, (tiled,))):
+            try:
+                undo(*arguments)
+            except (SetupError, OSError, subprocess.TimeoutExpired):
+                failed = True
+        if not failed: return None
+        try:
+            windows = self.ipc.windows()
+        except (SetupError, OSError, subprocess.TimeoutExpired):
+            return list(dict.fromkeys(w['address'] for w in moved + tiled))
+        stranded = []
+        for original in moved + tiled:
+            now = windows.get(original['address'])
+            if not now or any(now.get(k) != original.get(k) for k in ('pid', 'class')): continue  # Closed meanwhile.
+            if (original in moved and now['workspace']['id'] == workspace or
+                    original in tiled and not now.get('floating')) and original['address'] not in stranded:
+                stranded.append(original['address'])
+        # A step that failed after its app was back strands nothing.
+        return stranded or None
+
+    def open(self, request, cancelled):
+        """Builds a definition's card from the windows the caller binds and the apps it may launch."""
+        lock_ms, workspace = request.get('lock_ms', 5000), request['workspace']
+        bind, owned = request.get('bind', []), set(request.get('owned', []))
+        apps, chosen, missing, launchers, processes = [], [], {}, {}, {}
+        try:
+            with self.locked(lock_ms, cancelled):
+                # 1. Checks, before anything changes.
+                start = self.ipc.data('-j', 'activeworkspace')['id']
+                focus = request.get('focus') or self.ipc.data('-j', 'activewindow').get('address')
+                state = self.ipc.status()
+                if not (state.get('native_cards') and state.get('card_ungroup')): raise Unfinished('unavailable')
+                layouts = {w['id']: w['tiledLayout'] for w in self.ipc.data('-j', 'workspaces')}
+                if layouts.get(workspace) != 'dwindle' or not card_layout_available(state, 'dwindle'):
+                    raise Unfinished('unsupported_workspace')
+                windows = self.ipc.windows()
+                if any(w.get('fullscreen') and w['workspace']['id'] == workspace for w in windows.values()):
+                    raise Unfinished('fullscreen')
+                name, stored, token = request.get('name'), None, None
+                if name is not None:
+                    stored = self.cards().get(name)
+                    if stored is None: raise Unfinished('not_found')
+                    token = self.token(stored)
+                # A workspace the definition names is ignored: the card opens on the requested one.
+                recipe = RecipeStore.untitled(request['recipe'] if name is None else stored)
+                places = self.places(recipe)
+                apps = [app for face in recipe['faces'] for app in face['apps']]
+                chosen = [None] * len(apps)
+                # 2. Each bound window takes the first open slot of its app, front face first.
+                # No other window is ever taken.
+                members = {a for card in state.get('containers', []) for face in card['faces'] for a in face}
+                members.update(a for pair in state.get('pairs', []) for a in (pair['front'], pair['back']))
+                available, unused = self.bindable(windows, state), []
+                for address in bind:
+                    window = windows.get(address)
+                    if address in members or window and window.get('grouped'):
+                        raise Unfinished('in_card', [app_name(window)] if window else [])
+                    if window and window.get('fullscreen'): raise Unfinished('fullscreen')
+                    if address not in available: raise Unfinished('changed')
+                    index = next((i for i, app in enumerate(apps) if not chosen[i] and self.same_app(app, window)), None)
+                    if index is None: unused.append(address)
+                    else: chosen[index] = address
+                selected = {a: deepcopy(windows[a]) for a in chosen if a}
+                # 3. Every other slot is launched, or says why it is not.
+                catalog = DesktopApps(self.env)
+                for index, app in enumerate(apps):
+                    if chosen[index]: continue
+                    if {app['class'], app['initial_class']} & owned: missing[index] = 'owned'
+                    elif any(self.same_app(app, w) for a, w in windows.items() if a not in bind):
+                        missing[index] = 'open_elsewhere'
+                    elif not request.get('launch', True): missing[index] = 'not_launched'
+                    elif entry := catalog.infer(app, by_label=False): launchers[index] = entry
+                    else: missing[index] = 'no_launcher'
+                # Nothing starts for a card that cannot be made.
+                if empty := next((face for face in places if all(i in missing for i in face)), None):
+                    raise Unfinished('incomplete', [apps[i]['label'] for i in empty], slots=self.slots(recipe, chosen, missing))
+                baseline = set(windows)
+            # A request cancelled while it was checked starts nothing.
+            if cancelled(): raise Unfinished('cancelled')
+            for index, entry in launchers.items():
+                try:
+                    processes[index] = catalog.launch(entry)
+                except (SetupError, OSError):
+                    missing[index] = 'launch_failed'
+
+            # 4. Each launched app's window, waited for without the lock. Only a
+            # signal ends the wait early; the user moving around does not. A blank
+            # title is no proof that a window is a slot's own.
+            pending = {i: launchers[i] for i in processes}
+            probes = [dict(app, title=None) for app in apps]
+            keys = set().union(*({apps[i]['class'], apps[i]['initial_class'], e.wm_class, e.id[:-8]}
+                                 for i, e in pending.items())) - {''}
+            returned, deadline = set(), time.monotonic() + request.get('timeout_ms', 20000) / 1000
+            while pending:
+                if cancelled(): raise Unfinished('cancelled')
+                # The windows first, then the keyboard: a window that took the
+                # keyboard as it mapped still has it when its slot is filled. One
+                # that maps between the two replies waits for the next poll.
+                windows, state = self.ipc.windows(), self.ipc.status()
+                active = self.ipc.data('-j', 'activewindow').get('address')
+                current = self.ipc.data('-j', 'activeworkspace')['id']
+                for index in self.identify_launched(probes, pending, processes, chosen, self.bindable(windows, state), baseline):
+                    missing[index] = 'launch_failed'
+                    del pending[index]
+                for index in [i for i in pending if chosen[i]]:
+                    selected[chosen[index]] = deepcopy(windows[chosen[index]])
+                    del pending[index]
+                # The keyboard comes back from this request's own apps, once from each
+                # window, while the user stays where the request started and focus is there.
+                newcomer = windows.get(active, {})
+                ours = active in {chosen[i] for i in processes} or {newcomer.get('class'), newcomer.get('initialClass')} & keys
+                if (active and ours and active != focus and active not in returned and current == start
+                        and focus in windows and windows[focus]['workspace']['id'] == current):
+                    returned.add(active)
+                    self.give_back(focus)
+                if not pending: break
+                if time.monotonic() >= deadline:
+                    missing.update((index, 'timeout') for index in pending)
+                    break
+                time.sleep(.05)
+
+            # 5. Missing slots drop out. The rest share their face's room, and its
+            # focus goes to the nearest slot left.
+            arrangement = {'faces': [], 'active': recipe['active']}
+            for face, indexes in zip(recipe['faces'], places):
+                present = [j for j, i in enumerate(indexes) if chosen[i]]
+                if not present:
+                    raise Unfinished('incomplete', [apps[i]['label'] for i in indexes], slots=self.slots(recipe, chosen, missing))
+                share = sum(face['ratios'][j] for j in present)
+                nearest = min(present, key=lambda j: (abs(j - face['focus']), j))
+                arrangement['faces'].append({'windows': [chosen[indexes[j]] for j in present], 'axis': face['axis'],
+                                             'ratios': [face['ratios'][j] / share for j in present],
+                                             'focus': present.index(nearest)})
+            ours = {a for face in arrangement['faces'] for a in face['windows']}
+
+            # 6. The commit, under the lock again. A signal stops it until the batch goes out.
+            if cancelled(): raise Unfinished('cancelled')
+            with self.locked(lock_ms, cancelled):
+                if cancelled(): raise Unfinished('cancelled')
+                if name is not None and ((now := self.cards().get(name)) is None or self.token(now) != token):
+                    raise Unfinished('conflict')
+                windows, state = self.ipc.windows(), self.ipc.status()
+                available = self.bindable(windows, state)
+                changed = [a for a, w in selected.items() if a not in available or
+                           any(windows[a].get(k) != w.get(k) for k in ('pid', 'class', 'workspace', 'floating'))]
+                if changed: raise Unfinished('changed', [app_name(selected[a]) for a in changed])
+                floating = bool(recipe.get('floating'))
+                box = self.box(arrangement, floating, workspace, windows)
+                # Recorded before the batch, so that apps can go back even when its reply is lost.
+                moved = [selected[a] for face in arrangement['faces'] for a in face['windows']
+                         if selected[a]['workspace']['id'] != workspace]
+                commands = [self.move_command(w['address'], workspace) for w in moved]
+                commands.append('hyprflip ' + self.restore_line(arrangement, box, floating))
+                tiled = []
+                with self.reserve(selected, state, workspace):
+                    try:
+                        self.tile_selected(selected, tiled)
+                        if cancelled(): raise Unfinished('cancelled')
+                    except (Unfinished, SetupError, OSError, subprocess.TimeoutExpired):
+                        # Nothing moved yet; the apps tiled for the card float again.
+                        if (stranded := self.roll_back([], workspace, tiled)) is not None:
+                            raise Unfinished('rollback_failed', stranded=stranded)
+                        raise
+                    # From here on a signal waits for the result: the batch may have moved apps.
+                    try:
+                        replies = self.ipc.batch(commands)
+                    except (SetupError, OSError, subprocess.TimeoutExpired):
+                        replies = None
+                    # 7. Status tells what happened, whatever the replies said.
+                    card = next((c for c in self.ipc.status().get('containers', [])
+                                 if {a for face in c['faces'] for a in face} == ours), None)
+                    if card is None:
+                        stranded = self.roll_back(moved, workspace, tiled)
+                        self.keep_keyboard(focus, ours)
+                        if stranded is not None: raise Unfinished('rollback_failed', stranded=stranded)
+                        if replies is None: raise Unfinished('hyprland')
+                        busy = len(replies) == len(commands) and replies[-1].startswith('error: Finish the active')
+                        raise Unfinished('busy' if busy else 'refused')
+                # 8. If the new card took the keyboard, it goes back. That never undoes the card.
+                focus_returned = self.keep_keyboard(focus, ours)
+                # 9. The launchers that brought an app are kept with the definition.
+                remembered, opened = {}, {i: launchers[i] for i in processes if chosen[i]}
+                if name is not None and opened:
+                    update = RecipeStore.untitled(self.remember_opened(recipe, opened, chosen, selected))
+                    remembered['remembered'] = True
+                    if update != recipe:
+                        try:
+                            self.write(name, stored, update)
+                            recipe, token = update, self.token(update)
+                        except Unfinished:
+                            remembered['remembered'] = False
+        except Unfinished as stop:
+            stop.details.setdefault('launched', self.launches(apps, launchers, processes, chosen))
+            raise
+        except (SetupError, OSError, subprocess.TimeoutExpired) as error:
+            # A Hyprland that answers without a core is no failure to reach it.
+            code = 'unavailable' if isinstance(error, CoreUnavailable) else 'hyprland'
+            raise Unfinished(code, launched=self.launches(apps, launchers, processes, chosen)) from error
+        place = card.get('workspace') or {}
+        return {'result': 'opened', 'card': card['id'], 'token': token,
+                'workspace': {'id': place.get('id', workspace), 'name': place.get('name', str(workspace)),
+                              'special': bool(place.get('special'))},
+                'slots': self.slots(recipe, chosen, missing), 'launched': self.launches(apps, launchers, processes, chosen),
+                'unused': unused, 'focus_returned': focus_returned, **remembered}
+
+    def merge(self, recipe, card, reference, keep, limit):
+        """Puts the closed apps the caller keeps back at their places in the reference, in place.
+
+        Returns each slot's live window, None for a kept app, and the kept apps
+        left out for want of room.
+        """
+        def identity(apps): return [(app['class'], app['initial_class']) for app in apps]
+        addresses, dropped = [], []
+        for side, face in enumerate(recipe['faces']):
+            members, kept = card['faces'][side], sorted(k['index'] for k in keep if k['face'] == side)
+            if not kept:
+                addresses.append(list(members))
+                continue
+            old = reference['faces'][side]
+            if (identity(face['apps']) == identity(a for j, a in enumerate(old['apps']) if j not in kept)
+                    and all(abs(ratio - 1 / len(members)) < .001 for ratio in face['ratios'])):
+                # Only the kept apps closed, and hyprflip shared their room out
+                # evenly: the face stays as it was defined.
+                recipe['faces'][side] = deepcopy(old)
+                others = iter(members)
+                addresses.append([None if j in kept else next(others) for j in range(len(old['apps']))])
+                continue
+            # Otherwise each kept app goes back at its place, while there is room.
+            room = max(0, limit - len(members))
+            dropped += [{'face': side, 'index': j} for j in kept[room:]]
+            order = list(range(len(members)))
+            for j in kept[:room]: order.insert(min(j, len(order)), ('kept', j))
+            ratios = self.blend(order, dict(enumerate(face['ratios'])), {('kept', j): old['ratios'][j] for j in kept[:room]},
+                                floor=.1)
+            recipe['faces'][side] = {'apps': [face['apps'][k] if type(k) is int else deepcopy(old['apps'][k[1]]) for k in order],
+                                     'axis': old['axis'] if len(members) == 1 else face['axis'],
+                                     'ratios': ratios, 'focus': order.index(face['focus'])}
+            addresses.append([members[k] if type(k) is int else None for k in order])
+        return addresses, dropped
+
+    def save(self, request, cancelled):
+        """Saves a live card's definition by the card's id, wherever it is. The card itself is never touched."""
+        name, owned = request['name'], set(request.get('owned', []))
+        with self.locked(request.get('lock_ms', 5000), cancelled):
+            # 1. The card, exactly as the caller knows it: native and not fullscreen, parked or not.
+            windows, state = self.ipc.windows(), self.ipc.status()
+            card = next((c for c in state.get('containers', []) if c['id'] == request['card']), None)
+            if card is None and any(pair.get('id') == request['card'] for pair in state.get('pairs', [])):
+                raise Unfinished('not_native')
+            if card is None: raise Unfinished('no_card')
+            if not card.get('native_group'): raise Unfinished('not_native')
+            live = [a for face in card['faces'] for a in face]
+            if set(live) != set(request['members']) or any(a not in windows for a in live): raise Unfinished('changed')
+            if card.get('fullscreen') or any(windows[a].get('fullscreen') for a in live): raise Unfinished('fullscreen')
+            # 2. Its shape now, without titles. The caller may know better whether it floats.
+            recipe = self.capture(card, windows)
+            if request.get('floating') is not None:
+                recipe.pop('floating', None)
+                if request['floating']: recipe['floating'] = True
+            # 3. The definition it replaces, and the closed apps the caller keeps from it.
+            cards = self.cards()
+            stored = cards.get(name)
+            if request['previous'] is None:
+                if stored is not None: raise Unfinished('conflict')
+                reference = request.get('base')
+            elif stored is None or self.token(stored) != request['previous']:
+                raise Unfinished('conflict')
+            else:
+                reference = RecipeStore.untitled(stored)
+            keep = request.get('keep', [])
+            if any(k['index'] >= len(reference['faces'][k['face']]['apps']) for k in keep): raise Unfinished('invalid_request')
+            if reference and 'workspace' in reference: recipe['workspace'] = reference['workspace']
+            addresses, dropped = self.merge(recipe, card, reference, keep, state.get('container_max_panes', 5))
+            # 4. Launchers come from the definition or the app's class, never its
+            # label, and an app the caller opens itself never gets one.
+            self.remember_launchers(recipe, reference, DesktopApps(self.env), by_label=False, owned=owned)
+            # 5. Written only when something changed. A new name always is.
+            if stored is not None and recipe == reference:
+                result, token = 'unchanged', request['previous']
+            else:
+                if stored is None and len(cards) >= 100: raise Unfinished('limit')
+                self.write(name, stored, recipe)
+                result, token = 'saved', self.token(recipe)
+        return {'result': result, 'name': name, 'token': token, 'dropped': dropped,
+                'slots': [[self.slot(app, address=address) for app, address in zip(face['apps'], faces)]
+                          for face, faces in zip(recipe['faces'], addresses)]}
 
 
 def notify(message):
