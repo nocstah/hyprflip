@@ -134,8 +134,7 @@ def snapshot(ipc):
             if opened:
                 detail = 'Go to · Workspace ' + ', '.join(sorted({w.workspace_name(windows[c['current']]) for c in opened}))
             else:
-                existing = [win for win in windows.values() if any(w.Saved.same_app(app, win)
-                            for face in recipe['faces'] for app in face['apps'])]
+                existing = w.Saved.free_apps(recipe, windows, state)
                 remote = sorted({w.workspace_name(win) for win in existing if win['workspace']['id'] != ctx['workspace']})
                 detail = 'Open here'
                 if remote: detail += ' · Bring apps from ' + ', '.join(remote)

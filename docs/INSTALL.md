@@ -78,9 +78,56 @@ reload. A failed installation restores the previous files. An existing
 hy3 installation must use the [container updater](#container-updates).
 Open dwindle and floating cards stay open through a core update: the installer
 records each card, reloads the core and rebuilds it with the same apps, sides,
-proportions, focus and floating frame. A card whose apps closed meanwhile is
-left as separate open windows. Leave fullscreen first. The installer refuses
-active hy3 cards before changing files or unloading the core.
+proportions, focus and floating frame. The keyboard, the pointer and what each
+monitor shows stay as they were. A keyboard that was on a card's app goes back
+to that app; on an app the rebuilt card does not show, it stays on the card's
+shown side. If you move to another workspace or monitor during the update, the
+keyboard stays with you. If the keyboard or what a monitor shows is not as it
+was at the end, or Hyprland did not say, the installer prints a line saying so.
+
+Once every card is rebuilt, a tiled card that the reload moved goes back to its
+tile where dwindle's split controls can put it there. It holds the keyboard,
+shows its workspace if that was hidden and moves the focus to its monitor, only
+for those steps; you may see that workspace for a moment. Afterwards the
+workspace each monitor showed, an open special workspace, the focused monitor and
+the keyboard come back. The steps act only while the card has the keyboard: if
+you move the focus to another window meanwhile they stop, the keyboard stays with
+you, and the card stays out of its tile. A move to an empty workspace during those
+steps is undone, with the card still out.
+
+A card stays where the reload left it, and the installer prints a line saying so,
+if it does not take the keyboard, while any monitor shows a named workspace,
+which a focus could not show again, or with the keyboard in a special workspace
+open over it and `input:special_fallthrough` on. While a window on its workspace
+is fullscreen or maximized, that window stays so, the tile is left alone and the
+installer says so. The tile stays as the rebuild made it after that ends, which
+can be another place. Run again before it ends, the update has no saved tile to
+compare and says nothing.
+
+Two tiled cards alone on a workspace come back in their tiles, with
+`dwindle:default_split_ratio` unset. At another ratio one can still be squeezed,
+with the printed line. A card second in its split, beside one neighbour, whose
+split was moved by hand comes back at half the split, with the line. With two more
+tiles on the workspace, tiles can end up in other places and at other sizes, one of
+them very small, and the update prints the line for a card that is not back. If
+the pointer rests on another monitor than the keyboard, the focus can end on the
+keyboard's monitor until the pointer moves. If its workspace was hidden or on
+another monitor and `cursor:warp_on_change_workspace` is 2, Hyprland warps the
+pointer as those steps visit it. Hyprland's `previous` workspace afterwards is
+the one those steps visited last.
+
+A card the new core refuses to rebuild, for example because its apps closed
+meanwhile, is left as separate open windows, the installer prints why, and the
+other cards are still kept. A card that another program parked on a special
+workspace is left there as separate windows too; the installer says how many,
+and the program that parked it rebuilds it. If `hyprctl` cannot reach Hyprland,
+the installer rolls the update back and keeps its recovery file,
+`~/.local/lib/hyprflip/hyprflip.upgrade.json`; the next update in the same
+Hyprland session rebuilds the pairs and cards from it when no card or pair is
+open. A rollback rebuilds cards plainly and corrects no tile, so the last one
+gets the keyboard and shows its workspace, and a tile the reload moved stays
+moved. Leave fullscreen first: the installer refuses a fullscreen card. It also
+refuses active hy3 cards before changing files or unloading the core.
 
 Hold **Super+Ctrl+Alt**: M marks the front, P pairs the focused app as the back,
 F flips and U ungroups. Both windows must share a workspace and both be tiled or
@@ -405,7 +452,12 @@ one JSON line for panels such as OmaCards. The installers can also be run by
 hand as before.
 
 Open dwindle and floating cards, native pairs and customized core settings are
-kept. Leave fullscreen first. For active hy3 cards, use the matching
+kept. A card parked on a special workspace stays there as separate windows for
+the program that parked it, and a card the new core refuses to rebuild stays
+as separate windows; the step's detail says how many of each, how many tiles it
+could not check or return and whether the keyboard or what a monitor shows is not
+as it was ([core installation](#core-installation-with-the-supplied-installer)
+has the details). Leave fullscreen first. For active hy3 cards, use the matching
 core/provider updater below. For hyprpm, use
 `hyprpm update` followed by `hyprpm reload` instead of the supplied installer.
 

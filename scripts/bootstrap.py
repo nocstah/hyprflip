@@ -134,8 +134,17 @@ def install_core():
     code, output = run(sys.executable, 'scripts/install.py', timeout=300)
     if code:
         raise Failed(last_lines(output))
+    # Only this output says what became of the cards: a refused quiet restore
+    # shows no notification, and a panel never sees the installer's lines.
     kept = re.search(r'Keeping (\d+) open card', output)
-    return 'Loaded' + (f'; kept {kept.group(1)} open card(s)' if kept else '')
+    refused = output.count('Could not keep a card')
+    hidden = re.search(r'Leaving (\d+) hidden card', output)
+    tiles = output.count('A card was kept, but')
+    return ('Loaded' + (f'; kept {int(kept.group(1)) - refused} open card(s)' if kept else '') +
+            (f'; could not keep {refused}, whose apps stay open as separate windows' if refused else '') +
+            (f'; left {hidden.group(1)} hidden card(s) as separate windows' if hidden else '') +
+            (f'; could not check or return the tile of {tiles}' if tiles else '') +
+            ('; the keyboard or what a monitor shows is not as it was' if 'is not as it was before the update' in output else ''))
 
 
 def install_helper():

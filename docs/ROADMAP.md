@@ -104,6 +104,19 @@ is enough. Strip later:
 - OmaCards: its hy3 mentions and pin checks (`tests/pin_check.py`,
   `tests/run-native.py`).
 
+## To do: a nested check for drags the app starts
+
+Scripted card calls refuse while one of the card's windows is dragged or
+resized, including a move the app asks for itself, such as dragging a GTK
+header bar. No surface holds the pointer focus during such a move, so the
+guard reads the drag's target instead. That case was measured by hand in
+nested sessions: the park was refused mid-drag and went ahead after release.
+No committed suite covers it yet. A suite for it needs a GTK fixture window
+with a `WindowHandle` to drag it by, and real pointer input from
+`tests/frame_pointer.c`, which is built from the
+`wlr-virtual-pointer-unstable-v1.xml` protocol file passed with `--protocol`,
+as `tests/card_interactions.py` takes it.
+
 ## Before a wider container preview
 
 - The reproduced native-group migration crash has a pinned hy3 lifetime fix;

@@ -131,6 +131,13 @@ restore browser tabs or documents, or save custom shell commands. A web app need
 an installed launcher that opens that web app. Multiple new windows with the same
 class and changed titles may need **Restore from open apps…** to distinguish them.
 
+A card that another program parked on a special workspace is hidden, and the
+saved-card menus leave it alone: they never show it as open, go to it or
+reveal it, and never fill it in with missing apps. When an app that a saved
+card needs belongs to a hidden card, opening that saved card, or **Reopen
+missing apps**, stops with “Gmail is held by a hidden card. Close it or bring
+that card back, then try again.”
+
 ### Storage
 
 Definitions live in `$XDG_STATE_HOME/hyprflip/cards.json`, normally
@@ -141,6 +148,12 @@ window addresses, PIDs, screenshots or executable commands. Names are data,
 never filenames. Concurrent updates check the selected definition and preserve
 other saved cards. Rename checks both names and changes them in one atomic
 write. An unreadable or unsupported file is not overwritten.
+
+Other programs can keep stores of their own through the helper's
+[unattended requests](SCRIPTING.md#open-and-save-cards-unattended). Such a
+store is a file in a private folder of that program, never this file or one
+beside it. It never mixes with your library, never appears in the menus or the
+OmaCards panel, and never keeps a window title.
 
 The first schema supports 100 definitions and names up to 64 characters. Back
 up the JSON file to keep your arrangements across machines or reinstalls.

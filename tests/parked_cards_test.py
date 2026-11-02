@@ -3,6 +3,7 @@ from copy import deepcopy
 import unittest
 from unittest.mock import patch
 
+from panel_control_test import control
 import repair_test
 from saved_test import Menu
 from setup_test import setup, window
@@ -37,6 +38,26 @@ class ParkedCardsTest(unittest.TestCase):
         self.assertEqual(flow.menu.prompts[1][1][0].label, 'Open here')
         self.assertEqual(self.ipc.mutations, [])
         self.assertEqual({self.ipc.clients[a]['workspace']['id'] for a in ('0xa', '0xb', '0xc', '0xd')}, {-98})
+
+    def test_a_saved_row_never_offers_to_bring_what_a_parked_card_holds(self):
+        # Opening the row names such an app instead of taking it, in the menus and the panel.
+        def panel():
+            original = self.ipc.data
+            with patch.object(self.ipc, 'data', lambda *args: {'int': 1} if 'getoption' in args else original(*args)), \
+                    patch.object(control.shortcuts, 'snapshot', return_value={'available': False, 'rows': [], 'occupied': []}):
+                row = control.snapshot(self.ipc)['saved'][0]
+            self.assertFalse(row['open'])
+            return row['detail']
+        self.park(self.ipc.card); self.away()
+        self.ipc.clients['0xa']['floating'] = True
+        self.assertEqual(panel(), 'Open here')
+        flow = setup.Saved(self.ipc, Menu('0'))
+        with self.assertRaisesRegex(setup.SetupError, HELD): flow.prepare_restore()
+        self.assertEqual(flow.menu.prompts[0][1][0].detail, 'Open here · ' + setup.Saved.describe(self.recipe))
+        # A loose window of the same app can still be brought, from any special workspace too.
+        self.ipc.clients['0x1a'] = deepcopy(self.original['0xa']) | {
+            'address': '0x1a', 'pid': 26, 'floating': True, 'workspace': {'id': -97, 'name': 'special:loose'}}
+        self.assertEqual(panel(), 'Open here · Bring apps from -97 (special:loose) · Resize apps to fit')
 
     def test_go_to_takes_the_card_on_screen_and_never_a_parked_one(self):
         twins = {}

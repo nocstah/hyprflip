@@ -134,6 +134,8 @@ WEB_APP_CLASS = re.compile(r'(?:brave|chrome|chromium|google-chrome|msedge|micro
 NO_ANSWER = re.compile(r"(Couldn't .+|HYPRLAND_INSTANCE_SIGNATURE was not set!.+) \([1-6]\)")
 # A special workspace that Hyprctl.move reaches by its name.
 SPECIAL_NAME = re.compile(r'special:[A-Za-z0-9_.-]{1,56}')
+# A monitor as a focus names it. Hyprland reads a lone letter or a number as a direction or an id.
+MONITOR_NAME = re.compile(r'[A-Za-z][A-Za-z0-9_.-]{1,55}')
 
 
 class Hyprctl:
@@ -1722,6 +1724,18 @@ class Saved(Setup):
         return bool(card.get('workspace', {}).get('special'))
 
     @staticmethod
+    def hidden(state):
+        """The apps hidden cards hold."""
+        return {a for card in state.get('containers', []) if Saved.parked(card) for face in card['faces'] for a in face}
+
+    @staticmethod
+    def free_apps(recipe, windows, state):
+        """The open windows a saved card could bring in. An app a hidden card holds is named on opening, not brought."""
+        hidden = Saved.hidden(state)
+        return [w for a, w in windows.items() if a not in hidden and any(Saved.same_app(app, w)
+                for face in recipe['faces'] for app in face['apps'])]
+
+    @staticmethod
     def open_cards(recipe, windows, state):
         result = []
         for card in state.get('containers', []):
@@ -1934,8 +1948,7 @@ class Saved(Setup):
                     places = sorted({workspace_name(windows[c['current']]) for c in opened})
                     detail = 'Open · Workspace ' + ', '.join(places)
                 else:
-                    matches = [w for w in windows.values() if any(self.same_app(app, w)
-                               for face in recipe['faces'] for app in face['apps'])]
+                    matches = self.free_apps(recipe, windows, state)
                     remote = sorted({workspace_name(w) for w in matches if w['workspace']['id'] != workspace})
                     detail = 'Open here'
                     if remote: detail += ' · Bring apps from ' + ', '.join(remote)
@@ -2121,8 +2134,7 @@ class Saved(Setup):
                 if match not in {w['address'] for w in candidates}: raise Cancelled()
             if not candidates:
                 held = {a for a, w in windows.items() if a not in chosen and self.same_app(app, w)}
-                hidden = {a for card in state.get('containers', []) if self.parked(card) for face in card['faces'] for a in face}
-                if held & hidden:
+                if held & self.hidden(state):
                     raise SetupError(app['label'] + ' is held by a hidden card. Close it or bring that card back, then try again.')
                 if held:
                     raise SetupError(app['label'] + ' is already open but unavailable. Leave fullscreen or release it from its card, then try again.')
@@ -2465,19 +2477,50 @@ class Unattended(Saved):
                 if w['workspace']['id'] > 0 or SPECIAL_NAME.fullmatch(w['workspace'].get('name', ''))}
 
     @staticmethod
-    def focus_command(address):
-        """A focus that leaves the pointer where it is, as one function Hyprland runs whole.
+    def no_warp(focus):
+        """A focus dispatcher that leaves the pointer where it is, as one function Hyprland runs whole.
 
         Hyprland's focus puts the pointer in the middle of the window it focuses,
         even one that already has the keyboard, unless cursor:no_warps is on. This
         turns it on for this focus alone and back to the boolean it was, under
-        pcall, so a failed focus never leaves it on. It has no ';', so a batch
-        could carry it too.
+        pcall, so a failed focus never leaves it on. It has no ';', '[' or ']', so
+        a batch could carry it too.
         """
-        return ('function() local focus = hl.dsp.focus({ window = "address:' + address + '" }) '
+        return ('function() local focus = ' + focus + ' '
                 'local was = hl.get_config("cursor.no_warps") == true hl.config({ cursor = { no_warps = true } }) '
                 'local ok, err = pcall(hl.dispatch, focus) hl.config({ cursor = { no_warps = was } }) '
                 'if not ok then error(err) end end')
+
+    @staticmethod
+    def focus_command(address):
+        """Gives a window the keyboard, showing its workspace if that is hidden."""
+        return Unattended.no_warp('hl.dsp.focus({ window = "address:' + address + '" })')
+
+    @staticmethod
+    def workspace_command(number):
+        """Shows a numbered workspace on its monitor, which takes the focus.
+
+        Only a positive integer gets through. Hyprland reads a negative number as
+        an offset from the focused workspace and anything below 1 as workspace 1,
+        so a named workspace's id would land on another workspace.
+        """
+        if type(number) is not int or not 0 < number < 2 ** 31:
+            raise ValueError('Not a numbered workspace.')
+        return Unattended.no_warp('hl.dsp.focus({ workspace = ' + str(number) + ' })')
+
+    @staticmethod
+    def special_command(name):
+        """Opens a special workspace on the focused monitor. One that is open there stays open: it is no toggle."""
+        if not isinstance(name, str) or not SPECIAL_NAME.fullmatch(name):
+            raise ValueError('Not a special workspace.')
+        return Unattended.no_warp('hl.dsp.focus({ workspace = "' + name + '" })')
+
+    @staticmethod
+    def monitor_command(name):
+        """Moves the focus to a monitor, whatever it shows. An open special workspace stays open."""
+        if not isinstance(name, str) or not MONITOR_NAME.fullmatch(name):
+            raise ValueError('Not a monitor.')
+        return Unattended.no_warp('hl.dsp.focus({ monitor = "' + name + '" })')
 
     def give_back(self, address):
         """Gives the keyboard back to a window without moving the pointer, and never raises.

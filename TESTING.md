@@ -1,5 +1,264 @@
 # Validation
 
+## Cards opened, saved and ungrouped by another program (2026-11-02)
+
+`make test` passes (CTest: the core suite, with the new input-guard cases, and
+`own_symbols`), and so do 348 Python unit tests (210 at rc.10) and
+`python3 -m compileall -q scripts tests`. clang-format reports the same 348
+findings as rc.10, with the same count in every file.
+
+Three suites ran in fresh nested sessions with only the core loaded (Hyprland
+0.56.2, Aquamarine 0.15.1 with the render-node patch, on the second GPU), each
+on a workspace no monitor showed. Before its pointer measurements, each suite
+shows that a plain focus dispatch warps the pointer to the centre of the window
+it focuses, so a pointer left where it rested means that nothing warped it.
+Before every measured action the pointer rests off-centre over a tile, and
+`cursorpos` confirms it got there. Each suite first waits for the session's own
+two windows (`session_windows` in `tests/control.py`): `tests/nested_session.py`
+writes `session.json` a second before it opens them, and a suite started straight
+after lost the keyboard to them.
+
+- `tests/card_id_workflows.py` passes 13 checks. Besides the quiet restores,
+  turns, parking and refusals of 2026-11-01, it takes a pair apart by id into
+  two loose windows; refuses to ungroup a fullscreen card, and out of
+  fullscreen ungroups it into loose tiles; ungroups a parked card, whose apps
+  stay loose on `special:park`; swaps two cards beside a working tile in one
+  `hyprctl --batch`, where every move replies ok and the tile stays; and leaves
+  the layout as it was after a refused unpark in a batch and `preselect x`.
+  `cursorpos` is unchanged right after and once settled around 20 scripted
+  actions (4 quiet restores, 4 `show`, 2 `flip`, 7 silent `workspace` moves to
+  park, unpark and a named workspace, and 3 `ungroup`), and before and after
+  both batches.
+- `tests/install_cards.py` passes 64 checks, with `input:follow_mouse` 1,
+  `cursor:warp_on_change_workspace` 1 and `binds:hide_special_on_workspace_change`
+  true, the values on the pilot desktop, and two monitors: the session's own and
+  a headless 4K one at 1.5x that has the cards. Each check of the whole updates
+  and of the tile corrections compares `cursorpos`, what each monitor shows (its
+  workspace and open special workspace), the focused monitor and the keyboard
+  before and after, and the cards' faces, sides, layouts and frames within 4 px;
+  a correction that succeeds also compares the neighbour's tile. Where a whole
+  update compares frames, it fails on a line saying that a tile was not returned,
+  and every whole update fails on a line saying that something is not as it was.
+  - The 8 earlier checks: a fresh install into a throwaway home; a tiled 70/30
+    card beside its neighbour and an unfolded floating card kept as they were; a
+    card parked on `special:park` left as separate windows, with a count and never
+    "Could not keep a card"; the keyboard on the tiled card; an update from another
+    workspace; a correction on the card's own workspace with the keyboard on the
+    neighbour, then on the card; a card with `no_focus` there; a clean unload.
+  - The keyboard on each app of a two-app face of a card alone on its workspace.
+    The unload takes it from the first app, and it goes back.
+  - The keyboard on each app of a two-app face, with a card built earlier on that
+    workspace that a correction takes the keyboard for (the event socket shows it
+    did), and the pointer over the neighbour or over the other monitor, where only
+    the focused monitor differs. The layout has two more tiles, so tiles are not
+    compared here: see below.
+  - Two tiled cards alone on a workspace, of 2 and 2, 2 and 3, and 3 and 3 apps, as
+    they fell and with their split turned. Each gets three updates: from another
+    workspace, then twice with the keyboard on one card and the pointer over the
+    other. Their frames are still within 4 px of the first ones at the end.
+  - An update that corrects a card in the row below its neighbour on a hidden
+    workspace (the event socket shows the visit), with the keyboard on the other
+    monitor, on another workspace of that monitor, on nothing on an empty
+    workspace, in a special workspace open over another workspace, and on each
+    app of a two-app face of another card.
+  - A correction of a card displaced with `togglesplit` and `swapsplit`, from the
+    same places and more: the card hidden or shown; the keyboard on nothing on the
+    other monitor; seven positions of an open special workspace, with the keyboard
+    in it over another workspace, over the card, or over an empty workspace with the
+    pointer over the other monitor, on the other monitor with it open over another
+    workspace, the card or an empty workspace of the card's monitor, and in it on
+    the other monitor, each with `binds:hide_special_on_workspace_change` on and off;
+    and the pointer over the other monitor from the keyboard, where only the focused
+    monitor differs. Showing an empty workspace hands the focus to the monitor under
+    the pointer, so the special workspace reopens only after the focus is sent back.
+  - A card with `no_focus` makes `settle` raise: Hyprland replies ok to its focus.
+    No step goes out, no tile moves and everything comes back, from another
+    workspace (with the card or a neighbour last focused there: showing the
+    workspace then hands the keyboard to the neighbour) and from the other monitor.
+  - A named workspace on either monitor makes `settle` raise before any focus,
+    since a focus by id would land on workspace 1 (measured). The card stays out
+    of its tile, and nothing else changes.
+  - A card saved with a tile of no size, as an update under a fullscreen window
+    saves it, gets no focus and no step, and nothing changes.
+  - With `input:special_fallthrough` on and the keyboard in a special workspace
+    over the card, `settle` raises, and the card and its neighbour stay where they
+    are. With the keyboard on the other monitor the correction goes through.
+  - A focus that moves to the other monitor just before a correction's `togglesplit`,
+    `swapsplit` or `resize` (with a size the card does not have, so that one is
+    due): that step does nothing, read right after it and at the end from the two
+    tiles of that monitor; `settle` raises; and the keyboard, the pointer and what
+    the monitors then show stay.
+  - A monitor that goes away at a correction's first step, with the keyboard on
+    another: it stays there, and the card and its neighbour keep at least 500 px on
+    each side.
+  - A fullscreen window with `misc:on_focus_under_fullscreen` 0, 1 and 2 and a
+    maximized one with 1, on the card's workspace, with the keyboard on it, and
+    hidden with the keyboard elsewhere. It stays so, nothing else changes, and the
+    update prints that it left the tile alone. Run again before it ends, no
+    correction visits that workspace and the update says nothing. Once it ends,
+    the card, which was in the row below its neighbour, is on the left half.
+  - An update whose request to show a workspace again gets no answer still ends,
+    and prints that the keyboard or what a monitor shows is not as it was.
+  - A recovery run after a crash, with the core gone and the keyboard on the
+    side the recovery file does not show: the card comes back on its saved side
+    with the keyboard on that side, and the focus does not turn it.
+
+  Each fix was reverted in a scratch copy, one at a time, in a fresh session,
+  with the 56 new checks running on after a failure: with each card corrected as
+  soon as it is rebuilt, 7 checks fail (the six with two cards alone, where one ends
+  up a sliver, and one with the pointer over the other monitor); with the keyboard
+  going back only after the corrections, 1 (that one); with a special workspace
+  reopened before the focus is sent back, 4; with a resize from anywhere, not only
+  from the card's corner, 3 (both with `input:special_fallthrough` and the monitor
+  that goes away); with steps not guarded by the keyboard, 3 (the focus that moves);
+  without the final check of the card's box, 4; without the refusal under a
+  fullscreen window, 4; with a saved tile of no size gone back to, 1; without the
+  line that something is not as it was, 1; without the keyboard going back after
+  the restores, 3; without the monitors being put back, 22; without a workspace
+  being shown again, 18; without a special workspace being reopened, 9; without the
+  focused monitor going back, 3; without taking back a keyboard that a refused
+  card's workspace handed to a neighbour, 2; without the refusal of a named
+  workspace, 2; without the check of `acceptsInput`, 1; with no focus back to the
+  window that had the keyboard, 12 (the suite then stops at the first of the 8
+  earlier checks, as they do not run on after a failure); with a plain focus
+  instead of the no-warp one, 45 (likewise). Every new check fails in at least one
+  of these. Ten fail only with the plain focus, since showing the last workspace or
+  monitor again was enough there: the keyboard on another workspace of the card's
+  monitor, in a correction and in an update; on the other monitor with the card
+  shown; in a special workspace open over the card, with each value of the option;
+  on the second app of a two-app face, with the pointer on either monitor; and on
+  each app of a two-app face of another card, in an update that corrects a hidden
+  one.
+- `tests/unattended_workflows.py` passes 12 checks. Each request goes through
+  `control.py unattended` in its own process, with one JSON line back, nothing
+  on stderr and an exit code that agrees. `capabilities` finds the core.
+  `give_back` sends one focus that leaves the pointer and `cursor:no_warps` as
+  they were, and sends nothing but a read of the active window when that window
+  has the keyboard already. A stored card opens beside the working tile in one
+  batch of silent moves and a quiet restore, and the keyboard, the workspace and
+  the working tile stay. Bound apps parked on a special workspace join a card
+  while that workspace stays hidden. A missing app starts from a hidden launcher
+  matched by its window class, inside the nested session, and the keyboard is
+  back on the working tile within 300 ms (57 ms in this run). A slot the caller
+  owns is never launched, though a launcher matches it, and a bound app no slot
+  wants stays where it was. A restore the core refuses sends every imported app
+  back where it was, a special workspace included, and floats the floating one
+  again. Saving a parked card by id keeps no title and leaves the card and the
+  menus' library alone, and saving it again is `unchanged`. Unloading releases
+  the apps of all four cards, shown or parked. No window title (each test
+  window's title starts with a sentinel) reached the helper's hyprctl calls,
+  its replies, its store or a notification. `cursorpos` is unchanged around
+  all 5 opens (the refused one included), both saves and `give_back`, and after
+  each open the keyboard is on the working tile.
+
+What an update still cannot do, measured in nested sessions unless it says otherwise:
+
+- A rollback rebuilds cards plainly, by design, since the core it goes back to can
+  be older than quiet restores. The last card rebuilt gets the keyboard and shows
+  its workspace, and no tile is corrected: a card from the row below its neighbour
+  stayed on the left half, and a good update after that keeps it there.
+- With two more tiles on a card's workspace, tiles do not always come back as they
+  were, and a card that is not back gets the printed line. Of ten layouts with one
+  or two cards and up to three neighbours, updated from another workspace, one did
+  not with the suite's options (`dwindle:smart_split` on): a card with two
+  neighbours beside it came back 63 px narrower, and one neighbour 45 px wide, as
+  its corner was right and a resize took the room from a neighbour it was not
+  measured against. Four did not with the pilot desktop's options (`smart_split`
+  off, `preserve_split` on, `force_split` 2): a card last or in the middle with two
+  neighbours, a card with three, and a neighbour with two cards. Those tiles ended
+  up elsewhere, none under 678 px. The keyboard, the pointer and the monitors stayed
+  in all of them, and a committed check of one layout also shows that.
+- With `cursor:warp_on_change_workspace` 2, the keyboard and the monitors come
+  back but Hyprland warps the pointer as a correction visits a workspace, also
+  a workspace shown on another monitor.
+- With `input:special_fallthrough` on and the keyboard in a special workspace open
+  over the card, the layout controls do not reach the card: it stays out of its
+  tile, with the printed line, and nothing else changes. Over another workspace of
+  its monitor, or with the keyboard elsewhere, the correction goes through, unless
+  `binds:hide_special_on_workspace_change` is off too: the special workspace then
+  stays open over the visited card, and the card stays out with the line.
+- A card second in its split (right or below), beside one neighbour, whose split was
+  moved by hand does not get its size back. The split returns to 50/50 and the line
+  is printed, since the card's near corner moved with the split and the corner check
+  stops the resize. A card first in its split comes back. Before this, the frame
+  changed size at each update, silently, and the keyboard and pointer moved too.
+- With `dwindle:default_split_ratio` 1.4, two tiled cards alone on a workspace ended
+  up with one squeezed to 126 px in 4 of 7 layouts, with two printed lines: each step
+  comes closer by distance, so the card ends in its corner, and the resize then takes
+  the other card's room. Before this, all 7 differed. The ratio left unset does not
+  do this.
+- A move to an empty workspace during a correction's steps is undone: the keyboard is
+  then on nothing, which reads as not taken, so the monitors go back. A move to a
+  window stops the steps and keeps the keyboard with you.
+- With the suite's options, two cards alone with a moved split come back at the same
+  frames, but the update also prints the line for the first card, whose size only
+  comes right with the second card's resize. With the pilot desktop's options it
+  prints nothing.
+- A monitor that shows a named workspace makes every correction give up, not just
+  one on that monitor, and so does a special workspace or monitor with an unusual
+  name (unit tests). A card that does not take the keyboard stays out of its tile
+  too. Each prints the line.
+- A fullscreen or maximized window on a card's workspace stops the correction before
+  any focus, as a focus under it would take its fullscreen or end it. The tile stays
+  as the rebuild made it, also after that window leaves fullscreen, as nothing
+  corrects it later. While it lasts the core reads the rebuilt tile as no size, so an
+  update run again has nothing to compare and says nothing.
+- A focus that moves during a correction stops it. A step that had acted stays, so
+  the card can stay half-way (unit tests and a committed check), with the line.
+- With the pointer over another monitor than the keyboard, a correction or a
+  keyboard given back can leave the focus on the keyboard's monitor, until the
+  pointer moves: only a focus can give a window the keyboard.
+- Hyprland's workspace history keeps a correction's visit: the `previous` workspace
+  afterwards is the card's, not the one before.
+- A correction from a keyboard on nothing with the card's workspace shown leaves the
+  keyboard on the card, as no dispatch can take it from a window (unit tests). That
+  state needs the keyboard on nothing before the update. A keyboard an unload took
+  still goes back. After a crash between the unload and the restores, the next run
+  reads the keyboard as the crash left it, which can be on nothing.
+- If a monitor changed during the update, or the keyboard is on another window, the
+  keyboard stays where it is (unit tests, as are a window that closed during the
+  update and a monitor that went away). A monitor that goes away during a correction
+  can leave the card's monitor showing the card's workspace, as the focus is
+  no longer there to put it back (measured). A `hyprctl` that fails on the way back
+  leaves the keyboard on the card and its workspace shown, and the update goes on.
+  In each of these, and for a keyboard that was on a side the rebuilt card does not
+  show, the update prints that the keyboard or what a monitor shows is not as it
+  was, which `bootstrap.py` passes on.
+- The monitor flips and a special workspace closing and opening again can be seen
+  for a moment.
+
+Which suites wait for the session's windows: `tests/install_cards.py`,
+`tests/card_id_workflows.py`, `tests/unattended_workflows.py`,
+`tests/dwindle_workflows.py` (7 checks), `tests/fullscreen_workflows.py` (12,
+without `--protocol`) and `tests/unfold_workflows.py` (5), the last three each run
+once in a fresh session for this. `tests/chill_card_workflows.py`,
+`tests/floating_workflows.py --dwindle`, `tests/card_interactions.py --dwindle`,
+`tests/integration.py`, `tests/menu_workflows.py` and the hy3 suites start the same
+way and were not changed or run. Those that read the session's windows at once
+(`tests/config_upgrade.py`, `tests/motion.py`, `tests/peek.py`, `tests/saved_workflows.py`
+and others) stop with an error if started too early.
+
+Notifications are recorded in `tests/unattended_workflows.py`, which needs a
+session started with `--notify-recorder` and turns Hyprflip's notifications
+on. The recorder stands in for `notify-send` only on the nested compositor's
+PATH, so the suite puts the recorder's folder first on PATH and drops
+`DBUS_SESSION_BUS_ADDRESS`, `DISPLAY`, `DESKTOP_STARTUP_ID` and
+`XDG_ACTIVATION_TOKEN` for everything it starts: the terminals, the helper, its
+hyprctl and the apps the helper launches, whose environment the suite reads
+back. A refused Lua flip and a refused plain `restore` must notify, and each
+added one line. A refused `card 9999 flip`, a bare `restore quiet` and a
+refused complete `restore quiet …` must not, and added none; nor did any helper
+request. The log held 2 lines at the end. `tests/card_id_workflows.py` and
+`tests/install_cards.py` record no notifications and ran in sessions started
+without options.
+
+The drag guard's client-move case (a card's window moved by a drag the app asks
+for, such as a GTK header bar, where no surface holds the pointer focus) was
+measured by hand in nested sessions: the park was refused mid-drag and went
+ahead after release. No committed suite covers it yet; see
+[ROADMAP](docs/ROADMAP.md#to-do-a-nested-check-for-drags-the-app-starts). No
+nested suite other than those named above was run for these changes.
+
 ## Cards driven by id (2026-11-01)
 
 In a nested session with only the core loaded (Aquamarine 0.15.1 with the

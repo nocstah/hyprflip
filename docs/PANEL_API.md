@@ -35,6 +35,17 @@ There are no persistent window IDs: tokens belong to one Hyprland instance.
 `context.anchor_label` names the app that will become the front of a new card;
 it is display text only and never used to identify or retarget a window.
 
+A card on a special workspace, which another program parked there, no longer
+counts as an open saved card. It is still listed in `cards`, with the special
+workspace's negative id in `workspace`, but its `saved_names` is empty and its
+`name` is made of its apps' labels. A saved row whose only match is a parked
+card has `open: false` and the detail of a card that is not open, such as
+`Open here`, instead of `Go to · Workspace …`. The detail leaves out the apps
+the parked card holds: it offers neither to bring them nor to resize them.
+Opening that row never goes to the parked card or reveals it, and an app the
+parked card holds is named instead of taken: “… is held by a hidden card. Close
+it or bring that card back, then try again.”
+
 Every mutation includes `protocol: 1`, an `action`, and the snapshot's `context`.
 Card operations also include `target: {kind, id, token}` from the displayed
 card. Saved-card operations include `name` and `recipe_token` from its row.
@@ -72,6 +83,13 @@ Send `{"cancel": true}` to cancel even during launch waits. Closing stdin or
 SIGTERM/SIGINT also unwinds the request. Requests share the existing token/lock
 with native menus, so newer operations supersede older pending choices. Keep
 stdin open throughout an operation, including between handoff messages.
+
+`control.py unattended` is separate from protocol 1. It serves programs that
+open and save cards with nobody at a menu: one `--request` argument, one JSON
+line back, no stdin, no questions and no notifications (see
+[open and save cards unattended](SCRIPTING.md#open-and-save-cards-unattended)).
+It takes the same request lock as the menus and the panel, waiting at most its
+`lock_ms`, but it never supersedes a pending menu or panel request.
 
 The backend revalidates session, workspace, focus, membership, pane identity and
 saved-definition fingerprints. Titles and names remain plain JSON data; the

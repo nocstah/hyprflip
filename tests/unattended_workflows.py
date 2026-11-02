@@ -17,7 +17,7 @@ import subprocess
 import sys
 import threading
 import time
-from control import environment
+from control import environment, session_windows
 
 project = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(project / 'scripts'))
@@ -190,6 +190,7 @@ class Keyboard:
 
 try:
     assert not ipc.data('-j', 'plugin', 'list'), 'Use a fresh nested session without a demo flag'
+    session_windows(env)
     # The caller's own files: a private folder for its store, its launchers,
     # and a hyprctl that records each call before it runs the real one.
     for folder in (home, library.parent): shutil.rmtree(folder, ignore_errors=True)

@@ -1,5 +1,75 @@
 # Changelog
 
+## Unreleased
+
+- Take a card or pair apart by its id, shown or parked: `card <id> ungroup`.
+  It refuses while one of the card's windows is fullscreen, and `status`
+  carries `"card_ungroup": true`. A card ungrouped on screen re-tiles its
+  place, so a program that wants the layout kept parks the card first and
+  ungroups it there.
+- Scripted calls no longer refuse for input elsewhere. `card <id> workspace …
+  silent`, `card <id> ungroup` and `restore quiet …` go ahead while the screen
+  is locked or a button is held on another window (`card <id> ungroup` does so
+  from the start). They still refuse for a grab, a drag-and-drop, a locked or
+  confined pointer, a button pressed on one of the card's windows, or while one
+  of those windows is moved or resized, a move the app asks for included
+  (dragging a GTK header bar). Their busy refusals still start with
+  `Finish the active grab or drag`.
+- `card …` and `restore quiet …` sent with hyprctl no longer show a
+  notification, desktop or Hyprland's own, a bare `restore quiet` included: the
+  program that sent them reads the reply. A refused plain restore or Lua call
+  still notifies.
+- `control.py unattended` opens a saved definition as a card, and saves a live
+  card by its id, for programs that build cards while the user works
+  elsewhere. It asks nothing, notifies nothing and prints one JSON line. It
+  never switches the workspace or moves the pointer, and when one of its apps
+  takes the keyboard, it gives the keyboard back to the caller's `focus` where
+  it can. Its store is the caller's own and never keeps a window title. See
+  [open and save cards unattended](docs/SCRIPTING.md#open-and-save-cards-unattended).
+- Saved cards leave hidden cards alone. A card another program parked on a
+  special workspace is no longer shown as open, gone to, revealed or filled in
+  with missing apps. An app it holds is never offered, and opening names it
+  (“… is held by a hidden card”) instead of taking it.
+- Updating the core leaves hidden cards as separate windows on their special
+  workspace and says how many; the program that parked them rebuilds them.
+  When the new core refuses to rebuild one card, its apps stay as separate
+  windows and the other cards are still kept. Before, that refusal aborted the
+  whole update, since Hyprland 0.56's hyprctl exits 7 on it. When Hyprland
+  cannot be reached, the update is still rolled back and the recovery file
+  kept.
+- An update leaves the keyboard, the pointer and what each monitor shows as
+  they were. It rebuilds cards quietly, so the last one no longer takes the
+  keyboard and shows its workspace. Unloading the core takes the keyboard from
+  most apps of a multi-app face, and it now goes back to that app once the cards
+  are rebuilt, before any tile is corrected; on an app the card no longer shows,
+  it stays on the shown side. If it ends up otherwise, or Hyprland did not say,
+  the installer prints a line saying so.
+- Every card is rebuilt before any tile is corrected, so two tiled cards alone on
+  a workspace, with `dwindle:default_split_ratio` unset, no longer end up with one
+  squeezed to a sliver. Putting a tiled card
+  back in its tile no longer warps the pointer. It shows the card's workspace and
+  moves the focus to its monitor only for those steps: the workspace each monitor
+  showed, an open special workspace, the focused monitor and the keyboard come
+  back afterwards, also with the keyboard on another monitor, on nothing or in a
+  special workspace. The steps act only while the card has the keyboard, so a focus
+  that moves meanwhile stops them and keeps the keyboard, and the card's size comes
+  back only once it is in its corner, as a resize from elsewhere squeezes another
+  tile.
+- A tiled card stays where the reload left it, no other tile is rearranged and the
+  installer prints a line saying so, if it does not take the keyboard, while any
+  monitor shows a named workspace, which a focus could not show again, or with the
+  keyboard in a special workspace open over it and `input:special_fallthrough` on.
+  While a window on its workspace is fullscreen or maximized, that window stays so
+  and the tile is left as the rebuild made it, also after that ends. A rollback
+  still restores plainly and corrects no tile, since an older core refuses quiet
+  restores, so the last card rebuilt gets the keyboard and shows its workspace,
+  and a tile the reload moved stays moved. With two more tiles on a workspace,
+  tiles can still end up elsewhere and at other sizes: see `TESTING.md`.
+- A card the new core refuses to rebuild no longer shows a notification: the
+  installer prints why, and `bootstrap.py` reports how many it could not keep,
+  how many hidden cards it left, how many tiles it could not check or return and
+  whether the keyboard or what a monitor shows is not as it was.
+
 ## 0.3.0-rc.10 — 2026-11-01
 
 - Drive a card by its id without taking the focus: `card <id> show

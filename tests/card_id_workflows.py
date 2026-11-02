@@ -9,7 +9,7 @@ import shutil
 import subprocess
 import sys
 import time
-from control import environment
+from control import environment, session_windows
 
 project = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(project / 'scripts'))
@@ -160,6 +160,7 @@ def refused(action):
 
 try:
     assert not ipc.data('-j', 'plugin', 'list'), 'Use a fresh nested session without a demo flag'
+    session_windows(env)
     shutil.copy2(project / 'build/hyprflip.so', library)
     ipc.call('plugin', 'load', str(library)); loaded = True
     names = {m['name'] for m in ipc.data('-j', 'monitors')}

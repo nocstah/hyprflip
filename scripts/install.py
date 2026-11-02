@@ -27,7 +27,7 @@ if not source.is_file() or not main.is_file():
 
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from card_restore import describe, settle  # noqa: E402
+from card_restore import FullscreenWindow, apps, as_it_was, describe, remember, return_keyboard, settle  # noqa: E402
 
 
 def ctl(*args):
@@ -105,10 +105,10 @@ def atomic(path, data):
     os.replace(temporary, path)
 
 
-def keep(line):
+def keep(line, form="restore "):
     # A card whose apps closed or changed meanwhile stays as separate windows,
     # and the other cards are still kept.
-    reply = answer("hyprflip", "restore " + line)
+    reply = answer("hyprflip", form + line)
     if not reply.startswith("ok:"):
         print("Could not keep a card; its apps stay open as separate windows:", reply.removeprefix("error: "))
     return reply.startswith("ok:")
@@ -126,6 +126,8 @@ try:
     if saved_pairs or saved_cards:
         atomic(recovery, json.dumps({"instance": os.environ.get("HYPRLAND_INSTANCE_SIGNATURE"),
                                      "pairs": saved_pairs, "cards": saved_cards}).encode())
+    # Unloading the core drops the keyboard from most apps of a multi-app face.
+    place = remember(ctl)
     if installed:
         reply = ctl("plugin", "unload", str(library))
         if reply != "ok": raise RuntimeError(reply)
@@ -172,13 +174,27 @@ try:
             continue
         reply = answer("hyprflip", "adopt", pair["front"], pair["back"])
         if not reply.startswith("ok:"): raise RuntimeError("Could not restore pair: " + reply)
-    for line in saved_cards:
-        if not keep(line):
-            continue
+    # Quiet, so the update leaves the keyboard and what each monitor shows alone.
+    # The core just loaded is this checkout's. The rollback below stays plain:
+    # the core it goes back to can be older than quiet restores and refuse them.
+    # All of them first: a correction next to a card that is still loose tiles
+    # resizes the wrong split and squeezes that card to a sliver.
+    kept = [line for line in saved_cards if keep(line, "restore quiet ")]
+    # A quiet restore leaves the keyboard where the unload left it, which can be
+    # nowhere. It goes back before any correction, as each of those gives it back
+    # where it found it, and a monitor put back there can hand it to someone else.
+    return_keyboard(ctl, place, {a for line in saved_cards for a in apps(line)} |
+                    {a for pair in saved_pairs for a in (pair["front"], pair["back"])})
+    for line in kept:
         try:
             settle(line)
+        except FullscreenWindow:
+            print("A card was kept, but a fullscreen window on its workspace kept its tile from being checked or returned.")
         except (RuntimeError, KeyError, StopIteration, TypeError, ValueError):
-            print("A card was kept, but its tile could not be returned to the same place.")
+            print("A card was kept, but its tile could not be checked or returned to the same place.")
+    # Giving these back never fails an update, so this is the only word of it.
+    if (saved_pairs or saved_cards) and not as_it_was(ctl, place):
+        print("The keyboard or what a monitor shows is not as it was before the update, or Hyprland did not say.")
     errors = ctl("configerrors")
     if errors: raise RuntimeError(errors)
     recovery.unlink(missing_ok=True)

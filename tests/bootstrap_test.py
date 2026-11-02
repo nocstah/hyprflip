@@ -1,4 +1,5 @@
 import contextlib
+import importlib.util
 import io
 import json
 from pathlib import Path
@@ -72,6 +73,33 @@ class BootstrapTest(unittest.TestCase):
     def test_untested_hyprland_commit_is_refused(self):
         self.running = {"tag": "v0.56.2", "commit": "a" * 40}
         self.assertIn("not one this source was tested against", self.failure()["detail"])
+
+    def core_step(self, output):
+        spec = importlib.util.spec_from_file_location("hyprflip_bootstrap", PROJECT / "scripts/bootstrap.py")
+        bootstrap = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(bootstrap)
+        with patch("subprocess.run", return_value=subprocess.CompletedProcess([], 0, output, "")):
+            return bootstrap.install_core()
+
+    def test_the_core_step_says_what_became_of_the_cards(self):
+        # A panel sees only this line, and a refused quiet restore shows no notification.
+        self.assertEqual(self.core_step("Installed and loaded."), "Loaded")
+        self.assertEqual(self.core_step("Keeping 2 open card(s) through this update.\nInstalled and loaded."),
+                         "Loaded; kept 2 open card(s)")
+        self.assertEqual(self.core_step("Keeping 2 open card(s) through this update.\n"
+                                        "Leaving 1 hidden card(s) as separate windows; the program that parked them rebuilds them.\n"
+                                        "Could not keep a card; its apps stay open as separate windows: gone\n"
+                                        "Installed and loaded."),
+                         "Loaded; kept 1 open card(s); could not keep 1, whose apps stay open as separate windows; "
+                         "left 1 hidden card(s) as separate windows")
+        # The two lines of the update that give the keyboard, the monitors and a tile their only word.
+        self.assertEqual(self.core_step("Keeping 3 open card(s) through this update.\n"
+                                        "A card was kept, but its tile could not be checked or returned to the same place.\n"
+                                        "A card was kept, but a fullscreen window on its workspace kept its tile from being checked or returned.\n"
+                                        "The keyboard or what a monitor shows is not as it was before the update, or Hyprland did not say.\n"
+                                        "Installed and loaded."),
+                         "Loaded; kept 3 open card(s); could not check or return the tile of 2; "
+                         "the keyboard or what a monitor shows is not as it was")
 
 
 if __name__ == "__main__":
