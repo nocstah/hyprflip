@@ -36,6 +36,8 @@ class CardFrames {
     bool button(const IPointer::SButtonEvent &, Event::SCallbackInfo &);
     void clearInput();
     void refresh(bool force = false);
+    // Snapshots taken inside have the frame of a card in them, with the window it is drawn after.
+    void capture(const std::function<void()> &snapshots);
     std::string status();
     std::string rings();
     std::string dividers();

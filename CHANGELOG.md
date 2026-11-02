@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Swap a window or card into a tile with the real open animation.
+  `card <id or address> hold` keeps a still picture of what is leaving under
+  every window, `card <id or address> reveal [speed]` gives what arrives the
+  user's open animation, faster or slower by `speed`, and `card <id or address>
+  leave` plays the close animation. All three go in one `hyprctl --batch` with
+  the moves, and nothing else moves, takes the focus or moves the pointer.
+  `status` carries `"reveal": true`. See
+  [swap with an animation](docs/SCRIPTING.md#swap-with-an-animation).
 - Take a card or pair apart by its id, shown or parked: `card <id> ungroup`.
   It refuses while one of the card's windows is fullscreen, and `status`
   carries `"card_ungroup": true`. A card ungrouped on screen re-tiles its

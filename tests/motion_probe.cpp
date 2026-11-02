@@ -3,6 +3,9 @@
 #include <chrono>
 #include <cstdlib>
 #include <format>
+#include <hyprland/src/desktop/state/FadingOutState.hpp>
+#include <hyprland/src/desktop/state/WindowState.hpp>
+#include <hyprland/src/desktop/view/Window.hpp>
 #include <hyprland/src/event/EventBus.hpp>
 #include <hyprland/src/output/Monitor.hpp>
 #include <hyprland/src/plugins/PluginAPI.hpp>
@@ -21,7 +24,23 @@ Clock::time_point epoch, frameStart;
 std::string pending;
 PHLMONITORREF frameMonitor;
 std::vector<std::string> samples;
-bool recording = false;
+bool recording = false, recordWindows = false;
+
+// Every mapped window's animated and goal boxes and fade, and how many fadeouts Hyprland holds.
+std::string windows() {
+    using namespace Desktop::View;
+    std::string json;
+    for (const auto &w : Desktop::windowState()->windows()) {
+        if (!w->m_isMapped)
+            continue;
+        const auto at = w->positionAnimation()->value(), size = w->sizeAnimation()->value();
+        const auto toAt = w->positionAnimation()->goal(), toSize = w->sizeAnimation()->goal();
+        json += std::format("{}{{\"address\":\"0x{:x}\",\"box\":[{},{},{},{}],\"goal\":[{},{},{},{}],\"fade\":{}}}",
+                            json.empty() ? "" : ",", reinterpret_cast<uintptr_t>(w.get()), at.x, at.y, size.x, size.y,
+                            toAt.x, toAt.y, toSize.x, toSize.y, w->alphaValue(WINDOW_ALPHA_FADE));
+    }
+    return std::format(",\"fadeouts\":{},\"windows\":[{}]", Desktop::fadingOutState()->fadeouts().size(), json);
+}
 } // namespace
 APICALL EXPORT std::string PLUGIN_API_VERSION() { return HYPRLAND_API_VERSION; }
 APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
@@ -40,8 +59,9 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
             frameStart = Clock::now();
             auto state = HyprlandAPI::invokeHyprctlCommand("hyprflip", "status");
             if (state.starts_with('{'))
-                pending = std::format("{{\"ms\":{},\"state\":{}",
-                                      std::chrono::duration<double, std::milli>(frameStart - epoch).count(), state);
+                pending = std::format("{{\"ms\":{},\"state\":{}{}",
+                                      std::chrono::duration<double, std::milli>(frameStart - epoch).count(), state,
+                                      recordWindows ? windows() : "");
         } else if (stage == RENDER_POST && !pending.empty()) {
             // Both PRE and POST are outside beginRender/endRender: renderData
             // has no monitor there. preChecks supplies the actual output.
@@ -63,11 +83,14 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
                              drag->dragThresholdReached(), g_pInputManager->hasHeldButtons(),
                              bool(grab && (grab->m_keyboard || grab->m_pointer)), PROTO::data->dndActive(), g_pInputManager->isConstrained());
                      }
-                     if (request.ends_with(" start")) {
+                     if (request.ends_with(" fadeouts"))
+                         return std::to_string(Desktop::fadingOutState()->fadeouts().size());
+                     if (request.ends_with(" start") || request.ends_with(" start windows")) {
                          samples.clear();
                          pending.clear();
                          epoch = Clock::now();
                          recording = true;
+                         recordWindows = request.ends_with(" windows");
                          return std::string("ok");
                      }
                      recording = false;

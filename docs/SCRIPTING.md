@@ -94,6 +94,57 @@ hyprctl hyprflip card 12 workspace special:park silent
 hyprctl hyprflip card 12 ungroup
 ```
 
+## Swap with an animation
+
+For a program that swaps one window or card for another in a tile, three verbs
+make what arrives open like a new window, without moving anything else. Cores
+that have them report `"reveal": true` in `status`. Each takes a card's id, or a
+single window's address with its `0x`.
+
+| Action | Behavior |
+| --- | --- |
+| `card <id or address> hold` | Keep a still picture of what shows now, under every window, until what is revealed next has faded in over it |
+| `card <id or address> reveal` | Give it the user's open animation, as it stands in its tile, at the user's speed |
+| `card <id or address> reveal <speed>` | The same with the duration multiplied by `<speed>`, from 0.05 to 4: `0.7` takes 70% as long |
+| `card <id or address> leave` | Play the user's close animation from a picture of it, over what comes next |
+
+Send them in one `hyprctl --batch`, so that no frame falls between the requests.
+The order matters: `hold` first, while what leaves is in place, and `reveal`
+last, once what arrives has its final size. For two windows:
+
+```sh
+hyprctl --batch "dispatch hl.dsp.window.set_prop({prop=\"no_anim\",value=\"true\",window=\"address:$old\"}) ; \
+  dispatch hl.dsp.window.set_prop({prop=\"no_anim\",value=\"true\",window=\"address:$new\"}) ; \
+  hyprflip card $old hold ; \
+  dispatch hl.dsp.window.move({window=\"address:$old\",workspace=\"special:parked\",follow=false}) ; \
+  dispatch hl.dsp.window.move({window=\"address:$new\",workspace=\"3\",follow=false}) ; \
+  hyprflip card $new reveal 0.7"
+```
+
+For cards, set `no_anim` on all their windows and move them with
+`card <id> workspace … silent`. Set `no_anim` in every batch: it stops Hyprland
+animating the moves, and `reveal` lifts it for what arrives. A `no_anim` from a
+window rule stays and wins, so that window comes in at once.
+
+The picture of a card has its header in it, so a plain window can replace a
+card with no gap above it. A card over a card keeps its frame still while its
+panes open. A card over a plain window brings its frame in with its panes.
+
+- A `hold` with no `reveal` in its batch leaves nothing behind. Several `hold`s
+  before one `reveal` all stay, which suits a swap of more than one window.
+- A new swap during an animation starts over what shows, and never the
+  wallpaper. Only the oldest and the newest swap's pictures are kept.
+- While an opaque window fades in over a picture, its `no_blur` reads true. The
+  value it had comes back when the fade ends, unless something wrote to it in
+  the meantime.
+- A window or card that is not on screen or is fullscreen gets nothing, and the
+  reply is still `ok`. A batch without these verbs, or sent to a core without
+  them, is the same swap as a plain cut: an older core refuses them with a reply
+  and no notification, and the moves still run. Let the reply to a move decide
+  whether the swap worked, not the reply to one of these.
+- A bad id, address, speed or extra word is refused with an `error:` reply. As
+  with every call by id, no notification shows.
+
 ## Scripted calls and input
 
 `card <id> workspace <workspace> silent`, `card <id> ungroup` and
@@ -465,7 +516,8 @@ and checked names only, and its replies and its store carry no title either.
 
 ## How this is tested
 
-`tests/card_id_workflows.py` checks the calls by id and
+`tests/card_id_workflows.py` checks the calls by id,
+`tests/reveal_workflows.py` the swap with an animation and
 `tests/unattended_workflows.py` the helper, each in a nested session with only
 the core loaded. The refusal during a move the app asks for itself has been
 checked by hand so far.

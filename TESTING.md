@@ -1,5 +1,70 @@
 # Validation
 
+## A swap with hold and reveal (2026-11-02)
+
+`tests/reveal_workflows.py` takes a fresh nested session started with
+`--notify-recorder` and needs `make test` first, for `build/motion_probe.so`. It
+loads the core and the read-only motion probe, which now also records every
+window's box and fade and how many fadeouts Hyprland holds, frame by frame. It
+makes two headless outputs, uses the pilot desktop's curves and a magenta
+wallpaper, and takes about 35 seconds. It passes 15 checks:
+
+- `status` says `"reveal":true`.
+- A bad id, address, speed or extra word gets a clear reply, adds no line to the
+  notification recorder, and changes nothing. Building a card later adds lines,
+  so the recorder was working. Hyprland's own bar cannot be read from here: the
+  same branch in `Plugin.cpp` keeps both silent.
+- A focus dispatch warps the pointer, so one left where it rested means no warp.
+- Hold then reveal on a window: from the first frame, the box goes from about 92%
+  to its goal without shrinking and the fade only rises. It ends exactly in the
+  place it swapped into, with `no_anim` false, one picture that then goes, and the
+  neighbour on every frame, the focus and the pointer unchanged.
+- A window with a `no_anim` window rule comes in at once, and it still reads true.
+- Speed factors 0.7 and 2 scale the time to settle (within 0.55-0.85 and 1.6-2.4
+  of the same run at factor 1), and a later reveal at factor 1 takes as long as
+  the first.
+- A hold with no reveal leaves no fadeout, with the window in place or moved away.
+- `no_blur` set true stays true. Set false over a window rule of true, it reads
+  true during the fade and false after, also when the window leaves and returns
+  in mid-fade. A rule alone stays.
+- 9 batches at 16 ms keep at most 2 pictures of a window, then none, with the last
+  window right, `no_anim` and `no_blur` false and the focus unmoved.
+- A card over a card: its two shown panes open as one and their fades match, its
+  frame box is the same on every frame, and 2 pictures come and go.
+- A plain window replacing a card: 90 ms in, at factor 4, a pixel of the Flip
+  button is still the header's own colour. A card replacing a plain window: the
+  same pixel is still the window's colour, and the frame's box starts smaller and
+  grows with the panes.
+- 9 card batches at 16 ms keep at most 4 pictures, then none, with the last card
+  right.
+- `hyprctl reload` during a reveal: it ends right, `no_blur` comes back, and the
+  next reveal is a real open.
+- Plugin unload during a reveal: Hyprland's list has no fadeout straight away, the
+  window ends in its tile, and the output still draws what changes after.
+- A monitor removed with a picture up: the picture is gone at once, and an unload
+  and a new load after that work.
+
+What this does not prove: everything ran nested on the second GPU, so it says
+nothing about NVIDIA or about a real monitor's vblank, since a headless output runs
+on a timer. It used terminals in its tiles; the frame figures below used Chromium.
+Whether the speed feels right can only be judged on the real desktop. `leave` has
+no check here. No other nested suite was run for this change, though `CardFrames`
+changed; from reading the code, nothing differs there without these verbs.
+
+One frame run at 3840x2160 and 1.5x, at factor 0.7, on six swaps each, with Chromium
+windows and cards parked at other sizes: the box reached its goal at 277.5 ms
+(277.2-278.9) for a window and 278.8 ms (276.4-280.2) for a card, and the fade at
+about 252 and 254 ms. Capture missed most frames, so the frames' own settled
+figures (390 and 351 ms) are the last grab, not the end. Herdr's stand-in did not
+move or resize, and the tile never showed wallpaper.
+
+**A known flaw at 4K:** a faint small page does show. It comes from a window parked
+at another size, whose first frames in the tile still have its old layout. It was
+seen on each of the four swaps looked at closely (three cards and one window), about
+36-42 ms in, at a fade of about 0.12-0.16. It was gone from the next frame grabbed
+(61 and 71 ms) on the two swaps where that frame was looked at. Nothing here fixes
+it.
+
 ## Cards opened, saved and ungrouped by another program (2026-11-02)
 
 `make test` passes (CTest: the core suite, with the new input-guard cases, and

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 #include "CardFrames.hpp"
 #include "FloatingCards.hpp"
+#include "Reveal.hpp"
 #include <algorithm>
 #include <cmath>
 #include <format>
@@ -290,7 +291,8 @@ std::vector<CardFrames::Layout> CardFrames::layouts() const {
         for (const auto &w : Desktop::windowState()->windows()) {
             if (!shown(w) || std::ranges::find(layout.view.windows, w) == layout.view.windows.end())
                 continue;
-            auto box = w->geometricBox(IGeometric::GEOMETRIC_CURRENT).expand(w->getRealBorderSize());
+            auto box = w->geometricBox(Reveal::steady(w) ? IGeometric::GEOMETRIC_GOAL : IGeometric::GEOMETRIC_CURRENT)
+                           .expand(w->getRealBorderSize());
             box.translate(w->m_floatingOffset);
             if (w->m_workspace && !w->m_pinned)
                 box.translate(w->m_workspace->m_renderOffset->value());
@@ -308,7 +310,8 @@ std::vector<CardFrames::Layout> CardFrames::layouts() const {
             continue;
         layout.focused =
             std::ranges::find(layout.view.windows, Desktop::focusState()->window()) != layout.view.windows.end();
-        layout.alpha = layout.anchor->m_workspace->m_alpha->value() * layout.anchor->alpha(WINDOW_ALPHA_FADE)->value();
+        layout.alpha = layout.anchor->m_workspace->m_alpha->value() *
+                       (Reveal::steady(layout.anchor.lock()) ? 1.F : layout.anchor->alpha(WINDOW_ALPHA_FADE)->value());
         // Native groups use group-wide border colors. On multi-app faces, keep
         // the actual keyboard recipient distinct using the normal focus color.
         const auto focused = Desktop::focusState()->window();
@@ -378,6 +381,14 @@ void CardFrames::refresh(bool force) {
             g_pHyprRenderer->damageBox(current.box.copy().expand(DAMAGE_MARGIN));
     }
     m_last = std::move(next);
+}
+void CardFrames::capture(const std::function<void()> &snapshots) {
+    // Outside the monitor's own pass, the post-window stage still fires for each snapshot.
+    m_layouts = layouts();
+    m_rendered.clear();
+    m_rendering = true;
+    snapshots();
+    m_rendering = false;
 }
 void CardFrames::stage(eRenderStage stage) {
     if (stage == RENDER_PRE_WINDOWS) {

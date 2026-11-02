@@ -1,6 +1,7 @@
 #include "AccentColor.hpp"
 #include "Controller.hpp"
 #include "FloatingCards.hpp"
+#include "Reveal.hpp"
 #include <algorithm>
 #include <charconv>
 #include <dlfcn.h>
@@ -139,6 +140,8 @@ Controller::Controller(HANDLE handle, Settings settings)
         m_renderingMonitor = m;
         onFrame(m);
     }));
+    m_listeners.emplace_back(e.render.pre.listen([](PHLMONITOR) { Reveal::frame(); }));
+    m_listeners.emplace_back(e.monitor.removed.listen([](PHLMONITOR monitor) { Reveal::monitorGone(monitor); }));
     m_listeners.emplace_back(e.render.stage.listen([this](eRenderStage stage) {
         // Scheduling here sets the compositor's pending-frame flag. Scheduling
         // only before rendering can be consumed by the current commit. The
@@ -220,6 +223,7 @@ Controller::~Controller() {
     m_stopping = true;
     m_peek.reset();
     m_listeners.clear();
+    Reveal::shutdown();
     m_reconcileLater.reset();
     m_keyLater.reset();
     m_frameLater.reset();
@@ -1236,6 +1240,56 @@ Result Controller::cardAction(const std::string &arguments) {
     uint64_t id = 0;
     if (!(input >> text >> verb))
         return {false, USAGE};
+    if (verb == "reveal" || verb == "leave" || verb == "hold") {
+        static constexpr auto REVEAL_USAGE = "Use card <id or 0x address> hold, card <id or 0x address> leave or "
+                                             "card <id or 0x address> reveal [speed from 0.05 to 4].";
+        double speed = 1;
+        if (verb == "reveal" && input >> value) {
+            const auto [end, error] = std::from_chars(value.data(), value.data() + value.size(), speed);
+            if (error != std::errc{} || end != value.data() + value.size() || !(speed >= .05 && speed <= 4))
+                return {false, "The speed of a reveal is a number from 0.05 to 4, not " + value + "."};
+        }
+        if (input >> extra)
+            return {false, REVEAL_USAGE};
+        // A window by its address, or a card by its id: the windows it shows.
+        std::vector<PHLWINDOW> windows;
+        Reveal::Card whole;
+        if (text.starts_with("0x")) {
+            uintptr_t wanted = 0;
+            const auto [end, error] = std::from_chars(text.data() + 2, text.data() + text.size(), wanted, 16);
+            if (error != std::errc{} || end != text.data() + text.size())
+                return {false, REVEAL_USAGE};
+            for (const auto &w : Desktop::windowState()->windows())
+                if (reinterpret_cast<uintptr_t>(w.get()) == wanted && w->m_isMapped)
+                    windows.push_back(w);
+            if (windows.empty())
+                return {false, "No window has address " + text + "."};
+        } else {
+            const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), id);
+            if (error != std::errc{} || end != text.data() + text.size() || !id)
+                return {false, REVEAL_USAGE};
+            if (m_turn && m_turn->pairID == id)
+                finish();
+            auto *p = find(id);
+            const auto s = p && valid(*p) ? state(*p) : std::nullopt;
+            if (!s)
+                return {false, "No card has id " + text + ". Read the ids from status."};
+            for (unsigned side = 0; side < 2; ++side)
+                if (s->unfolded || side == s->active)
+                    windows.insert(windows.end(), s->faces[side].begin(), s->faces[side].end());
+            whole = {.whole = true, .extraTop = p->frame ? CardFrames::headerHeight() : 0};
+        }
+        // A fullscreen window has no tile to come into, so this asks nothing of it: the same batch is then a plain cut.
+        if (std::ranges::any_of(windows, [](const auto &w) { return Fullscreen::controller()->isFullscreen(w); }))
+            return {true, "ok"};
+        if (verb == "reveal") {
+            Reveal::reveal(windows, speed, whole);
+            return {true, "ok"};
+        }
+        // A snapshot of a window has no card frame in it unless the frames draw into it.
+        m_frames->capture([&]() { verb == "leave" ? Reveal::leave(windows) : Reveal::hold(windows, whole); });
+        return {true, "ok"};
+    }
     const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), id);
     if (error != std::errc{} || end != text.data() + text.size() || !id)
         return {false, USAGE};
@@ -1856,6 +1910,6 @@ std::string Controller::status() {
            ",\"native_cards\":true,\"hy3_provider\":" + (provider() ? "true" : "false") +
            ",\"floating_cards\":true,\"workspace_protection\":true,\"container_provider\":true" +
            ",\"layout_controls\":true,\"repair_cards\":true,\"card_ungroup\":true,\"pane_replacement\":true" +
-           ",\"container_max_panes\":" + std::to_string(CONTAINER_MAX_PANES) + "}";
+           ",\"reveal\":true,\"container_max_panes\":" + std::to_string(CONTAINER_MAX_PANES) + "}";
 }
 } // namespace Hyprflip
