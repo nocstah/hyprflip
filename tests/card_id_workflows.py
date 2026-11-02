@@ -81,8 +81,10 @@ def pointer():
 def rest(over):
     """Leaves the pointer off-centre over a tile, where a warp to any window's centre shows."""
     x, y, width, height = tile(over)
-    ipc.call('dispatch', f'hl.dsp.cursor.move({{x={x + width // 4},y={y + height // 3}}})')
-    return pointer()
+    point = x + width // 4, y + height // 3
+    ipc.call('dispatch', f'hl.dsp.cursor.move({{x={point[0]},y={point[1]}}})')
+    assert pointer() == point, (over, point, pointer())
+    return point
 
 
 def still(action, over, settle=lambda: time.sleep(.1)):
@@ -183,6 +185,17 @@ hl.config({{general={{gaps_in=14,gaps_out=24}},decoration={{inactive_opacity=0.8
     term = spawn('terminal')
     front, back = spawn('browser'), spawn('notes')
     ipc.focus(term)
+    # Positive control: here a focus dispatch warps the pointer to the window's centre, even
+    # onto the window that already has the focus, so a pointer left resting below means
+    # that nothing warped it.
+    rest(term)
+    assert active() == term
+    ipc.focus(term)
+    x, y, width, height = tile(term)
+    centre = pointer()
+    assert abs(centre[0] - (x + width / 2)) <= 1 and abs(centre[1] - (y + height / 2)) <= 1, (centre, tile(term))
+    rest(term)
+    passed('a focus dispatch warps the pointer to the centre of the window it focuses, even one already focused')
     id = restore(front, back, term)
     made = card(id)
     assert made['faces'] == [[front], [back]] and made['active'] == 0, made

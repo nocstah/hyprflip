@@ -17,6 +17,24 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parent.parent
 VERSION = re.search(r"project\(hyprflip VERSION ([\d.]+)", (ROOT / "CMakeLists.txt").read_text()).group(1)
 PAIR = {"front": "0xa", "back": "0xb"}
+SHOWN = {"id": 3, "name": "3", "special": False}
+PARKED = {"id": -98, "name": "special:park", "special": True}
+# What Hyprland 0.56's hyprctl prints, by its exit code, when Hyprland does not answer.
+UNANSWERED = {4: "Couldn't connect to /run/user/1000/hypr/test-instance/.socket.sock. (4)\n",
+              6: "Hyprland IPC didn't respond in time\n\nCouldn't read (6)\n"}
+
+
+def card(front, back, workspace, **state):
+    """A tiled native card with one app on each face, as status reports it."""
+    return {"faces": [[front], [back]], "native_group": True, "floating": False, "fullscreen": False,
+            "active": 0, "unfolded": False, "box": [10, 20, 800, 600], "workspace": workspace,
+            "layouts": [{"axis": "horizontal", "focused": front, "ratios": [1]},
+                        {"axis": "horizontal", "focused": back, "ratios": [1]}], **state}
+
+
+def line(front, back):
+    """The restore line the installer sends for that card."""
+    return f"tiled 0 0 10 20 800 600 front horizontal {front} {front}:1 back horizontal {back} {back}:1"
 
 
 class InstallerTest(unittest.TestCase):
@@ -52,6 +70,10 @@ class InstallerTest(unittest.TestCase):
         self.restored = []
         self.recovery_at_unload = None
         self.fail_adoption = False
+        # Restore lines the core refuses, and those that get no answer: the exit
+        # code hyprctl gives up with, or None for a hyprctl that never returns.
+        self.refused, self.unanswered = set(), {}
+        self.park_at_finish = False
         self.calls = []
 
     def hyprctl(self, command, **kwargs):
@@ -67,6 +89,10 @@ class InstallerTest(unittest.TestCase):
             version = VERSION if self.library.read_bytes() == b"new plugin" else "0.1.0"
             reply = {"version": version, "pairs": self.pairs, "containers": self.containers}
         elif args == ["hyprflip", "finish"]:
+            # Another program may park a card while the update settles.
+            if self.park_at_finish:
+                for container in self.containers:
+                    container["workspace"] = PARKED
             reply = "ok: settled"
         elif args == ["plugin", "unload", str(self.library)]:
             # What a failed update would retry from.
@@ -89,8 +115,16 @@ class InstallerTest(unittest.TestCase):
             reply = [{"address": address, "grouped": list(PAIR.values())}
                      for address in PAIR.values()]
         elif len(args) == 2 and args[0] == "hyprflip" and args[1].startswith("restore "):
-            self.restored.append(args[1].removeprefix("restore "))
-            reply = "ok: restored"
+            restore = args[1].removeprefix("restore ")
+            if restore in self.unanswered:
+                code = self.unanswered[restore]
+                if code is None: raise subprocess.TimeoutExpired(command, kwargs.get("timeout"))
+                return subprocess.CompletedProcess(command, code, UNANSWERED[code], "")
+            if restore in self.refused:
+                reply = "error: The card could not be restored; its apps stay open."
+            else:
+                self.restored.append(restore)
+                reply = "ok: restored"
         elif args == ["hyprflip", "adopt", PAIR["front"], PAIR["back"]]:
             if self.library.read_bytes() == b"old plugin":
                 reply = "unknown request"
@@ -103,7 +137,8 @@ class InstallerTest(unittest.TestCase):
             self.fail(f"Unexpected IPC: {args}")
         if not isinstance(reply, str):
             reply = json.dumps(reply)
-        return subprocess.CompletedProcess(command, 0, reply, "")
+        # Hyprland 0.56's hyprctl exits 7 when the reply is an error.
+        return subprocess.CompletedProcess(command, 7 if reply.startswith("error:") else 0, reply, "")
 
     def run_installer(self, *arguments):
         self.output = io.StringIO()
@@ -184,16 +219,10 @@ class InstallerTest(unittest.TestCase):
         self.assertFalse(self.recovery.exists())
 
     def test_update_leaves_parked_cards_out_of_restore_and_recovery(self):
-        def card(front, back, workspace, **state):
-            return {"faces": [[front], [back]], "native_group": True, "floating": False, "fullscreen": False,
-                    "active": 0, "unfolded": False, "box": [10, 20, 800, 600], "workspace": workspace,
-                    "layouts": [{"axis": "horizontal", "focused": front, "ratios": [1]},
-                                {"axis": "horizontal", "focused": back, "ratios": [1]}], **state}
         # The fullscreen check covers the cards an update keeps, not a parked one.
-        self.containers = [card("0xc", "0xd", {"id": 3, "name": "3", "special": False}),
-                           card("0xe", "0xf", {"id": -98, "name": "special:park", "special": True}, fullscreen=True)]
+        self.containers = [card("0xc", "0xd", SHOWN), card("0xe", "0xf", PARKED, fullscreen=True)]
         self.run_installer()
-        shown = "tiled 0 0 10 20 800 600 front horizontal 0xc 0xc:1 back horizontal 0xd 0xd:1"
+        shown = line("0xc", "0xd")
         self.assertEqual(self.restored, [shown])
         self.assertEqual(self.recovery_at_unload, {"instance": "test-instance", "pairs": [PAIR], "cards": [shown]})
         self.assertIn("Keeping 1 open card(s) through this update.\n"
@@ -201,6 +230,87 @@ class InstallerTest(unittest.TestCase):
                       self.output.getvalue())
         self.assertEqual(self.library.read_bytes(), b"new plugin")
         self.assertFalse(self.recovery.exists())
+
+    def test_dry_run_counts_hidden_cards_without_changing_anything(self):
+        self.containers = [card("0xe", "0xf", PARKED)]
+        with self.assertRaises(SystemExit) as result:
+            self.run_installer("--dry-run")
+        self.assertEqual(result.exception.code, 0)
+        self.assertIn("Leaving 1 hidden card(s) as separate windows; the program that parked them rebuilds them.\n",
+                      self.output.getvalue())
+        self.assertEqual(self.calls, [["-j", "binds"], ["-j", "plugin", "list"], ["hyprflip", "status"]])
+
+    def test_parked_cards_alone_never_replay_the_recovery_file(self):
+        # The recovery file is read only when no card or pair of any kind is open.
+        self.pairs = []
+        self.containers = [card("0xe", "0xf", PARKED)]
+        self.recovery.write_text(json.dumps({"instance": "test-instance", "pairs": [PAIR],
+                                             "cards": [line("0xc", "0xd")]}))
+        self.run_installer()
+        self.assertEqual(self.restored, [])
+        self.assertEqual(self.pairs, [])
+        self.assertNotIn(["hyprflip", "adopt", PAIR["front"], PAIR["back"]], self.calls)
+        self.assertEqual(self.library.read_bytes(), b"new plugin")
+
+    def test_a_card_parked_while_the_update_settles_is_left_out(self):
+        self.containers = [card("0xc", "0xd", SHOWN)]
+        self.park_at_finish = True
+        self.run_installer()
+        self.assertEqual(self.restored, [])
+        self.assertEqual(self.recovery_at_unload["cards"], [])
+        self.assertEqual(self.library.read_bytes(), b"new plugin")
+
+    def test_a_refused_restore_leaves_that_card_and_keeps_the_others(self):
+        self.containers = [card("0xc", "0xd", SHOWN), card("0xe", "0xf", SHOWN)]
+        self.refused = {line("0xc", "0xd")}
+        self.run_installer()
+        self.assertEqual(self.restored, [line("0xe", "0xf")])
+        self.assertIn("Could not keep a card; its apps stay open as separate windows: "
+                      "The card could not be restored; its apps stay open.\n", self.output.getvalue())
+        self.assertEqual(self.library.read_bytes(), b"new plugin")
+        self.assertFalse(self.recovery.exists())
+
+    def test_a_refused_restore_in_the_rollback_keeps_the_other_cards(self):
+        self.containers = [card("0xc", "0xd", SHOWN), card("0xe", "0xf", SHOWN)]
+        self.refused = {line("0xc", "0xd")}
+        self.fail_adoption = True
+        with self.assertRaisesRegex(RuntimeError, "Could not restore pair"):
+            self.run_installer()
+        self.assertEqual(self.restored, [line("0xe", "0xf")])
+        self.assertIn("Could not keep a card", self.output.getvalue())
+        for path, content in self.originals.items():
+            self.assertEqual(path.read_bytes(), content)
+        self.assertEqual(json.loads(self.recovery.read_text()), {"instance": "test-instance", "pairs": [PAIR],
+                                                                  "cards": [line("0xc", "0xd"), line("0xe", "0xf")]})
+
+    def test_a_stale_recovery_file_with_a_parked_card_no_longer_aborts(self):
+        # Written before updates left parked cards out. Nothing is open, so the
+        # update replays it, and the core refuses the card whose apps are parked.
+        self.pairs = []
+        self.recovery.write_text(json.dumps({"instance": "test-instance", "pairs": [],
+                                             "cards": [line("0xc", "0xd"), line("0xe", "0xf")]}))
+        self.refused = {line("0xe", "0xf")}
+        self.run_installer()
+        self.assertEqual(self.restored, [line("0xc", "0xd")])
+        self.assertIn("Could not keep a card", self.output.getvalue())
+        self.assertEqual(self.library.read_bytes(), b"new plugin")
+        self.assertFalse(self.recovery.exists())
+
+    def test_a_restore_that_gets_no_answer_still_rolls_the_update_back(self):
+        # Only the core's refusal is answered per card. A Hyprland that does not
+        # answer stops the update: hyprctl gives up with exit 4 when it cannot
+        # connect, or exit 6 after its own 5 s, before the installer's timeout.
+        for code in (4, 6, None):
+            with self.subTest(code=code):
+                self.setUp()
+                self.containers = [card("0xc", "0xd", SHOWN), card("0xe", "0xf", SHOWN)]
+                self.unanswered = {line("0xc", "0xd"): code}
+                with self.assertRaises(RuntimeError if code else subprocess.TimeoutExpired):
+                    self.run_installer()
+                self.assertNotIn("Could not keep a card", self.output.getvalue())
+                for path, content in self.originals.items():
+                    self.assertEqual(path.read_bytes(), content)
+                self.assertEqual(json.loads(self.recovery.read_text())["cards"], [line("0xc", "0xd"), line("0xe", "0xf")])
 
     def test_active_hy3_containers_reject_native_upgrade_before_mutation(self):
         self.containers = [{"faces": [["0xc"], ["0xd", "0xe"]]}]

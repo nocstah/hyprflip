@@ -641,12 +641,17 @@ InputState Controller::input(const std::vector<PHLWINDOW> &targets) const {
     const auto grab = g_pSeatManager->m_seatGrab;
     const bool held = g_pInputManager->hasHeldButtons();
     const auto over = held && !targets.empty() ? pointerWindow() : nullptr;
+    // A border resize or a mod+drag can begin where no surface takes the
+    // pointer focus. Its target is the window (or card) the press began on.
+    const auto drag = g_layoutManager->dragController()->target();
+    const auto dragged = drag ? drag->window() : nullptr;
     return {.locked = g_pSessionLockManager->isSessionLocked(),
             .grab = grab && (grab->m_keyboard || grab->m_pointer),
             .dnd = PROTO::data->dndActive(),
             .constrained = g_pInputManager->isConstrained(),
             .held = held,
-            .heldOverTarget = over && std::ranges::find(targets, over) != targets.end()};
+            .heldOverTarget = (over && std::ranges::find(targets, over) != targets.end()) ||
+                              (dragged && std::ranges::find(targets, dragged) != targets.end())};
 }
 bool Controller::scriptBusy(const std::vector<PHLWINDOW> &targets) const { return scriptedBusy(input(targets)); }
 std::vector<PHLWINDOW> Controller::members(const Pair &p) const {

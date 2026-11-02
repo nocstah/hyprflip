@@ -36,6 +36,17 @@ def ctl(*args):
         raise RuntimeError(p.stdout + p.stderr)
     return p.stdout.strip()
 
+
+def answer(*args):
+    # The plugin's reply, a refusal included: Hyprland 0.56's hyprctl exits 7
+    # when the reply is an error. hyprctl's own failures to reach Hyprland
+    # (exits 1-6, such as no answer within its 5 s), a timeout or a missing
+    # hyprctl still raise.
+    p = subprocess.run(["hyprctl", *args], capture_output=True, text=True, timeout=10)
+    if p.returncode and not (p.returncode == 7 and p.stdout.startswith("error")):
+        raise RuntimeError(p.stdout + p.stderr)
+    return p.stdout.strip()
+
 binds = json.loads(ctl("-j", "binds"))
 keys = {"M", "P", "F", "U", "ESCAPE"}
 conflicts = [b for b in binds if b["modmask"] == 76 and b["key"].upper() in keys
@@ -92,6 +103,15 @@ def atomic(path, data):
     temporary = path.with_name(path.name + ".hyprflip-new")
     temporary.write_bytes(data)
     os.replace(temporary, path)
+
+
+def keep(line):
+    # A card whose apps closed or changed meanwhile stays as separate windows,
+    # and the other cards are still kept.
+    reply = answer("hyprflip", "restore " + line)
+    if not reply.startswith("ok:"):
+        print("Could not keep a card; its apps stay open as separate windows:", reply.removeprefix("error: "))
+    return reply.startswith("ok:")
 
 try:
     # Capture after settling: a turn may have been active when installation
@@ -150,13 +170,10 @@ try:
         if not members.issubset(windows) or any(set(windows[w]["grouped"]) != members for w in members):
             print("Pair changed during update; leaving its native windows untouched:", sorted(members))
             continue
-        reply = ctl("hyprflip", "adopt", pair["front"], pair["back"])
+        reply = answer("hyprflip", "adopt", pair["front"], pair["back"])
         if not reply.startswith("ok:"): raise RuntimeError("Could not restore pair: " + reply)
-    # A card whose apps closed or changed meanwhile stays as separate windows.
     for line in saved_cards:
-        reply = ctl("hyprflip", "restore " + line)
-        if not reply.startswith("ok:"):
-            print("Could not keep a card; its apps stay open as separate windows:", reply.removeprefix("error: "))
+        if not keep(line):
             continue
         try:
             settle(line)
@@ -179,11 +196,11 @@ except Exception:
         # Newer originals support adoption; older originals retain native
         # groups and the recovery file for the next successful upgrade.
         for pair in saved_pairs:
-            ctl("hyprflip", "adopt", pair["front"], pair["back"])
+            answer("hyprflip", "adopt", pair["front"], pair["back"])
         # Older cores lack restore; their cards stay as open windows and the
         # recovery file keeps them for the next successful update.
         for line in saved_cards:
-            ctl("hyprflip", "restore " + line)
+            keep(line)
     except Exception:
         pass
     raise
