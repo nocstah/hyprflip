@@ -1234,7 +1234,8 @@ Result Controller::show(Pair &p, unsigned side) {
 }
 Result Controller::cardAction(const std::string &arguments) {
     static constexpr auto USAGE = "Use card <id> flip, card <id> show <front|back>, card <id> ungroup or "
-                                  "card <id> workspace <number|name:<name>|special[:<name>]> [silent].";
+                                  "card <id> workspace <number|name:<name>|special[:<name>]> [silent], or "
+                                  "card <id or 0x address> hold|leave|reveal [speed from 0.05 to 4].";
     std::istringstream input(arguments);
     std::string text, verb, value, extra;
     uint64_t id = 0;
@@ -1796,11 +1797,13 @@ Result Controller::dispatch(const std::string &action) {
         finish();
         return {true, "ok"};
     }
-    return {false, "Unknown action. Use mark, pair, card, attach [horizontal|vertical], replace <old> <new>, release, unfold, "
-                   "layout <horizontal|vertical|balance|toggle>, other_side, "
-                   "workspace <number> [silent], move <left|right|up|down>, cancel, "
-                   "flip, peek [end], unpair, finish, restore [quiet] ..., "
-                   "card <id> <flip|show <front|back>|ungroup|workspace <workspace> [silent]>, or status."};
+    return {false,
+            "Unknown action. Use mark, pair, card, attach [horizontal|vertical], replace <old> <new>, release, unfold, "
+            "layout <horizontal|vertical|balance|toggle>, other_side, "
+            "workspace <number> [silent], move <left|right|up|down>, cancel, "
+            "flip, peek [end], unpair, finish, restore [quiet] ..., "
+            "card <id> <flip|show <front|back>|ungroup|workspace <workspace> [silent]>, "
+            "card <id or 0x address> hold|leave|reveal [speed], or status."};
 }
 namespace {
 // notify-send on PATH, for desktop notifications through the user's daemon.

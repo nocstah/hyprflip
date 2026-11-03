@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.0-rc.11 — 2026-11-03
 
 - Swap a window or card into a tile with the real open animation.
   `card <id or address> hold` keeps a still picture of what is leaving under

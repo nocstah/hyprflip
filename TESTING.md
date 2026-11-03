@@ -1,13 +1,40 @@
 # Validation
 
+## Release-candidate checks (2026-11-03)
+
+The current tree passes both CTest checks (`make test`) and all 348 Python unit
+tests. clang-format still reports 343 pre-existing findings, down from 348 after
+the changed return block was formatted; formatting is not a clean gate.
+
+Fresh disposable nested sessions on Hyprland 0.56.2, using the patched Aquamarine
+render node and notification recorder, passed these suites:
+
+- `tests/reveal_workflows.py`: 17 checks, including the two `leave` checks below
+  and usage text that lists the animation verbs.
+- `tests/card_id_workflows.py`: 13 checks.
+- `tests/install_cards.py`: 64 checks.
+- `tests/unattended_workflows.py`: 12 checks. The missing app returned the keyboard
+  within 63 ms, below the suite's 300 ms limit, with the pointer unchanged.
+
+An earlier unattended run stopped after five checks because the test runner's PID
+namespace could not read the compositor-reported process id under `/proc`. The
+fresh rerun used the same host PID namespace as the nested compositor and passed
+without weakening its assertions. Every nested session started for these checks
+was stopped and its connection file removed.
+
+These checks exercise the real plugin with disposable terminal fixtures. They do
+not establish how real browser pages render during a switch, or the feel and
+frame pacing on the live desktop. The known small-page ghost at 4K described below
+is unchanged and remains unresolved; this run adds no new 4K browser measurement.
+
 ## A swap with hold and reveal (2026-11-02)
 
 `tests/reveal_workflows.py` takes a fresh nested session started with
 `--notify-recorder` and needs `make test` first, for `build/motion_probe.so`. It
 loads the core and the read-only motion probe, which now also records every
 window's box and fade and how many fadeouts Hyprland holds, frame by frame. It
-makes two headless outputs, uses the pilot desktop's curves and a magenta
-wallpaper, and takes about 35 seconds. It passes 15 checks:
+makes two headless outputs and uses the pilot desktop's curves and a magenta
+wallpaper. It passes 17 checks in the 2026-11-03 rerun:
 
 - `status` says `"reveal":true`.
 - A bad id, address, speed or extra word gets a clear reply, adds no line to the
@@ -24,6 +51,12 @@ wallpaper, and takes about 35 seconds. It passes 15 checks:
   of the same run at factor 1), and a later reveal at factor 1 takes as long as
   the first.
 - A hold with no reveal leaves no fadeout, with the window in place or moved away.
+- `leave` on a plain window creates one temporary close-animation picture, then
+  removes it. The real window remains mapped and parked, with the focus and
+  pointer unchanged and no notification; bringing it back restores the same tile.
+- `leave` on a card snapshots only its shown face, cleans every picture, and keeps
+  the parked card intact. Bringing it back restores its panes and the neighbour's
+  tile, with the focus and pointer unchanged and no notification.
 - `no_blur` set true stays true. Set false over a window rule of true, it reads
   true during the fade and false after, also when the window leaves and returns
   in mid-fade. A rule alone stays.
@@ -47,9 +80,8 @@ wallpaper, and takes about 35 seconds. It passes 15 checks:
 What this does not prove: everything ran nested on the second GPU, so it says
 nothing about NVIDIA or about a real monitor's vblank, since a headless output runs
 on a timer. It used terminals in its tiles; the frame figures below used Chromium.
-Whether the speed feels right can only be judged on the real desktop. `leave` has
-no check here. No other nested suite was run for this change, though `CardFrames`
-changed; from reading the code, nothing differs there without these verbs.
+Whether the speed feels right can only be judged on the real desktop. The card-id,
+unattended and installer suites were also rerun on 2026-11-03, as recorded above.
 
 One frame run at 3840x2160 and 1.5x, at factor 0.7, on six swaps each, with Chromium
 windows and cards parked at other sizes: the box reached its goal at 277.5 ms

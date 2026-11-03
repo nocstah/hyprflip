@@ -241,6 +241,9 @@ hl.workspace_rule({{workspace="{PLACE}",monitor="{output}"}})
         result = subprocess.run(['hyprctl', 'hyprflip', request], env=env, capture_output=True, text=True, timeout=8)
         assert result.stdout.strip().startswith(reply), (request, result.stdout)
     assert not notify_log.read_text(), notify_log.read_text()
+    for request in ('card 0 foo', 'card 0'):
+        result = subprocess.run(['hyprctl', 'hyprflip', request], env=env, capture_output=True, text=True, timeout=8)
+        assert 'hold|leave|reveal' in result.stdout, 'Card usage must include the animation verbs'
     assert fadeouts() == 0 and box(first) == goal and ipc.status()['containers'] == before['containers']
     passed('a bad id, address, speed or extra word is refused with a clear reply and no notification, and nothing changes')
 
@@ -307,6 +310,18 @@ hl.workspace_rule({{workspace="{PLACE}",monitor="{output}"}})
     assert box(leaving) == goal and box(tile) == tile_box and fadeouts() == 0
     passed('a hold with no reveal leaves nothing behind, with the window in place or moved away')
 
+    # A close animation without an arriving window: the picture goes away, the real window stays mapped and parked.
+    before = rest(tile)
+    notices = notify_log.read_text()
+    frames = record([set_prop(leaving, 'no_anim', 'true'), f'hyprflip card {leaving} leave', move(leaving, PARK)], .8)
+    assert max(f['fadeouts'] for f in frames) == 1 and frames[-1]['fadeouts'] == 0 and fadeouts() == 0
+    assert ipc.windows()[leaving]['workspace']['name'] == PARK
+    assert active() == tile and pointer() == before and notify_log.read_text() == notices
+    batch(move(leaving, PLACE), f'hyprflip card {leaving} reveal')
+    time.sleep(.7)
+    assert box(leaving) == goal and box(tile) == tile_box and fadeouts() == 0
+    passed('leave closes a window through one temporary picture, keeps it mapped and parked, and leaves focus and pointer alone')
+
     # no_blur: lifted for the fade over a picture, then just as it was.
     ruled = spawn('ruled', '503050')
     batch(move(ruled, PARK))
@@ -359,6 +374,8 @@ hl.workspace_rule({{workspace="{PLACE}",monitor="{output}"}})
     focus(tile)
     panes = [spawn(name, color) for name, color in (('c1', '0a6f8f'), ('c2', '0a6f8f'), ('c3', '00ff00'))]
     one = build_card(panes[0], panes[1], panes[2])
+    usage = subprocess.run(['hyprctl', 'hyprflip', f'card {one} foo'], env=env, capture_output=True, text=True, timeout=8)
+    assert 'hold|leave|reveal' in usage.stdout, 'Known-card usage must include the animation verbs'
     focus(tile)
     time.sleep(.3)
     one_shown = [a for a in card_of(panes[1])['faces'][card_of(panes[1])['active']]]
@@ -391,6 +408,18 @@ hl.workspace_rule({{workspace="{PLACE}",monitor="{output}"}})
     assert all(prop(a, 'no_anim') is False for a in one_shown)
     passed('a card over a card: its panes open as one, its frame stays still, two pictures come and go, '
            'and the neighbour, the focus and the pointer stay')
+
+    before = rest(tile)
+    notices = notify_log.read_text()
+    frames = record([*[set_prop(a, 'no_anim', 'true') for a in card_of(panes[1])['faces'][0] + card_of(panes[1])['faces'][1]],
+                     f'hyprflip card {one} leave', f'hyprflip card {one} workspace {PARK} silent'], .8)
+    assert max(f['fadeouts'] for f in frames) == len(one_shown) and fadeouts() == 0
+    assert card_of(panes[1])['workspace']['name'] == PARK
+    assert active() == tile and pointer() == before and notify_log.read_text() == notices
+    batch(f'hyprflip card {one} workspace {PLACE} silent', f'hyprflip card {one} reveal')
+    time.sleep(.7)
+    assert {a: box(a) for a in one_shown} == one_boxes and box(tile) == tile_box and fadeouts() == 0
+    passed('leave snapshots only the shown face of a card, cleans every picture and keeps the parked card intact')
 
     # A plain window for a card and the reverse: the header band. A control for the second:
     # at rest, the button's pixel is the header's own.
