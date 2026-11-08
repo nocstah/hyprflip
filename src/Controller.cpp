@@ -77,6 +77,18 @@ bool fits(PHLWINDOW w, Vector2D size) {
     auto min = w->minSize(), max = w->maxSize();
     return (!min || (size.x >= min->x && size.y >= min->y)) && (!max || (size.x <= max->x && size.y <= max->y));
 }
+// Says which limit an app's place breaks, naming the app and both sizes.
+std::string sizeProblem(PHLWINDOW w, Vector2D size) {
+    const std::string name = FloatingCards::appName(w);
+    const auto px = [](double v) { return std::to_string(static_cast<long>(std::round(v))); };
+    const auto min = w->minSize().value_or(Vector2D{1, 1}), max = w->maxSize().value_or(Vector2D{1e9, 1e9});
+    if (size.x < min.x || size.y < min.y)
+        return name + " needs at least " + px(min.x) + " x " + px(min.y) + " px, but its place in the card is " +
+               px(size.x) + " x " + px(size.y) + ". Make the first window bigger, or open the card on a "
+               "workspace with fewer windows.";
+    return name + " can be at most " + px(max.x) + " x " + px(max.y) + " px, but its place in the card is " +
+           px(size.x) + " x " + px(size.y) + ".";
+}
 bool sameBox(const CBox &a, const CBox &b) {
     return std::abs(a.x - b.x) < 1 && std::abs(a.y - b.y) < 1 && std::abs(a.w - b.w) < 1 && std::abs(a.h - b.h) < 1;
 }
@@ -761,15 +773,16 @@ Result Controller::pair(bool multiApp) {
         if (id) {
             m_pairs.push_back({m_nextID++, {}, {}, false, id, api->epoch});
             const auto created = state(m_pairs.back());
-            bool fitsAll = created.has_value();
+            std::string tooSmall = created ? "" : "The card could not be laid out.";
             if (created)
                 for (const auto &w : created->windows())
-                    fitsAll &= fits(w.lock(), w->size(IGeometric::GEOMETRIC_GOAL));
-            if (!fitsAll) {
+                    if (tooSmall.empty() && !fits(w.lock(), w->size(IGeometric::GEOMETRIC_GOAL)))
+                        tooSmall = sizeProblem(w.lock(), w->size(IGeometric::GEOMETRIC_GOAL));
+            if (!tooSmall.empty()) {
                 discardContainer(m_pairs.back());
                 m_pairs.pop_back();
                 m_mutating = false;
-                return {false, "The card cannot satisfy both windows' size limits."};
+                return {false, tooSmall};
             }
             m_marked.reset();
         }
@@ -795,9 +808,10 @@ Result Controller::pair(bool multiApp) {
     g->add(b);
     g->setCurrent(a);
     if (!fits(a, a->size(IGeometric::GEOMETRIC_GOAL)) || !fits(b, a->size(IGeometric::GEOMETRIC_GOAL))) {
+        const auto size = a->size(IGeometric::GEOMETRIC_GOAL);
         g->destroy();
         m_mutating = false;
-        return {false, "The combined tile cannot satisfy both windows' size limits."};
+        return {false, sizeProblem(fits(a, size) ? b : a, size)};
     }
     const bool previousLock = g->locked();
     g->setLocked(true);
@@ -1611,7 +1625,7 @@ Result Controller::restore(const std::string &arguments) {
     if (quiet ? scriptBusy(apps) : inputBusy())
         return {false, "Finish the active grab or drag before restoring a card."};
     if (!FloatingCards::canCreate(snapshot))
-        return {false, "Those apps are gone or no longer fit; they stay open as separate windows."};
+        return {false, FloatingCards::fitProblem(snapshot, mode == "floating")};
     // A quiet restore leaves the focus alone, unless it is on one of the card's
     // apps: it then goes to the shown side, never staying on a hidden one.
     const auto focused = reinterpret_cast<uintptr_t>(Desktop::focusState()->window().get());
@@ -1624,7 +1638,11 @@ Result Controller::restore(const std::string &arguments) {
     if (id) m_pairs.push_back({m_nextID++, {}, {}, false, id, FloatingCards::EPOCH});
     m_mutating = false;
     reconcile();
-    return {id != 0, id ? "ok" : "The card could not be restored; its apps stay open."};
+    if (!id) {
+        const auto why = FloatingCards::fitProblem(snapshot, mode == "floating");
+        return {false, why.empty() ? "The card could not be restored; its apps stay open." : why};
+    }
+    return {true, "ok"};
 }
 Result Controller::fullscreen() {
     if (inputBusy()) return {false, "Finish the active grab or drag before changing fullscreen."};

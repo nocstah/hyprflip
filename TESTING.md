@@ -1,5 +1,37 @@
 # Validation
 
+## Saved cards that must grow to fit (2026-11-08)
+
+Release checks for 0.3.0-rc.12. The tree passes both CTest checks and all 352
+Python unit tests, 4 of them new in `tests/saved_test.py`: a saved card opens in
+one quiet restore with no mark or pair, a floating card starts from its front
+app's size before setup tiled it, a refusal's reason reaches the person, and a
+core without `card_ungroup` keeps the earlier path.
+
+Fresh disposable nested sessions on Hyprland 0.56.2 passed:
+
+- `tests/fit_workflows.py` (new): 4 checks with a GTK fixture that asks for a
+  700 px minimum. A floating card restored from a narrower box grows to fit, on
+  screen; one that would grow past the right edge moves back, along that side
+  only; one that fits as given keeps its exact box, partly off screen; and one
+  needing 3500 px on a 1920 px screen is refused with the app and both sizes
+  named, all three apps left open and no card made.
+- `tests/install_cards.py`: 64 checks. The first run of this tree failed here:
+  the new clamp moved an unfolded floating card that an update put back on
+  another monitor (x 300 to 2000). The clamp now applies only to a card that had
+  to grow, and the rerun passed.
+- `tests/reveal_workflows.py` (`--notify-recorder`): 17 checks.
+- `tests/card_id_workflows.py`: 13 checks.
+- `tests/unattended_workflows.py` (`--notify-recorder`): 12 checks.
+- `tests/floating_workflows.py --dwindle`: 10 checks.
+- `tests/dwindle_workflows.py`: 7 checks.
+
+On the pilot desktop (Asahi MacBook, 1512x982 logical), the saved AI card,
+Terminal on the front and ChatGPT (480 px minimum) beside Claude Desktop
+(600 px) on the back, opened from the OmaCards panel path where it had failed
+with “failed to add”. The suites that need the hy3 build (opening and saved
+workflows) were not run.
+
 ## Release-candidate checks (2026-11-03)
 
 The current tree passes both CTest checks (`make test`) and all 348 Python unit

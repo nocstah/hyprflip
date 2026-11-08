@@ -979,6 +979,11 @@ class Setup:
         try:
             self.tile_selected(selected, tiled)
             self.import_windows(selected, workspace, moved)
+            if arrangement and state.get('native_cards') and state.get('card_ungroup'):
+                self.restore_whole(selected, arrangement, workspace)
+                face = arrangement['faces'][arrangement['active']]
+                self.ipc.focus(face['windows'][face['focus']])
+                return
             self.ipc.focused((front, 'mark'), (back, 'card' if state.get('native_cards') else 'pair'))
             created = next((c for c in self.ipc.status()['containers'] if c['faces'] == [[front], [back]]), None)
             if not created:
@@ -1031,6 +1036,59 @@ class Setup:
                 finally:
                     self.restore_focus(selected[front])
             raise
+
+    @staticmethod
+    def restore_line(arrangement, box, floating):
+        """The core's quiet restore of an arrangement, as card_restore.describe words a card's."""
+        if not all(type(v) in (int, float) and math.isfinite(v) for v in box):
+            raise SetupError('The card action is unavailable.')
+        line = (f'restore quiet {"floating" if floating else "tiled"} {arrangement["active"]} 0 ' +
+                ' '.join(f'{v:.12g}' for v in box))
+        for side, face in zip(('front', 'back'), arrangement['faces']):
+            if not all(re.fullmatch(r'0x[0-9a-fA-F]{1,16}', a) for a in face['windows']):
+                raise SetupError('The card action is unavailable.')
+            line += (f' {side} {face["axis"]} {face["windows"][face["focus"]]}' +
+                     ''.join(f' {a}:{r:.12g}' for a, r in zip(face['windows'], face['ratios'])))
+        return line
+
+    def box(self, arrangement, floating, workspace, windows):
+        """A tiled card's box is its front app's tile there, or else the screen's free area; a floating
+        card keeps its front app's size, centred on that screen."""
+        front = windows[arrangement['faces'][0]['windows'][0]]
+        if not floating and front['workspace']['id'] == workspace: return [*front['at'], *front['size']]
+        monitors = {w['id']: w.get('monitorID') for w in self.ipc.data('-j', 'workspaces')}
+        monitor = next((m for m in self.ipc.data('-j', 'monitors') if m['id'] == monitors.get(workspace)), None)
+        if monitor is None: return [*front['at'], *front['size']]
+        width, height = monitor['width'] / monitor['scale'], monitor['height'] / monitor['scale']
+        if monitor.get('transform', 0) % 2: width, height = height, width
+        left, top, right, bottom = monitor.get('reserved', [0, 0, 0, 0])
+        x, y, width, height = monitor['x'] + left, monitor['y'] + top, width - left - right, height - top - bottom
+        if not floating: return [x, y, width, height]
+        return [x + (width - front['size'][0]) / 2, y + (height - front['size'][1]) / 2, *front['size']]
+
+    def restore_whole(self, selected, arrangement, workspace):
+        """Builds a saved card in one step, at a size its apps fit, and returns it.
+
+        Assembling a saved card pane by pane inside the front app's tile fails
+        whenever that tile is narrower than one app's minimum size, however big
+        the finished card would be: a terminal squeezed to a third of the screen
+        cannot take ChatGPT, which needs 480 px. The core's restore sizes a
+        floating card to fit every app, keeps it on screen, and names the app
+        that cannot fit when no card would.
+        """
+        floating = bool(arrangement.get('floating'))
+        windows = self.ipc.windows()
+        # A floating card keeps its front app's size from before setup tiled it.
+        front = arrangement['faces'][0]['windows'][0]
+        if floating and front in selected: windows = {**windows, front: selected[front]}
+        box = self.box(arrangement, floating, workspace, windows)
+        replies = self.ipc.batch(['hyprflip ' + self.restore_line(arrangement, box, floating)])
+        expected = [face['windows'] for face in arrangement['faces']]
+        card = next((c for c in self.ipc.status().get('containers', []) if c['faces'] == expected), None)
+        if card: return card
+        reply = replies[-1] if replies else ''
+        reason = reply[len('error: '):] if reply.startswith('error: ') else ''
+        raise SetupError(clean(reason, 240) if reason else 'The saved card could not be rebuilt. Its apps are still open.')
 
     def restore_ratios(self, face):
         panes = face['windows']
@@ -2649,35 +2707,6 @@ class Unattended(Saved):
         if not re.fullmatch(r'0x[0-9a-fA-F]{1,16}', address) or type(workspace) is not int or not 0 < workspace < 2**31:
             raise SetupError('The card action is unavailable.')
         return f'dispatch hl.dsp.window.move({{window="address:{address}",workspace="{workspace}",follow=false}})'
-
-    @staticmethod
-    def restore_line(arrangement, box, floating):
-        """The core's quiet restore of an arrangement, as card_restore.describe words a card's."""
-        if not all(type(v) in (int, float) and math.isfinite(v) for v in box):
-            raise SetupError('The card action is unavailable.')
-        line = (f'restore quiet {"floating" if floating else "tiled"} {arrangement["active"]} 0 ' +
-                ' '.join(f'{v:.12g}' for v in box))
-        for side, face in zip(('front', 'back'), arrangement['faces']):
-            if not all(re.fullmatch(r'0x[0-9a-fA-F]{1,16}', a) for a in face['windows']):
-                raise SetupError('The card action is unavailable.')
-            line += (f' {side} {face["axis"]} {face["windows"][face["focus"]]}' +
-                     ''.join(f' {a}:{r:.12g}' for a, r in zip(face['windows'], face['ratios'])))
-        return line
-
-    def box(self, arrangement, floating, workspace, windows):
-        """A tiled card's box is its front app's tile there, or else the screen's free area; a floating
-        card keeps its front app's size, centred on that screen."""
-        front = windows[arrangement['faces'][0]['windows'][0]]
-        if not floating and front['workspace']['id'] == workspace: return [*front['at'], *front['size']]
-        monitors = {w['id']: w.get('monitorID') for w in self.ipc.data('-j', 'workspaces')}
-        monitor = next((m for m in self.ipc.data('-j', 'monitors') if m['id'] == monitors.get(workspace)), None)
-        if monitor is None: return [*front['at'], *front['size']]
-        width, height = monitor['width'] / monitor['scale'], monitor['height'] / monitor['scale']
-        if monitor.get('transform', 0) % 2: width, height = height, width
-        left, top, right, bottom = monitor.get('reserved', [0, 0, 0, 0])
-        x, y, width, height = monitor['x'] + left, monitor['y'] + top, width - left - right, height - top - bottom
-        if not floating: return [x, y, width, height]
-        return [x + (width - front['size'][0]) / 2, y + (height - front['size'][1]) / 2, *front['size']]
 
     def roll_back(self, moved, workspace, tiled):
         """Sends moved apps back where they came from and floats again those tiled for the card.

@@ -828,8 +828,10 @@ bool moveTo(uint64_t id, const std::string &destination, bool follow) {
     return true;
 }
 const ContainerAPI *api() { return &API; }
-bool canCreate(const ContainerSnapshot &snapshot) {
-    Card proposed;
+namespace {
+// Describes the card a snapshot asks for, without touching any window. False
+// when an app is gone, appears twice or has no share of its face.
+bool propose(const ContainerSnapshot &snapshot, Card &proposed) {
     proposed.unfolded = snapshot.unfolded;
     for (unsigned s = 0; s < 2; ++s) {
         if (!snapshot.count[s] || snapshot.count[s] > CONTAINER_MAX_PANES)
@@ -842,11 +844,84 @@ bool canCreate(const ContainerSnapshot &snapshot) {
             proposed.faces[s].push_back(w);
             proposed.ratios[s].push_back(snapshot.ratios[s][i]);
         }
+        const double sum = std::accumulate(proposed.ratios[s].begin(), proposed.ratios[s].end(), 0.);
+        for (auto &r : proposed.ratios[s])
+            r /= sum;
     }
     proposed.unfoldVertical = proposed.preferVerticalUnfold();
+    return true;
+}
+// Where a floating card may go: its front app's screen, less bars and gaps.
+std::optional<CBox> floatingArea(const PHLWINDOW &w) {
+    if (!w || !w->m_workspace || !w->m_workspace->m_space)
+        return {};
+    return w->m_workspace->m_space->workArea(true);
+}
+} // namespace
+std::string appName(const PHLWINDOW &w) {
+    // The app, never the title: a title can say what the user is reading, and
+    // these messages reach notifications and other programs.
+    std::string name = w ? w->m_class : "";
+    // A reverse-domain id says the app last: com.anthropic.Claude is Claude.
+    if (name.find('.') != std::string::npos && name.find_first_of("-_ ") == std::string::npos)
+        name = name.substr(name.rfind('.') + 1);
+    if (name.size() > 40) {
+        size_t end = 40;
+        while (end && (static_cast<unsigned char>(name[end]) & 0xC0) == 0x80)
+            --end;
+        name = name.substr(0, end) + "…";
+    }
+    return name.empty() ? "An app" : name;
+}
+bool canCreate(const ContainerSnapshot &snapshot) {
+    Card proposed;
+    if (!propose(snapshot, proposed))
+        return false;
     auto minimum = proposed.minimum();
     return proposed.fits(
         {snapshot.x, snapshot.y, std::max(snapshot.width, minimum.x), std::max(snapshot.height, minimum.y)});
+}
+std::string fitProblem(const ContainerSnapshot &snapshot, bool floating) {
+    Card proposed;
+    if (!propose(snapshot, proposed))
+        return "An app in that card closed or appears twice; the others stay open.";
+    const auto minimum = proposed.minimum();
+    const auto area = floatingArea(proposed.faces[0][0].lock());
+    const CBox room = floating && area ? *area : CBox{snapshot.x, snapshot.y, snapshot.width, snapshot.height};
+    // The pane that asks the most of the card, measured against the room there is.
+    PHLWINDOW app;
+    bool across = true;
+    double worst = 0, needed = 0, own = 0;
+    for (unsigned s = 0; s < 2; ++s)
+        for (unsigned i = 0; i < proposed.faces[s].size(); ++i) {
+            const auto w = proposed.faces[s][i].lock();
+            const double border = 2. * w->getRealBorderSize();
+            const auto min = w->minSize().value_or(Vector2D{1, 1}) + Vector2D{border, border};
+            const double gaps = proposed.gap(proposed.vertical[s]) * (proposed.faces[s].size() - 1);
+            const double x = proposed.vertical[s] ? min.x : min.x / proposed.ratios[s][i] + gaps;
+            const double y = proposed.vertical[s] ? min.y / proposed.ratios[s][i] + gaps : min.y;
+            for (const bool horizontal : {true, false}) {
+                const double share = (horizontal ? x : y) / std::max(1., horizontal ? room.w : room.h);
+                if (share > worst) {
+                    worst = share, app = w, across = horizontal;
+                    needed = horizontal ? x : y, own = horizontal ? min.x : min.y;
+                }
+            }
+        }
+    // Nothing asks for more than there is: another limit refused it, such as an
+    // app's maximum size. Naming a minimum here would send the person after the wrong thing.
+    if (!app || worst <= 1.)
+        return "Those apps no longer fit in one card; they stay open as separate windows.";
+    const auto px = [](double v) { return std::to_string(static_cast<long>(std::ceil(v))); };
+    const std::string name = appName(app), dimension = across ? "wide" : "tall";
+    const double available = across ? room.w : room.h;
+    if (floating && area && (minimum.x > area->w + .5 || minimum.y > area->h + .5))
+        return name + " needs at least " + px(own) + " px, so this card would have to be " + px(needed) + " px " +
+               dimension + ", and the screen has " + px(available) + ". Put fewer apps side by side, or give " +
+               name + " a bigger share.";
+    return name + " needs at least " + px(own) + " px, and its part of this card is only " +
+           px(own * available / std::max(1., needed)) + " px " + dimension +
+           ". Float the card or close a window on this workspace, then open it again.";
 }
 uint64_t create(const ContainerSnapshot &snapshot, bool floating, bool focus) {
     if (!canCreate(snapshot))
@@ -876,8 +951,22 @@ uint64_t create(const ContainerSnapshot &snapshot, bool floating, bool focus) {
     }
     c->unfoldVertical = c->preferVerticalUnfold();
     auto min = c->minimum();
+    const bool wider = c->initial.w < min.x, taller = c->initial.h < min.y;
     c->initial.w = std::max(c->initial.w, min.x);
     c->initial.h = std::max(c->initial.h, min.y);
+    // A floating card that has to grow to fit its apps grows on its screen, and
+    // is refused when it could not fit there; fitProblem says which app is too
+    // big. One that fits as given stays exactly where it was asked to be, as an
+    // update puts back, on whichever monitor that is.
+    if (floating && (wider || taller))
+        if (const auto area = floatingArea(c->faces[0][0].lock())) {
+            if ((wider && min.x > area->w + .5) || (taller && min.y > area->h + .5))
+                return 0;
+            if (wider)
+                c->initial.x = std::clamp(c->initial.x, area->x, area->x + area->w - c->initial.w);
+            if (taller)
+                c->initial.y = std::clamp(c->initial.y, area->y, area->y + area->h - c->initial.h);
+        }
     if (!c->fits(c->initial))
         return 0;
     c->changing = true;

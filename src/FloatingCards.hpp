@@ -13,6 +13,11 @@ const ContainerAPI *api();
 // focus the card leaves the focus where it is.
 uint64_t create(const ContainerSnapshot &snapshot, bool floating = true, bool focus = true);
 bool canCreate(const ContainerSnapshot &snapshot);
+// Why the card a snapshot describes cannot be made, in words for the person:
+// which app needs more room than the card or the screen has.
+std::string fitProblem(const ContainerSnapshot &snapshot, bool floating);
+// An app's name for messages: its class, never its title, shortened.
+std::string appName(const PHLWINDOW &w);
 void closing(PHLWINDOW window);
 void focused(PHLWINDOW window);
 void shutdown();

@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.3.0-rc.12 — 2026-11-08
+
+- Saved cards open in one step at a size that fits their apps. Opening one
+  from the panel, the menus or `control.py` used to build it pane by pane
+  inside the front app's tile, so a floating card failed whenever that tile
+  was narrower than one app's minimum size, however big the finished card
+  would be: a terminal in a third of a 14" screen could not take ChatGPT,
+  which needs 480 px. The helper now sends the whole card in one quiet
+  `restore`, as unattended opening already did, when the core has
+  `card_ungroup`.
+- A floating card that has to grow to fit its apps grows on its screen: it is
+  moved back from an edge it would cross, along the side it grew. A card that
+  fits as given stays exactly where it was asked to be, as an update puts it
+  back, on whichever monitor that is.
+- Refusals name the app and the sizes. A restore that cannot fit says, for
+  example, “Claude needs at least 600 px, so this card would have to be
+  1818 px wide, and the screen has 1512. Put fewer apps side by side, or give
+  Claude a bigger share.”; mark and pair say which window's place is too small.
+  Messages use the app's name from its class, never a window title. A refusal
+  for any other limit keeps the general wording. A card that cannot be made
+  leaves its apps open where they were.
+- Bridge ABI 7 and helper protocol 1 are unchanged.
+
 ## 0.3.0-rc.11 — 2026-11-03
 
 - Swap a window or card into a tile with the real open animation.

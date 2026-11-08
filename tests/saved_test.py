@@ -171,5 +171,59 @@ class SavedTest(unittest.TestCase):
         self.assertEqual(self.ipc.mutations, [])
         self.assertEqual(len(self.ipc.snapshot['containers']), 1)
 
+    def whole_core(self, reply='ok: ok', builds=True):
+        """A core with native cards and card ungroup, whose restore builds the card in one step."""
+        self.ipc.snapshot.update(native_cards=True, card_ungroup=True)
+        sent = []
+
+        def batch(commands):
+            sent.append(commands)
+            if builds:
+                self.ipc.snapshot['containers'] = [dict(id=7, faces=[['0xa'], ['0xb', '0xc']], current='0xb', active=1,
+                                                        unfolded=False, box=[0, 0, 1200, 700])]
+            return [reply]
+        self.ipc.batch = batch
+        return sent
+
+    def test_saved_card_is_rebuilt_in_one_step_not_pane_by_pane(self):
+        # Pairing in the front app's tile and attaching the rest fails whenever that
+        # tile is narrower than an app's minimum size, however big the card would be.
+        self.ungrouped(); sent = self.whole_core()
+        flow = self.saved('0', 'restore', 'restore')
+        self.assertEqual(flow.apply(flow.prepare_manage()), 'Restored “Comms”.')
+        self.assertEqual(sent, [['hyprflip restore quiet tiled 1 0 0 0 600 700 front horizontal 0xa 0xa:1 '
+                                 'back horizontal 0xb 0xb:0.5 0xc:0.5']])
+        self.assertFalse([m for m in self.ipc.mutations if m[0] == 'action'])
+        self.assertEqual(self.ipc.mutations[-1], ('focus', '0xb'))
+
+    def test_floating_card_keeps_the_front_apps_size_from_before_setup(self):
+        self.recipe['floating'] = True
+        self.ungrouped(); sent = self.whole_core()
+        self.ipc.data = lambda *args, _data=self.ipc.data: (
+            [{'id': 2, 'monitorID': 0, 'tiledLayout': 'dwindle'}] if args == ('-j', 'workspaces') else
+            [{'id': 0, 'x': 0, 'y': 0, 'width': 3000, 'height': 2000, 'scale': 2, 'reserved': [0, 30, 0, 0]}]
+            if args == ('-j', 'monitors') else _data(*args))
+        flow = self.saved('0', 'restore', 'restore'); plan = flow.prepare_manage()
+        self.ipc.clients['0xa']['size'] = [300, 700]  # Squeezed once setup tiles the other apps beside it.
+        flow.apply(plan)
+        self.assertTrue(sent[0][0].startswith('hyprflip restore quiet floating 1 0 450 165 600 700 front'), sent)
+
+    def test_a_refused_restore_says_which_app_does_not_fit(self):
+        self.ungrouped()
+        self.whole_core('error: Claude needs at least 600 px, so this card would have to be 1818 px wide, '
+                        'and the screen has 1512.', builds=False)
+        flow = self.saved('0', 'restore', 'restore')
+        with self.assertRaisesRegex(setup.SetupError, r'^Claude needs at least 600 px'):
+            flow.apply(flow.prepare_manage())
+        self.assertEqual(self.ipc.snapshot['containers'], [])
+
+    def test_a_core_without_card_ungroup_still_builds_pane_by_pane(self):
+        self.ungrouped(); sent = self.whole_core()
+        self.ipc.snapshot['card_ungroup'] = False
+        flow = self.saved('0', 'restore', 'restore')
+        with self.assertRaises(setup.SetupError): flow.apply(flow.prepare_manage())
+        self.assertEqual(sent, [])
+        self.assertIn(('action', 'mark'), self.ipc.mutations)
+
 
 if __name__ == '__main__': unittest.main()
