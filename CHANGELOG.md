@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.3.0-rc.14 — 2026-11-09
+
+- hy3 is retired. Cards are built by the core alone, tiled on Omarchy's
+  default dwindle layout or floating; the hy3 integration, its provider
+  build, updater and container trial are gone, and `status` no longer reports
+  `hy3_provider`. Cards from the hy3 provider must be ungrouped
+  (Super+Ctrl+Alt+U) before updating; [the install guide](docs/INSTALL.md)
+  explains the switch.
+- Attaching and releasing apps have default keys again: Super+Ctrl+Alt+H adds
+  the marked app beside the focused pane, V below it, and E takes the focused
+  app out of its card. They are set by the guided setup module and can be
+  changed in OmaCards like the other shortcuts.
+- Releasing a pane keeps the focus where it was, instead of moving it to the
+  card's first app.
+- Moving a pane to the other face keeps the proportions of the panes it leaves
+  and joins, gives the moved app an even share, and turns the card to show it.
+- Replacing an app in a tiled card trades the two apps' tiles, so the incoming
+  app takes the outgoing one's place at the same size, and the outgoing app
+  gets the incoming one's old tile. A replacement whose outgoing app cannot fit
+  the incoming tile is refused before anything moves.
+- Reopening a card's missing apps tries the card's present box first, keeping
+  its id, and rebuilds the whole card only when the apps do not fit.
+- Every nested test suite runs on dwindle with the core alone.
+
 ## 0.3.0-rc.13 — 2026-11-09
 
 - Opening a saved card that is already open on another workspace brings it to

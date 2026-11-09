@@ -1,5 +1,24 @@
 # Validation
 
+## hy3 retired; every suite on dwindle (2026-11-09)
+
+Release checks for 0.3.0-rc.14. The tree passes both CTest checks and all 354
+Python unit tests. Every nested suite now loads only `build/hyprflip.so` and
+builds cards with `card`; the hy3-only suites (containers, container upgrade,
+stale targets, trial, updater) are removed with the provider. Fresh disposable
+nested sessions on Hyprland 0.56.2 passed: install cards (64), reveal (17),
+card id (13), unattended (12), floating (10), dwindle (7), fit (4), repair
+(10), opening (6), setup (7), edit (14), layout (6), pane (12), workflows
+(10), three panes (9), cold open with repair (12), chill (8), peek (19),
+transitions (15), card motion (7), card frames (10), card interactions (9) and
+the saved restart run (7).
+
+Porting found three core bugs on dwindle, fixed here: release moved the focus
+to the card's first app, moving a pane to the other face reset the proportions
+of both faces, and replacing a tiled app left the outgoing app in a sliver.
+The workflow suite's screenshot step needs the host screen on: with the screen
+locked the nested session draws no frames and `grim` times out.
+
 ## Open cards brought here, floated and completed whole (2026-11-09)
 
 Release checks for 0.3.0-rc.13, a helper-only change. All 356 Python unit tests
