@@ -22,6 +22,7 @@ DEFINITIONS = (
     ('attach_h', 'Add app beside', 'H', 'attach pane beside'),
     ('attach_v', 'Add app below', 'V', 'attach pane below'),
     ('release', 'Remove focused app', 'E', 'release focused pane'),
+    ('attach_face', 'Add app as new face', 'N', 'attach app as a new face'),
     ('fullscreen', 'Fullscreen whole card', 'Return', 'fullscreen the whole card'),
     ('cancel', 'Cancel pairing', 'Escape', 'cancel pairing'),
 )

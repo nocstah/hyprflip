@@ -93,4 +93,5 @@ if hl.plugin.hyprflip and hl.plugin.hyprflip.attach then
     shortcuts.bind("SUPER + CTRL + ALT + H", run("attach", "horizontal"), { description = "Hyprflip: attach pane beside" })
     shortcuts.bind("SUPER + CTRL + ALT + V", run("attach", "vertical"), { description = "Hyprflip: attach pane below" })
     shortcuts.bind("SUPER + CTRL + ALT + E", run("release"), { description = "Hyprflip: release focused pane" })
+    shortcuts.bind("SUPER + CTRL + ALT + N", run("attach", "face"), { description = "Hyprflip: attach app as a new face" })
 end

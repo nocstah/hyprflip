@@ -8,6 +8,7 @@ local names = {
     ["separate windows"]="unpair", ["mark first side"]="mark",
     ["attach second side"]="pair", ["attach pane beside"]="attach_h",
     ["attach pane below"]="attach_v", ["release focused pane"]="release",
+    ["attach app as a new face"]="attach_face",
     ["fullscreen the whole card"]="fullscreen", ["cancel pairing"]="cancel",
 }
 local entries, preferences = {}, {}
