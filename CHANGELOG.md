@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.3.0-rc.15 — 2026-11-09
+
+- Cards can have up to four faces. Mark an app and press Super+Ctrl+Alt+N
+  (or **Add as new face** in the card menu and OmaCards) to add it as Face 3,
+  then Face 4; the card turns to it. Each flip turns to the next face, and the
+  last comes round to the front. `card <id> show <n>` turns straight to a face.
+- Moving an app to the other side moves it to the next face. Taking the only
+  app off a face removes that face while the card keeps at least two; a
+  two-face card comes apart as before.
+- Unfolding lays every face out side by side, each with the room its apps need.
+- Saved cards, updates and `restore` keep every face: `restore` takes faces
+  after the back as `face …`, saved definitions hold two to four faces, and
+  cards saved by earlier versions load unchanged. `status` reports
+  `container_max_faces`; the panel protocol adds face names and
+  `capabilities.faces`, and stays at version 1.
+- The card header names the face shown, such as “Face 3 of 3”.
+
 ## 0.3.0-rc.14 — 2026-11-09
 
 - hy3 is retired. Cards are built by the core alone, tiled on Omarchy's

@@ -1,5 +1,18 @@
 # Validation
 
+## Cards with up to four faces (2026-11-09)
+
+Release checks for 0.3.0-rc.15. Both CTest checks pass (core_test adds three
+cases for the N-way unfold split) and all 375 Python unit tests, 21 of them new
+for three- and four-face restore lines, recipes, Find, edit menus and the panel
+protocol. Fresh nested sessions on Hyprland 0.56.2 passed every suite of
+0.3.0-rc.14 with the same counts, plus the new `tests/multiface_workflows.py`
+(9): a three-face restore, flipping round all faces, `show <n>` and its
+refusal, adding a fourth face and refusing a fifth, removing a face by
+releasing its only app, the update round trip through `card_restore.describe`,
+unfolding three faces side by side, and a two-face card still dissolving.
+OmaCards' native panel run passed against this helper.
+
 ## hy3 retired; every suite on dwindle (2026-11-09)
 
 Release checks for 0.3.0-rc.14. The tree passes both CTest checks and all 354
