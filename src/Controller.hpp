@@ -57,11 +57,14 @@ class Controller {
         bool frame = false;
     };
     struct State {
-        std::array<std::vector<PHLWINDOW>, 2> faces;
-        std::array<PHLWINDOW, 2> focused;
-        std::array<bool, 2> vertical{};
-        std::array<std::array<double, CONTAINER_MAX_PANES>, 2> ratios{};
+        // Faces 0..count-1; a plain pair always has two.
+        std::array<std::vector<PHLWINDOW>, CONTAINER_MAX_FACES> faces;
+        std::array<PHLWINDOW, CONTAINER_MAX_FACES> focused;
+        std::array<bool, CONTAINER_MAX_FACES> vertical{};
+        std::array<std::array<double, CONTAINER_MAX_PANES>, CONTAINER_MAX_FACES> ratios{};
+        unsigned count = 2;
         unsigned active = 0;
+        unsigned next() const { return (active + 1) % count; }
         bool unfolded = false;
         CBox geometry;
         bool contains(PHLWINDOW window) const;
@@ -82,6 +85,10 @@ class Controller {
         std::vector<bool> suppressedGlass;
         std::vector<CBox> windowGeometry;
         bool previewReturn = false;
+        // The face the turn goes to: the next one round.
+        unsigned target = 1;
+        unsigned face(bool second) const { return second ? target : source; }
+        float sign() const { return target > source ? 1.F : -1.F; }
     };
     Pair *find(PHLWINDOW window);
     Pair *find(uint64_t id);
@@ -115,7 +122,7 @@ class Controller {
     Result unpair();
     // Dissolves a card or pair where it is, leaving its apps as windows.
     Result ungroup(Pair &pair);
-    Result attach(bool vertical);
+    Result attach(bool vertical, bool newFace = false);
     Result release();
     Result workspace(uint32_t destination, bool follow);
     // scripted: the silent move by id, guarded by scriptBusy instead of inputBusy.

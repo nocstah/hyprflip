@@ -341,9 +341,15 @@ std::vector<CardFrames::Layout> CardFrames::layouts() const {
         if (buttonWidth < 38 || layout.box.h < height + 12)
             continue;
         layout.button = {layout.box.x + layout.box.w - buttonWidth - 4, layout.box.y, buttonWidth, controlHeight};
-        layout.text = layout.view.unfolded ? "Both sides" : layout.view.active ? "Back" : "Front";
-        const auto count =
-            layout.view.unfolded ? layout.view.count[0] + layout.view.count[1] : layout.view.count[layout.view.active];
+        layout.text = layout.view.unfolded ? (layout.view.faces > 2 ? "All faces" : "Both sides") : faceName(layout.view.active);
+        if (!layout.view.unfolded && layout.view.faces > 2)
+            layout.text += " of " + std::to_string(layout.view.faces);
+        unsigned count = layout.view.count[layout.view.active];
+        if (layout.view.unfolded) {
+            count = 0;
+            for (unsigned f = 0; f < layout.view.faces; ++f)
+                count += layout.view.count[f];
+        }
         const auto longText = layout.text + " · " + std::to_string(count) + (count == 1 ? " app" : " apps");
         double labelWidth = longText.size() * fontSize() * .64 + 20;
         if (labelWidth + buttonWidth + 24 <= layout.box.w)

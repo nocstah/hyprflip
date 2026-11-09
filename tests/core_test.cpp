@@ -1,3 +1,4 @@
+#include <vector>
 #include "AccentColor.hpp"
 #include "InputGuard.hpp"
 #include "SplitLayout.hpp"
@@ -21,6 +22,13 @@ int main() {
     require(!balancedSplit(840, {420, 2000}, {430, 2000}), "unfold refuses when the combined minima cannot fit");
     require(!balancedSplit(840, {200, 300}, {200, 400}), "unfold refuses when both maxima are too small");
     require(balancedSplit(841, {420.2, 2000}, {419.8, 2000}) == 421, "fractional minima retain whole-pixel boundaries");
+    require(sharedSplit(900, {{100, 2000}, {100, 2000}, {100, 2000}}) == std::vector<double>{300, 300, 300},
+            "three faces unfold in equal thirds when they fit");
+    require(sharedSplit(900, {{500, 2000}, {100, 2000}, {100, 2000}}) == std::vector<double>{500, 200, 200},
+            "a wide face keeps its minimum and the others share the rest");
+    require(sharedSplit(1000, {{100, 200}, {100, 2000}, {100, 2000}, {100, 2000}}) ==
+                std::vector<double>{200, 267, 267, 266},
+            "a face at its maximum gives its room to the others, in whole pixels");
     require(parseAccent("#F78DBB") == 0xfff78dbbu && parseAccent("#00aa11") == 0xff00aa11u, "accent parses #RRGGBB");
     require(!parseAccent("") && !parseAccent("F78DBB") && !parseAccent("#F78DB") && !parseAccent("#F78DBBAA") &&
                 !parseAccent("#G78DBB"),

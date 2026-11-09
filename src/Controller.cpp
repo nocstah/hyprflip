@@ -271,7 +271,12 @@ Controller::Pair *Controller::find(uint64_t id) {
     return it == m_pairs.end() ? nullptr : &*it;
 }
 bool Controller::State::contains(PHLWINDOW w) const {
-    return w && (std::ranges::find(faces[0], w) != faces[0].end() || std::ranges::find(faces[1], w) != faces[1].end());
+    if (!w)
+        return false;
+    for (unsigned s = 0; s < count; ++s)
+        if (std::ranges::find(faces[s], w) != faces[s].end())
+            return true;
+    return false;
 }
 std::vector<PHLWINDOWREF> Controller::State::windows() const {
     std::vector<PHLWINDOWREF> result;
@@ -295,9 +300,11 @@ std::optional<Controller::State> Controller::state(const Pair &p) const {
     if (p.containerID) {
         const auto api = provider(p.providerEpoch);
         ContainerSnapshot snapshot;
-        if (!api || !api->inspect(p.containerID, &snapshot) || snapshot.active > 1)
+        if (!api || !api->inspect(p.containerID, &snapshot) || snapshot.faces < 2 || snapshot.faces > CONTAINER_MAX_FACES ||
+            snapshot.active >= snapshot.faces)
             return std::nullopt;
-        for (unsigned s = 0; s < 2; ++s) {
+        result.count = snapshot.faces;
+        for (unsigned s = 0; s < snapshot.faces; ++s) {
             if (snapshot.count[s] < 1 || snapshot.count[s] > CONTAINER_MAX_PANES)
                 return std::nullopt;
             for (unsigned i = 0; i < snapshot.count[s]; ++i) {
@@ -410,7 +417,8 @@ std::vector<CardFrameView> Controller::frameViews() const {
         view.active = s->active;
         view.unfolded = s->unfolded;
         view.animating = m_turn && m_turn->pairID == pair.id;
-        for (unsigned side = 0; side < 2; ++side) view.count[side] = s->faces[side].size();
+        view.faces = s->count;
+        for (unsigned side = 0; side < s->count; ++side) view.count[side] = s->faces[side].size();
         view.windows = s->windows();
         result.push_back(std::move(view));
     }
@@ -433,7 +441,7 @@ std::vector<CardDropOffer> Controller::dropOffers(PHLWINDOW window) const {
         if (!workspace || !workspace->m_visible || workspace->m_isSpecialWorkspace ||
             (Fullscreen::controller()->hasFullscreen(workspace) && !fullscreenCard) || window->m_workspace != workspace ||
             workspace->m_renderOffset->isBeingAnimated()) continue;
-        for (unsigned side = 0; side < 2; ++side) {
+        for (unsigned side = 0; side < s->count; ++side) {
             if (!s->unfolded && side != s->active) continue;
             CardDropOffer offer;
             offer.id = p.id;
@@ -465,7 +473,7 @@ Result Controller::dropAttach(PHLWINDOW window, const CardDropOffer &offer) {
     if (!unavailable(window).empty() || find(window)) return {false, "The app changed during the drag. Try again."};
     auto p = find(offer.id);
     auto before = p ? state(*p) : std::nullopt;
-    if (!p || !p->containerID || !before || before->windows() != offer.members || offer.side > 1 ||
+    if (!p || !p->containerID || !before || before->windows() != offer.members || offer.side >= before->count ||
         (!before->unfolded && before->active != offer.side) ||
         window->m_workspace != before->focused[offer.side]->m_workspace)
         return {false, "The card changed during the drag. Try again."};
@@ -513,7 +521,7 @@ Result Controller::dropAttach(PHLWINDOW window, const CardDropOffer &offer) {
         // A provider may have attached then released the candidate while
         // checking the final geometry. Restore the original split precisely.
         if (auto api = provider(p->providerEpoch))
-            for (unsigned side = 0; side < 2; ++side) {
+            for (unsigned side = 0; side < before->count; ++side) {
                 std::array<uintptr_t, CONTAINER_MAX_PANES> windows{};
                 for (unsigned i = 0; i < before->faces[side].size(); ++i)
                     windows[i] = reinterpret_cast<uintptr_t>(before->faces[side][i].get());
@@ -556,7 +564,7 @@ void Controller::onFocus(PHLWINDOW w) {
             finish(false);
         else if (!s->contains(w))
             finish();
-        else if (s->active != (m_turn->source ^ unsigned(m_turn->timeline.secondSide())))
+        else if (s->active != m_turn->face(m_turn->timeline.secondSide()))
             finish(false);
     }
     deferReconcile();
@@ -580,7 +588,7 @@ void Controller::damage(const Pair &p) {
 }
 void Controller::select(Pair &p, unsigned index, bool focus) {
     auto s = state(p);
-    if (!s || index > 1)
+    if (!s || index >= s->count)
         return;
     const bool old = m_mutating;
     m_mutating = true;
@@ -615,7 +623,7 @@ void Controller::finish(bool applyDestination) {
         return;
     if (applyDestination)
         if (auto p = find(m_turn->pairID))
-            select(*p, m_turn->source ^ unsigned(m_turn->timeline.destination()));
+            select(*p, m_turn->face(m_turn->timeline.destination()));
     if (auto p = find(m_turn->pairID); p && p->containerID)
         if (auto api = provider(p->providerEpoch))
             api->animating(p->containerID, false);
@@ -855,7 +863,7 @@ Result Controller::endPeek() {
     m_peek.reset();
     if (!returnable) return {true, "ok"};
     if (m_turn && m_turn->pairID == pending.pairID) {
-        if ((m_turn->source ^ unsigned(m_turn->timeline.destination())) != pending.source)
+        if (m_turn->face(m_turn->timeline.destination()) != pending.source)
             m_turn->timeline.reverse();
         return {true, "ok"};
     }
@@ -879,7 +887,7 @@ Result Controller::flip(std::optional<Transition> preview, Pair *target) {
     auto s = state(*p);
     if (!s)
         return {false, "This card changed. Pair its windows again."};
-    const unsigned source = s->active;
+    const unsigned source = s->active, goal = s->next();
     const auto mode = preview.value_or(transition(m_settings.transition->value()).value_or(Transition::Flip));
     if (s->unfolded) {
         if (preview) return {false, "Fold the card with O before previewing a transition."};
@@ -888,11 +896,11 @@ Result Controller::flip(std::optional<Transition> preview, Pair *target) {
                 return {false, "Leave fullscreen before folding this container."};
         auto api = provider(p->providerEpoch);
         m_mutating = true;
-        const bool ok = api && api->unfold(p->containerID, false) && api->select(p->containerID, 1 - source, true);
+        const bool ok = api && api->unfold(p->containerID, false) && api->select(p->containerID, goal, true);
         m_mutating = false;
         return {ok, ok ? "ok" : "The layout could not fold this card."};
     }
-    auto a = s->focused[source], b = s->focused[1 - source];
+    auto a = s->focused[source], b = s->focused[goal];
     if (!p->containerID && !fits(b, a->size(IGeometric::GEOMETRIC_GOAL)))
         return {false, "The other side no longer fits this size. Resize the pair before flipping."};
     std::string reason;
@@ -911,14 +919,14 @@ Result Controller::flip(std::optional<Transition> preview, Pair *target) {
     if (!reason.empty() || mode == Transition::Instant) {
         // A preview of Instant leaves the card where it started.
         if (preview) return {true, "ok"};
-        select(*p, 1 - source);
+        select(*p, goal);
         damage(*p);
         m_lastFallback = reason.empty() ? "" : "Instant switch: " + reason;
         return {true, "ok"};
     }
     auto pose = std::make_shared<Pose>();
     pose->mode = mode;
-    pose->direction = source == 0 ? 1.F : -1.F;
+    pose->direction = goal > source ? 1.F : -1.F;
     pose->leader = s->focused[source];
     pose->perspective = m_settings.perspective->value();
     pose->retreat = m_settings.retreat->value();
@@ -937,6 +945,7 @@ Result Controller::flip(std::optional<Transition> preview, Pair *target) {
                         m_eventKey,
                         {},
                         {}});
+    m_turn->target = goal;
     m_turn->transformers.resize(m_turn->windows.size());
     m_turn->suppressedGlass.resize(m_turn->windows.size());
     m_turn->previewReturn = preview.has_value();
@@ -980,8 +989,9 @@ Result Controller::flip(std::optional<Transition> preview, Pair *target) {
         } else {
             m_mutating = true;
             for (unsigned side = 0; side < 2; ++side) {
-                select(*p, source ^ side, false);
-                pose->faces[side] = m_shader->captureFace(s->faces[source ^ side], monitor, pose->error);
+                const auto face = m_turn->face(side);
+                select(*p, face, false);
+                pose->faces[side] = m_shader->captureFace(s->faces[face], monitor, pose->error);
                 if (!pose->faces[side]) break;
             }
             select(*p, source);
@@ -1043,7 +1053,7 @@ Result Controller::ungroup(Pair &p) {
     return {true, "ok"};
 }
 
-Result Controller::attach(bool vertical) {
+Result Controller::attach(bool vertical, bool newFace) {
     if (inputBusy())
         return {false, "Finish the active grab or drag before attaching."};
     auto w = m_marked.lock();
@@ -1058,7 +1068,9 @@ Result Controller::attach(bool vertical) {
     auto s = state(*p);
     if (!s)
         return {false, "This card changed. Pair its windows again."};
-    if (s->faces[s->active].size() >= CONTAINER_MAX_PANES)
+    if (newFace && s->count >= CONTAINER_MAX_FACES)
+        return {false, "This card already has " + std::to_string(CONTAINER_MAX_FACES) + " faces."};
+    if (!newFace && s->faces[s->active].size() >= CONTAINER_MAX_PANES)
         return {false, "This side already has five apps. Remove an app before adding another."};
     for (const auto &member : s->windows())
         if (p->providerEpoch != FloatingCards::EPOCH && Fullscreen::controller()->isFullscreen(member.lock()))
@@ -1067,7 +1079,9 @@ Result Controller::attach(bool vertical) {
         return {false, "Tile the marked window on the same workspace before attaching it."};
     auto api = provider(p->providerEpoch);
     m_mutating = true;
-    bool ok = api && api->attach(p->containerID, reinterpret_cast<uintptr_t>(w.get()), s->active, vertical);
+    // A new face goes after the last one, and the card turns to it.
+    const unsigned side = newFace ? s->count : s->active;
+    bool ok = api && api->attach(p->containerID, reinterpret_cast<uintptr_t>(w.get()), side, vertical);
     if (ok) {
         const auto attached = state(*p);
         bool fitsAll = attached.has_value();
@@ -1084,6 +1098,8 @@ Result Controller::attach(bool vertical) {
     m_mutating = false;
     if (ok)
         m_marked.reset();
+    if (ok && newFace)
+        return {true, "Added as " + faceName(side) + ". Flip to go round the faces."};
     return {ok, ok ? "Pane attached to this face." : "The layout could not attach this window."};
 }
 Result Controller::replacePane(const std::string &arguments) {
@@ -1218,7 +1234,7 @@ Result Controller::show(Pair &p, unsigned side) {
     return {true, "ok"};
 }
 Result Controller::cardAction(const std::string &arguments) {
-    static constexpr auto USAGE = "Use card <id> flip, card <id> show <front|back>, card <id> ungroup or "
+    static constexpr auto USAGE = "Use card <id> flip, card <id> show <front|back|face number>, card <id> ungroup or "
                                   "card <id> workspace <number|name:<name>|special[:<name>]> [silent], or "
                                   "card <id or 0x address> hold|leave|reveal [speed from 0.05 to 4].";
     std::istringstream input(arguments);
@@ -1260,7 +1276,7 @@ Result Controller::cardAction(const std::string &arguments) {
             const auto s = p && valid(*p) ? state(*p) : std::nullopt;
             if (!s)
                 return {false, "No card has id " + text + ". Read the ids from status."};
-            for (unsigned side = 0; side < 2; ++side)
+            for (unsigned side = 0; side < s->count; ++side)
                 if (s->unfolded || side == s->active)
                     windows.insert(windows.end(), s->faces[side].begin(), s->faces[side].end());
             whole = {.whole = true, .extraTop = p->frame ? CardFrames::headerHeight() : 0};
@@ -1284,8 +1300,18 @@ Result Controller::cardAction(const std::string &arguments) {
         return {false, "No card has id " + text + ". Read the ids from status."};
     if (verb == "flip" && !(input >> extra))
         return flip(std::nullopt, p);
-    if (verb == "show" && input >> value && (value == "front" || value == "back") && !(input >> extra))
-        return show(*p, value == "back");
+    if (verb == "show" && input >> value && !(input >> extra)) {
+        // front and back, or a face by its number from 1: front is 1, back is 2.
+        unsigned face = 0;
+        const auto [last, bad] = std::from_chars(value.data(), value.data() + value.size(), face);
+        const bool number = bad == std::errc{} && last == value.data() + value.size();
+        const auto s = state(*p);
+        if (value == "front" || value == "back")
+            return show(*p, value == "back");
+        if (number && s && face >= 1 && face <= s->count)
+            return show(*p, face - 1);
+        return {false, "Use card <id> show front, back, or a face number from 1 to " + std::to_string(s ? s->count : 2) + "."};
+    }
     // Another program takes its card apart, parked or on screen; the focus stays.
     if (verb == "ungroup" && !(input >> extra)) {
         const auto windows = members(*p);
@@ -1426,8 +1452,9 @@ Result Controller::editContainer(ContainerEdit operation, const std::string &tar
             return {false, "Leave fullscreen before changing the card layout."};
     if (s->faces[s->active].size() < 2)
         return {false, "This side needs at least two apps. Add an app from the card menu first."};
-    if (operation == ContainerEdit::OtherSide && s->faces[1 - s->active].size() >= CONTAINER_MAX_PANES)
-        return {false, "The other side already has five apps. Remove an app there first."};
+    if (operation == ContainerEdit::OtherSide && s->faces[s->next()].size() >= CONTAINER_MAX_PANES)
+        return {false, s->count > 2 ? "The next face already has five apps. Remove an app there first."
+                                    : "The other side already has five apps. Remove an app there first."};
     auto api = provider(p->providerEpoch);
     m_mutating = true;
     const bool ok = api && api->edit(p->containerID, reinterpret_cast<uintptr_t>(w.get()), operation);
@@ -1487,7 +1514,7 @@ void Controller::onFrame(PHLMONITOR monitor) {
         return;
     }
     auto current = s->focused[s->active];
-    if (s->active != (m_turn->source ^ unsigned(m_turn->timeline.secondSide()))) {
+    if (s->active != m_turn->face(m_turn->timeline.secondSide())) {
         finish(false);
         return;
     }
@@ -1514,10 +1541,10 @@ void Controller::onFrame(PHLMONITOR monitor) {
     auto now = Clock::now();
     m_turn->timeline.advance(std::chrono::duration<double, std::milli>(now - m_turn->last).count());
     m_turn->last = now;
-    m_turn->pose->angle = float(m_turn->timeline.angle()) * (m_turn->source == 0 ? 1.F : -1.F);
+    m_turn->pose->angle = float(m_turn->timeline.angle()) * m_turn->sign();
     m_turn->pose->progress = m_turn->timeline.progress();
     m_turn->pose->dirty = true;
-    const auto destination = m_turn->source ^ unsigned(m_turn->timeline.secondSide());
+    const auto destination = m_turn->face(m_turn->timeline.secondSide());
     if (s->active != destination)
         select(*p, destination);
     m_turn->pose->leader = s->focused[destination];
@@ -1541,6 +1568,7 @@ void Controller::onFrame(PHLMONITOR monitor) {
 //   <tiled|floating> <active> <unfolded> <x> <y> <w> <h>
 //   front <horizontal|vertical> <focused> <address:ratio>...
 //   back  <horizontal|vertical> <focused> <address:ratio>...
+//   [face <horizontal|vertical> <focused> <address:ratio>...]  a third face, then a fourth
 Result Controller::restore(const std::string &arguments) {
     std::istringstream input(arguments);
     std::string mode, token;
@@ -1550,8 +1578,9 @@ Result Controller::restore(const std::string &arguments) {
     if (quiet)
         input >> mode;
     if (!(input >> snapshot.active >> snapshot.unfolded >> snapshot.x >> snapshot.y >> snapshot.width >> snapshot.height) ||
-        (mode != "tiled" && mode != "floating") || snapshot.active > 1 || snapshot.unfolded > 1)
-        return {false, "Use restore [quiet] <tiled|floating> <active> <unfolded> <x> <y> <w> <h> front ... back ..."};
+        (mode != "tiled" && mode != "floating") || snapshot.active >= CONTAINER_MAX_FACES || snapshot.unfolded > 1)
+        return {false, "Use restore [quiet] <tiled|floating> <active> <unfolded> <x> <y> <w> <h> front ... back ... [face ...]"};
+    unsigned faces = 2;
     int side = -1;
     std::string address;
     const auto parse = [](const std::string &text, uintptr_t &value) {
@@ -1560,8 +1589,10 @@ Result Controller::restore(const std::string &arguments) {
         return error == std::errc{} && end == text.data() + text.size();
     };
     while (input >> token) {
-        if (token == "front" || token == "back") {
-            side = token == "back";
+        if (token == "front" || token == "back" || token == "face") {
+            if (token == "face" && faces >= CONTAINER_MAX_FACES)
+                return {false, "A card has at most " + std::to_string(CONTAINER_MAX_FACES) + " faces."};
+            side = token == "front" ? 0 : token == "back" ? 1 : faces++;
             std::string axis, focused;
             if (!(input >> axis >> focused) || (axis != "horizontal" && axis != "vertical") ||
                 !parse(focused, snapshot.focused[side]))
@@ -1582,10 +1613,14 @@ Result Controller::restore(const std::string &arguments) {
         snapshot.windows[side][snapshot.count[side]] = window;
         snapshot.ratios[side][snapshot.count[side]++] = ratio;
     }
-    if (!snapshot.count[0] || !snapshot.count[1])
-        return {false, "A card needs apps on both faces."};
+    snapshot.faces = faces;
+    for (unsigned s = 0; s < faces; ++s)
+        if (!snapshot.count[s])
+            return {false, faces > 2 ? "Every face of a card needs an app." : "A card needs apps on both faces."};
+    if (snapshot.active >= faces)
+        return {false, "The shown face is not one of the card's faces."};
     std::vector<PHLWINDOW> apps;
-    for (unsigned s = 0; s < 2; ++s)
+    for (unsigned s = 0; s < faces; ++s)
         for (unsigned i = 0; i < snapshot.count[s]; ++i)
             for (const auto &w : Desktop::windowState()->windows())
                 if (reinterpret_cast<uintptr_t>(w.get()) == snapshot.windows[s][i]) {
@@ -1601,7 +1636,7 @@ Result Controller::restore(const std::string &arguments) {
     // apps: it then goes to the shown side, never staying on a hidden one.
     const auto focused = reinterpret_cast<uintptr_t>(Desktop::focusState()->window().get());
     bool member = false;
-    for (unsigned s = 0; s < 2; ++s)
+    for (unsigned s = 0; s < faces; ++s)
         for (unsigned i = 0; i < snapshot.count[s]; ++i)
             member |= focused && snapshot.windows[s][i] == focused;
     m_mutating = true;
@@ -1646,7 +1681,8 @@ Result Controller::floating() {
     snapshot.active = current->active; snapshot.unfolded = current->unfolded;
     snapshot.x = current->geometry.x; snapshot.y = current->geometry.y;
     snapshot.width = current->geometry.w; snapshot.height = current->geometry.h;
-    for (unsigned side = 0; side < 2; ++side) {
+    snapshot.faces = current->count;
+    for (unsigned side = 0; side < current->count; ++side) {
         snapshot.count[side] = current->faces[side].size();
         snapshot.focused[side] = reinterpret_cast<uintptr_t>(current->focused[side].get());
         snapshot.vertical[side] = current->vertical[side];
@@ -1735,6 +1771,8 @@ Result Controller::dispatch(const std::string &action) {
         return attach(false);
     if (action == "attach vertical")
         return attach(true);
+    if (action == "attach face")
+        return attach(false, true);
     if (action == "release")
         return release();
     if (action.starts_with("replace "))
@@ -1866,7 +1904,7 @@ std::string Controller::status() {
             std::format("{{\"id\":{},\"active\":{},\"unfolded\":{},\"current\":{},\"box\":[{},{},{},{}],\"faces\":[",
                         p.id, s->active, s->unfolded ? "true" : "false", address(s->focused[s->active]), s->geometry.x,
                         s->geometry.y, s->geometry.w, s->geometry.h);
-        for (unsigned side = 0; side < 2; ++side) {
+        for (unsigned side = 0; side < s->count; ++side) {
             if (side)
                 json += ',';
             json += '[';
@@ -1884,7 +1922,7 @@ std::string Controller::status() {
         const auto space = s->focused[s->active]->m_workspace;
         json += ",\"workspace\":{\"id\":" + std::to_string(space ? space->m_id : 0) + ",\"name\":" + quote(space ? space->m_name : "") +
                 ",\"special\":" + (space && space->m_isSpecialWorkspace ? "true" : "false") + "},\"layouts\":[";
-        for (unsigned side = 0; side < 2; ++side) {
+        for (unsigned side = 0; side < s->count; ++side) {
             if (side) json += ',';
             json += "{\"axis\":" + quote(s->vertical[side] ? "vertical" : "horizontal") +
                     ",\"focused\":" + address(s->focused[side]) + ",\"ratios\":[";
@@ -1901,6 +1939,7 @@ std::string Controller::status() {
            ",\"card_dividers\":" + (m_frames ? m_frames->dividers() : "[]") +
            ",\"native_cards\":true,\"floating_cards\":true,\"workspace_protection\":true,\"container_provider\":true" +
            ",\"layout_controls\":true,\"repair_cards\":true,\"card_ungroup\":true,\"pane_replacement\":true" +
-           ",\"reveal\":true,\"container_max_panes\":" + std::to_string(CONTAINER_MAX_PANES) + "}";
+           ",\"reveal\":true,\"container_max_panes\":" + std::to_string(CONTAINER_MAX_PANES) +
+           ",\"container_max_faces\":" + std::to_string(CONTAINER_MAX_FACES) + "}";
 }
 } // namespace Hyprflip

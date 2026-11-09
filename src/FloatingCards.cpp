@@ -102,10 +102,12 @@ class PaneTarget final : public ITarget {
     void onUpdateSpace() override { original->onUpdateSpace(); }
 };
 struct Card {
-    std::array<std::vector<PHLWINDOWREF>, 2> faces;
-    std::array<PHLWINDOWREF, 2> focused;
-    std::array<bool, 2> vertical{};
-    std::array<std::vector<double>, 2> ratios;
+    // Faces 0..count-1 are in use; the rest stay empty.
+    std::array<std::vector<PHLWINDOWREF>, CONTAINER_MAX_FACES> faces;
+    std::array<PHLWINDOWREF, CONTAINER_MAX_FACES> focused;
+    std::array<bool, CONTAINER_MAX_FACES> vertical{};
+    std::array<std::vector<double>, CONTAINER_MAX_FACES> ratios;
+    unsigned count = 2;
     std::map<uintptr_t, SP<PaneTarget>> targets;
     SP<CGroup> group;
     unsigned active = 0;
@@ -210,7 +212,7 @@ struct Card {
         return w->m_workspace->m_monitor->logicalBox();
     }
     std::optional<unsigned> side(PHLWINDOW w) const {
-        for (unsigned s = 0; s < 2; ++s)
+        for (unsigned s = 0; s < count; ++s)
             if (std::ranges::find(faces[s], w) != faces[s].end())
                 return s;
         return {};
@@ -222,8 +224,11 @@ struct Card {
         return group && group->size() && group->getCurrentIdx() < group->size() && group->current() && group->m_target->floating();
     }
     bool valid() const {
-        if (!alive || !group || faces[0].empty() || faces[1].empty() || group->size() != targets.size())
+        if (!alive || !group || count < 2 || count > CONTAINER_MAX_FACES || group->size() != targets.size())
             return false;
+        for (unsigned s = 0; s < count; ++s)
+            if (faces[s].empty())
+                return false;
         for (const auto &[_, p] : targets) {
             auto w = p->window();
             if (!w || !w->m_isMapped || w->m_group != group || w->m_target != p)
@@ -233,7 +238,7 @@ struct Card {
     }
     bool preferVerticalUnfold() const {
         bool rows = false, columns = false;
-        for (unsigned side = 0; side < 2; ++side)
+        for (unsigned side = 0; side < count; ++side)
             if (faces[side].size() >= 3)
                 (vertical[side] ? columns : rows) = true;
         return rows && !columns;
@@ -242,9 +247,9 @@ struct Card {
         Vector2D minimum{1, 1};
         Vector2D maximum{1e9, 1e9};
     };
-    std::array<FaceLimits, 2> faceLimits() const {
-        std::array<FaceLimits, 2> limits;
-        for (unsigned s = 0; s < 2; ++s) {
+    std::array<FaceLimits, CONTAINER_MAX_FACES> faceLimits() const {
+        std::array<FaceLimits, CONTAINER_MAX_FACES> limits;
+        for (unsigned s = 0; s < count; ++s) {
             for (unsigned i = 0; i < faces[s].size(); ++i) {
                 if (!faces[s][i])
                     continue;
@@ -282,16 +287,26 @@ struct Card {
                 return ExtentRange{unfoldVertical ? limits[side].minimum.y : limits[side].minimum.x,
                                    unfoldVertical ? limits[side].maximum.y : limits[side].maximum.x};
             };
-            const double first = balancedSplit(available, range(0), range(1)).value_or(available / 2);
-            const double extent = s == 0 ? first : available - first;
-            if (unfoldVertical) {
-                box.h = extent;
-                if (s)
-                    box.y += first + gutter;
+            const double share = std::max(1., available - gutter * (count - 2));
+            std::vector<double> extents;
+            if (count == 2) {
+                const double first = balancedSplit(share, range(0), range(1)).value_or(share / 2);
+                extents = {first, share - first};
             } else {
-                box.w = extent;
-                if (s)
-                    box.x += first + gutter;
+                std::vector<ExtentRange> ranges;
+                for (unsigned f = 0; f < count; ++f)
+                    ranges.push_back(range(f));
+                extents = sharedSplit(share, ranges);
+            }
+            double start = 0;
+            for (unsigned f = 0; f < s; ++f)
+                start += extents[f] + gutter;
+            if (unfoldVertical) {
+                box.y += std::round(start);
+                box.h = std::round(start + extents[s]) - std::round(start);
+            } else {
+                box.x += std::round(start);
+                box.w = std::round(start + extents[s]) - std::round(start);
             }
         }
         return box;
@@ -316,15 +331,19 @@ struct Card {
     Vector2D minimum() const {
         const auto limits = faceLimits();
         const double top = bare() ? 0 : header;
-        const auto first = limits[0].minimum, second = limits[1].minimum;
-        return {unfolded && !unfoldVertical ? std::ceil(first.x) + std::ceil(second.x) + gap(false)
-                                            : std::max(first.x, second.x),
-                (unfolded && unfoldVertical ? std::ceil(first.y) + std::ceil(second.y) + gap(true)
-                                            : std::max(first.y, second.y)) +
-                    top};
+        // Folded, the card needs room for its biggest face; unfolded, for all of them in a row.
+        double x = 0, y = 0;
+        for (unsigned s = 0; s < count; ++s) {
+            const auto m = limits[s].minimum;
+            x = unfolded && !unfoldVertical ? x + std::ceil(m.x) : std::max(x, m.x);
+            y = unfolded && unfoldVertical ? y + std::ceil(m.y) : std::max(y, m.y);
+        }
+        if (unfolded)
+            (unfoldVertical ? y : x) += gap(unfoldVertical) * (count - 1);
+        return {x, y + top};
     }
     bool fits(CBox box) const {
-        for (unsigned s = 0; s < 2; ++s)
+        for (unsigned s = 0; s < count; ++s)
             for (unsigned i = 0; i < faces[s].size(); ++i) {
                 if (!faces[s][i])
                     return false;
@@ -338,10 +357,27 @@ struct Card {
             }
         return true;
     }
+    // Takes face s out, already emptied of its last app's target, and keeps
+    // the active face pointing at the same face where it can.
+    void removeFace(unsigned s) {
+        for (unsigned f = s; f + 1 < count; ++f) {
+            faces[f] = std::move(faces[f + 1]);
+            focused[f] = focused[f + 1];
+            vertical[f] = vertical[f + 1];
+            ratios[f] = std::move(ratios[f + 1]);
+        }
+        --count;
+        faces[count].clear();
+        ratios[count].clear();
+        focused[count] = {};
+        vertical[count] = false;
+        if (active > s || active >= count)
+            active = active == 0 ? 0 : active - 1;
+    }
     void visibility() {
         if (!alive || changing)
             return;
-        for (unsigned s = 0; s < 2; ++s)
+        for (unsigned s = 0; s < count; ++s)
             for (auto &ref : faces[s])
                 if (auto w = ref.lock()) {
                     const bool shown = unfolded || s == active;
@@ -357,8 +393,8 @@ struct Card {
         if (!alive || !floats())
             return;
         std::vector<PHLWINDOW> order;
-        for (unsigned s : {active ^ 1u, active})
-            for (auto &ref : faces[s])
+        for (unsigned step = 1; step <= count; ++step)
+            for (auto &ref : faces[(active + step) % count])
                 if (auto w = ref.lock(); w && w != focused[active].lock())
                     order.push_back(w);
         if (auto w = focused[active].lock())
@@ -503,7 +539,8 @@ bool inspect(uint64_t id, ContainerSnapshot *out) {
     out->y = box.y;
     out->width = box.w;
     out->height = box.h;
-    for (unsigned s = 0; s < 2; ++s) {
+    out->faces = c->count;
+    for (unsigned s = 0; s < c->count; ++s) {
         out->count[s] = c->faces[s].size();
         out->focused[s] = addr(c->focused[s].lock());
         out->vertical[s] = c->vertical[s];
@@ -516,7 +553,7 @@ bool inspect(uint64_t id, ContainerSnapshot *out) {
 }
 bool select(uint64_t id, uint32_t side, bool focus) {
     auto c = get(id);
-    if (!c || !c->valid() || side > 1)
+    if (!c || !c->valid() || side >= c->count)
         return false;
     c->active = side;
     c->current(c->focused[side].lock());
@@ -537,9 +574,17 @@ bool dissolve(uint64_t id) {
 bool attach(uint64_t id, uintptr_t address, uint32_t side, bool vertical) {
     auto c = get(id);
     auto w = resolve(address);
-    if (!c || !c->valid() || !supports(address) || side > 1 || c->faces[side].size() >= CONTAINER_MAX_PANES ||
-        w->m_workspace != c->group->m_target->workspace())
+    if (!c || !c->valid() || !supports(address) || side > c->count || side >= CONTAINER_MAX_FACES ||
+        c->faces[side].size() >= CONTAINER_MAX_PANES || w->m_workspace != c->group->m_target->workspace())
         return false;
+    // One past the last face starts a new face holding just this app.
+    const bool added = side == c->count;
+    if (added) {
+        c->faces[side].clear();
+        c->ratios[side].clear();
+        c->vertical[side] = false;
+        c->count++;
+    }
     auto oldRatios = c->ratios[side];
     auto oldVertical = c->vertical[side];
     c->faces[side].push_back(w);
@@ -563,6 +608,8 @@ bool attach(uint64_t id, uintptr_t address, uint32_t side, bool vertical) {
         c->faces[side].pop_back();
         c->ratios[side] = oldRatios;
         c->vertical[side] = oldVertical;
+        if (added)
+            c->count--;
         return false;
     }
     return c->keepFullscreen([&] {
@@ -590,8 +637,10 @@ bool release(uint64_t id, uintptr_t address) {
     auto s = c ? c->side(w) : std::nullopt;
     if (!s || !c->valid())
         return false;
-    if (c->faces[*s].size() == 1)
+    // The last app of a face takes the face with it; a card keeps at least two.
+    if (c->faces[*s].size() == 1 && c->count <= 2)
         return dissolve(id);
+    const bool drop = c->faces[*s].size() == 1;
     // The keyboard stays where it was: on the released app when it had it, so
     // the app just taken out is the one you are using, else where the user left it.
     const auto had = Desktop::focusState()->window();
@@ -599,14 +648,18 @@ bool release(uint64_t id, uintptr_t address) {
         c->changing = true;
         c->restore(w);
         c->group->remove(w);
-        const auto index = std::ranges::find(c->faces[*s], w) - c->faces[*s].begin();
-        c->faces[*s].erase(c->faces[*s].begin() + index);
-        c->ratios[*s].erase(c->ratios[*s].begin() + index);
-        double total = 0;
-        for (const auto weight : c->ratios[*s]) total += weight;
-        for (auto &weight : c->ratios[*s]) weight /= total;
-        if (c->focused[*s] == w)
-            c->focused[*s] = c->faces[*s][0];
+        if (drop) {
+            c->removeFace(*s);
+        } else {
+            const auto index = std::ranges::find(c->faces[*s], w) - c->faces[*s].begin();
+            c->faces[*s].erase(c->faces[*s].begin() + index);
+            c->ratios[*s].erase(c->ratios[*s].begin() + index);
+            double total = 0;
+            for (const auto weight : c->ratios[*s]) total += weight;
+            for (auto &weight : c->ratios[*s]) weight /= total;
+            if (c->focused[*s] == w)
+                c->focused[*s] = c->faces[*s][0];
+        }
         c->changing = false;
         c->refresh();
         select(id, c->active, false);
@@ -662,7 +715,7 @@ bool unfold(uint64_t id, bool value) {
 bool arrange(uint64_t id, uint32_t side, bool vertical, uint32_t count, const uintptr_t *windows,
              const double *ratios) {
     auto c = get(id);
-    if (!c || !c->valid() || side > 1 || count != c->faces[side].size() || !windows || !ratios)
+    if (!c || !c->valid() || side >= c->count || count != c->faces[side].size() || !windows || !ratios)
         return false;
     auto before = c->faces[side];
     auto old = c->ratios[side];
@@ -707,7 +760,8 @@ bool edit(uint64_t id, uintptr_t address, ContainerEdit op) {
     if (!side || !c->valid())
         return false;
     if (op == ContainerEdit::OtherSide) {
-        auto other = *side ^ 1;
+        // The next face round: the other one on a two-face card.
+        auto other = (*side + 1) % c->count;
         if (c->faces[*side].size() < 2 || c->faces[other].size() >= CONTAINER_MAX_PANES)
             return false;
         auto faces = c->faces;
@@ -898,7 +952,10 @@ namespace {
 // when an app is gone, appears twice or has no share of its face.
 bool propose(const ContainerSnapshot &snapshot, Card &proposed) {
     proposed.unfolded = snapshot.unfolded;
-    for (unsigned s = 0; s < 2; ++s) {
+    if (snapshot.faces < 2 || snapshot.faces > CONTAINER_MAX_FACES)
+        return false;
+    proposed.count = snapshot.faces;
+    for (unsigned s = 0; s < proposed.count; ++s) {
         if (!snapshot.count[s] || snapshot.count[s] > CONTAINER_MAX_PANES)
             return false;
         proposed.vertical[s] = snapshot.vertical[s];
@@ -957,7 +1014,7 @@ std::string fitProblem(const ContainerSnapshot &snapshot, bool floating) {
     PHLWINDOW app;
     bool across = true;
     double worst = 0, needed = 0, own = 0;
-    for (unsigned s = 0; s < 2; ++s)
+    for (unsigned s = 0; s < proposed.count; ++s)
         for (unsigned i = 0; i < proposed.faces[s].size(); ++i) {
             const auto w = proposed.faces[s][i].lock();
             const double border = 2. * w->getRealBorderSize();
@@ -993,9 +1050,12 @@ uint64_t create(const ContainerSnapshot &snapshot, bool floating, bool focus) {
         return 0;
     auto c = std::make_shared<Card>();
     c->initial = {snapshot.x, snapshot.y, snapshot.width, snapshot.height};
-    c->active = std::min(snapshot.active, 1u);
+    if (snapshot.faces < 2 || snapshot.faces > CONTAINER_MAX_FACES)
+        return 0;
+    c->count = snapshot.faces;
+    c->active = std::min(snapshot.active, c->count - 1);
     c->unfolded = snapshot.unfolded;
-    for (unsigned s = 0; s < 2; ++s) {
+    for (unsigned s = 0; s < c->count; ++s) {
         if (!snapshot.count[s] || snapshot.count[s] > CONTAINER_MAX_PANES)
             return 0;
         c->vertical[s] = snapshot.vertical[s];
@@ -1039,8 +1099,8 @@ uint64_t create(const ContainerSnapshot &snapshot, bool floating, bool focus) {
     if (front->m_isFloating != floating)
         g_layoutManager->changeFloatingMode(front->layoutTarget());
     c->group = CGroup::create({front});
-    for (auto &face : c->faces)
-        for (auto &ref : face) {
+    for (unsigned s = 0; s < c->count; ++s)
+        for (auto &ref : c->faces[s]) {
             auto w = ref.lock();
             if (w != front) {
                 if (!w->canBeGroupedInto(c->group)) {
@@ -1129,7 +1189,7 @@ PHLWINDOW windowWithin(const Desktop::CViewHitTester *self, const Vector2D &pos,
         if (c->side(found)) {
             if (!c->valid())
                 return found;
-            for (unsigned s = 0; s < 2; ++s)
+            for (unsigned s = 0; s < c->count; ++s)
                 for (auto &ref : c->faces[s])
                     if (auto w = ref.lock(); w && w != ignore && (c->unfolded || s == c->active) && w->acceptsInput() &&
                                              w->getWindowBoxUnified(properties).containsPoint(pos))

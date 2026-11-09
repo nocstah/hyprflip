@@ -7,8 +7,14 @@
 #include <map>
 #include <optional>
 #include <set>
+#include <string>
+#include "ContainerABI.hpp"
 
 namespace Hyprflip {
+// What a face is called: Front and Back, then Face 3 and Face 4.
+inline std::string faceName(unsigned side) {
+    return side == 0 ? "Front" : side == 1 ? "Back" : "Face " + std::to_string(side + 1);
+}
 struct CardFrameView {
     uint64_t id = 0;
     unsigned active = 0;
@@ -21,7 +27,8 @@ struct CardFrameView {
     // Line color between the apps of a fullscreen card.
     std::optional<CHyprColor> divider;
     double dividerWidth = 0;
-    unsigned count[2]{};
+    unsigned faces = 2;
+    unsigned count[CONTAINER_MAX_FACES]{};
     std::vector<PHLWINDOWREF> windows;
 };
 

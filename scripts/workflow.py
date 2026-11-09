@@ -351,7 +351,7 @@ class Hyprctl:
             if not (name in ('mark', 'pair', 'card', 'release', 'unpair', 'other_side', 'flip', 'unfold', 'floating', 'fullscreen') and not argument or
                     name == 'workspace' and re.fullmatch(r'[1-9][0-9]{0,9}', argument) and int(argument) <= 2147483647 or
                     name == 'other_side' and re.fullmatch(r'0x[0-9a-fA-F]+', argument) or
-                    name == 'attach' and argument in ('horizontal', 'vertical') or
+                    name == 'attach' and argument in ('horizontal', 'vertical', 'face') or
                     name == 'layout' and argument in ('horizontal', 'vertical', 'balance') or
                     name == 'arrange' and re.fullmatch(r'(horizontal|vertical)( 0x[0-9a-fA-F]+:[0-9.eE+-]+){1,5}', argument) or
                     name == 'replace' and re.fullmatch(r'0x[0-9a-fA-F]+ 0x[0-9a-fA-F]+', argument) or

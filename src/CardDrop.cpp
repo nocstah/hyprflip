@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include "CardDrop.hpp"
+#include "CardFrames.hpp"
 #include <algorithm>
 #include <cmath>
 #include <format>
@@ -135,7 +136,7 @@ std::vector<CardDrop::Target> CardDrop::targets(PHLWINDOW w) const {
             continue;
         target.hovered = target.zone.containsPoint(pos) &&
                          (!under || std::ranges::find(target.offer.members, under) != target.offer.members.end());
-        const std::string face = target.offer.side ? "Back" : "Front";
+        const std::string face = faceName(target.offer.side);
         target.text = target.offer.refusal.empty() ? "Drop to add to " + face : face + ": " + target.offer.refusal;
         if (target.hovered && target.offer.refusal.empty()) {
             target.preview = box;
