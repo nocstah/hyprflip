@@ -9,6 +9,8 @@ local names = {
     ["attach second side"]="pair", ["attach pane beside"]="attach_h",
     ["attach pane below"]="attach_v", ["release focused pane"]="release",
     ["attach app as a new face"]="attach_face",
+    ["go to face 1"]="face_1", ["go to face 2"]="face_2",
+    ["go to face 3"]="face_3", ["go to face 4"]="face_4",
     ["fullscreen the whole card"]="fullscreen", ["cancel pairing"]="cancel",
 }
 local entries, preferences = {}, {}

@@ -15,6 +15,12 @@ if hl.plugin.hyprflip and hl.plugin.hyprflip.attach then
     shortcuts.bind("SUPER + CTRL + ALT + V", run("attach", "vertical"), { description = "Hyprflip: attach pane below" })
     shortcuts.bind("SUPER + CTRL + ALT + E", run("release"), { description = "Hyprflip: release focused pane" })
     shortcuts.bind("SUPER + CTRL + ALT + N", run("attach", "face"), { description = "Hyprflip: attach app as a new face" })
+    if hl.plugin.hyprflip.face then
+        -- Straight to a face of the focused card, sliding past the ones between.
+        for n = 1, 4 do
+            shortcuts.bind("SUPER + CTRL + ALT + " .. n, run("face", n), { description = "Hyprflip: go to face " .. n })
+        end
+    end
     if hl.plugin.hyprflip.unfold then
         shortcuts.bind("SUPER + CTRL + ALT + O", run("unfold"), { description = "Hyprflip: unfold or fold both faces" })
     end

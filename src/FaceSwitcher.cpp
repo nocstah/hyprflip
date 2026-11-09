@@ -163,7 +163,7 @@ void FaceSwitcher::stage(eRenderStage stage) {
         tile.box = local(l.tiles[i].box);
         tile.selected = i == m_view->selected;
         tile.active = i == m_view->active;
-        const auto value = std::format("{}  {}{}", i + 1, faceName(i), tile.active ? "  ·  now" : "");
+        const auto value = std::format("{}  {}{}", i + 1, i < m_view->names.size() ? m_view->names[i] : faceName(i), tile.active ? "  ·  now" : "");
         const auto key = std::format("{}/{}/{}", value, scale, *font);
         auto it = m_textures.find(key);
         if (it == m_textures.end())

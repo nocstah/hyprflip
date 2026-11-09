@@ -106,5 +106,30 @@ try:
     ok('a long swipe right resists past one face and settles on the face before')
     before = card()['active']; assert swipe(*[(-120, 40)] * 6, end='cancel') == before
     ok('a cancelled swipe returns to its face')
+
+    # Jumping straight to a face, and face names.
+    ipc.call('eval', 'hl.config({plugin={hyprflip={duration_ms=0}}})')
+    assert ipc.action('face 3').startswith('ok'); wait(lambda: card()['active'] == 2, 'face 3')
+    ipc.call('eval', 'hl.plugin.hyprflip.face(1)'); wait(lambda: card()['active'] == 0, 'Lua face(1)')
+    try:
+        ipc.action('face 7'); raise AssertionError('face 7 was accepted')
+    except w.SetupError as error:
+        assert 'from 1 to 4' in str(error), error
+    ok('face <n> and the Lua face(n) go straight to a face, and refuse one out of range')
+
+    tricky = 'Mail & Chat 50%'
+    assert ipc.action('name ' + tricky).startswith('ok')
+    assert ipc.action(f"card {card()['id']} name 3 Code").startswith('ok')
+    assert card()['names'] == [tricky, '', 'Code', ''], card()['names']
+    import card_restore
+    line = card_restore.describe(card())
+    assert ipc.action(f"card {card()['id']} ungroup").startswith('ok'); wait(lambda: not st()['containers'], 'ungroup')
+    assert ipc.batch(['hyprflip restore quiet ' + line])[-1].startswith('ok'), line
+    assert card()['names'] == [tricky, '', 'Code', ''], card()['names']
+    assert ipc.action(f"card {card()['id']} name 3").startswith('ok') and card()['names'][2] == ''
+    try:
+        ipc.action('name ' + 'x' * 60); raise AssertionError('a long name was accepted')
+    except w.SetupError: pass
+    ok('faces take names, keep them through the description updates restore from, and clear them')
 finally:
     for p in procs: p.terminate()

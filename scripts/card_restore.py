@@ -6,7 +6,7 @@ import re
 import subprocess
 
 # workflow.py sits beside this file in every checkout install.py runs from.
-from workflow import Unattended
+from workflow import Unattended, name_words
 
 # A window address as Hyprland prints it: the only text a focus or a step here carries.
 ADDRESS = re.compile(r"0x[0-9a-fA-F]{1,16}")
@@ -32,7 +32,9 @@ def describe(card):
     words = ["front", "back"] + ["face"] * (len(card["faces"]) - 2)
     for name, face, layout in zip(words, card["faces"], card["layouts"]):
         line += [name, layout["axis"], layout["focused"]] + [f"{w}:{r:.12g}" for w, r in zip(face, layout["ratios"])]
+    line += name_words(card.get("names") or [])
     return " ".join(line)
+
 
 
 def active(ctl):

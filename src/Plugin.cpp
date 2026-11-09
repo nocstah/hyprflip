@@ -20,6 +20,7 @@ int pair(lua_State *L) { return invoke(L, "pair"); }
 int card(lua_State *L) { return invoke(L, "card"); }
 int flip(lua_State *L) { return invoke(L, "flip"); }
 int peek(lua_State *L) { return invoke(L, "peek"); }
+int face(lua_State *L) { return invoke(L, ("face " + std::to_string(luaL_checkinteger(L, 1))).c_str()); }
 int endPeek(lua_State *L) { return invoke(L, "peek end"); }
 int preview(lua_State *L) { return invoke(L, (std::string("preview ") + luaL_checkstring(L, 1)).c_str()); }
 int unpair(lua_State *L) { return invoke(L, "unpair"); }
@@ -152,6 +153,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE h) {
                                    {"card", card},
                                    {"flip", flip},
                                    {"peek", peek},
+                                   {"face", face},
                                    {"end_peek", endPeek},
                                    {"preview", preview},
                                    {"unpair", unpair},

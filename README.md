@@ -225,6 +225,7 @@ Hold **Super + Ctrl + Alt** for the following keys:
 | **H** / **V** | Add the marked app beside or below the focused pane | Guided helper |
 | **E** | Take the focused app out of its card | Guided helper |
 | **N** | Add the marked app as a new face, up to four | Guided helper |
+| **1**–**4** | Go straight to that face of the focused card | Guided helper |
 
 Use **K** when you remember the app, and **L** when you want a saved arrangement.
 Results in K show the workspace, face and whether the app is hidden.

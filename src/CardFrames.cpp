@@ -341,7 +341,7 @@ std::vector<CardFrames::Layout> CardFrames::layouts() const {
         if (buttonWidth < 38 || layout.box.h < height + 12)
             continue;
         layout.button = {layout.box.x + layout.box.w - buttonWidth - 4, layout.box.y, buttonWidth, controlHeight};
-        layout.text = layout.view.unfolded ? (layout.view.faces > 2 ? "All faces" : "Both sides") : faceName(layout.view.active);
+        layout.text = layout.view.unfolded ? (layout.view.faces > 2 ? "All faces" : "Both sides") : faceName(layout.view.active, layout.view.names[layout.view.active]);
         if (!layout.view.unfolded && layout.view.faces > 2)
             layout.text += " of " + std::to_string(layout.view.faces);
         unsigned count = layout.view.count[layout.view.active];

@@ -15,6 +15,7 @@ namespace Hyprflip {
 inline std::string faceName(unsigned side) {
     return side == 0 ? "Front" : side == 1 ? "Back" : "Face " + std::to_string(side + 1);
 }
+inline std::string faceName(unsigned side, const std::string &name) { return name.empty() ? faceName(side) : name; }
 struct CardFrameView {
     uint64_t id = 0;
     unsigned active = 0;
@@ -29,6 +30,7 @@ struct CardFrameView {
     double dividerWidth = 0;
     unsigned faces = 2;
     unsigned count[CONTAINER_MAX_FACES]{};
+    std::array<std::string, CONTAINER_MAX_FACES> names;
     std::vector<PHLWINDOWREF> windows;
 };
 

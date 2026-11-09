@@ -69,6 +69,9 @@ class Controller {
         unsigned count = 2;
         unsigned active = 0;
         unsigned next() const { return (active + 1) % count; }
+        // A face's own name, or Front, Back, Face 3 and Face 4.
+        std::array<std::string, CONTAINER_MAX_FACES> names;
+        std::string name(unsigned face) const { return faceName(face, names[face]); }
         bool unfolded = false;
         CBox geometry;
         bool contains(PHLWINDOW window) const;
@@ -136,6 +139,9 @@ class Controller {
     // back to the last face, and holding it opens the face switcher.
     Result flipKey();
     Result switcherAction(const std::string &arguments);
+    // Turns the focused card straight to face n, counted from 1.
+    Result showFace(const std::string &number);
+    Result nameFace(Pair &pair, unsigned face, const std::string &name);
     void openSwitcher();
     void commitSwitch();
     void cancelSwitch();

@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <bit>
 #include <charconv>
+#include <cstring>
 #include <dlfcn.h>
 #include <filesystem>
 #include <unistd.h>
@@ -361,6 +362,8 @@ std::optional<Controller::State> Controller::state(const Pair &p) const {
             snapshot.active >= snapshot.faces)
             return std::nullopt;
         result.count = snapshot.faces;
+        for (unsigned s = 0; s < snapshot.faces; ++s)
+            result.names[s] = std::string(snapshot.names[s], strnlen(snapshot.names[s], CONTAINER_NAME_SIZE));
         for (unsigned s = 0; s < snapshot.faces; ++s) {
             if (snapshot.count[s] < 1 || snapshot.count[s] > CONTAINER_MAX_PANES)
                 return std::nullopt;
@@ -475,6 +478,7 @@ std::vector<CardFrameView> Controller::frameViews() const {
         view.unfolded = s->unfolded;
         view.animating = m_turn && m_turn->pairID == pair.id;
         view.faces = s->count;
+        view.names = s->names;
         for (unsigned side = 0; side < s->count; ++side) view.count[side] = s->faces[side].size();
         view.windows = s->windows();
         result.push_back(std::move(view));
@@ -503,6 +507,7 @@ std::vector<CardDropOffer> Controller::dropOffers(PHLWINDOW window) const {
             CardDropOffer offer;
             offer.id = p.id;
             offer.side = side;
+            offer.name = s->names[side];
             offer.count = s->faces[side].size();
             offer.vertical = s->vertical[side];
             offer.members = s->windows();
@@ -922,6 +927,31 @@ Result Controller::peek() {
     if (result.ok) m_peek = std::move(pending);
     return result;
 }
+Result Controller::showFace(const std::string &number) {
+    unsigned face = 0;
+    const auto [end, error] = std::from_chars(number.data(), number.data() + number.size(), face);
+    if (error != std::errc{} || end != number.data() + number.size() || !face || face > CONTAINER_MAX_FACES)
+        return {false, "Use face <number>, from 1 to " + std::to_string(CONTAINER_MAX_FACES) + "."};
+    auto p = find(Desktop::focusState()->window());
+    const auto s = p && valid(*p) ? state(*p) : std::nullopt;
+    if (!s) return {false, "Focus a card first."};
+    if (face > s->count) return {false, "This card has " + std::to_string(s->count) + " faces."};
+    cancelSwitch();
+    if (face - 1 == s->active && !(m_turn && m_turn->pairID == p->id)) return {true, "ok"};
+    return flip(std::nullopt, p, face - 1);
+}
+Result Controller::nameFace(Pair &pair, unsigned face, const std::string &raw) {
+    // Trim, keep it on one line, and keep it short enough for the header.
+    std::string name;
+    for (char c : raw) name += (c == '\n' || c == '\r' || c == '\t') ? ' ' : c;
+    const auto first = name.find_first_not_of(' '), last = name.find_last_not_of(' ');
+    name = first == std::string::npos ? "" : name.substr(first, last - first + 1);
+    if (name.size() > CONTAINER_NAME_SIZE - 1) return {false, "A face name has at most 47 characters."};
+    if (pair.providerEpoch != FloatingCards::EPOCH || !FloatingCards::name(pair.containerID, face, name))
+        return {false, "This face could not be named."};
+    m_frames->refresh(true);
+    return {true, "ok"};
+}
 void Controller::remember(Pair &pair, unsigned shown, unsigned next) {
     if (shown != next) pair.lastFace = shown;
 }
@@ -1070,6 +1100,7 @@ void Controller::openSwitcher() {
     if (!monitor) return cancelSwitch();
     SwitcherView view{.pairID = p->id, .monitor = monitor, .card = s->geometry, .count = s->count,
                       .active = s->active, .selected = m_switch->selected};
+    for (unsigned face = 0; face < s->count; ++face) view.names.push_back(s->name(face));
     view.captured = s->geometry.copy().translate(-monitor->m_position).scale(monitor->m_scale);
     // Hidden faces do not draw, so the previews are snapshots taken now.
     if (g_pHyprRenderer->glBackend() &&
@@ -1554,7 +1585,7 @@ Result Controller::show(Pair &p, unsigned side) {
     return {true, "ok"};
 }
 Result Controller::cardAction(const std::string &arguments) {
-    static constexpr auto USAGE = "Use card <id> flip, card <id> show <front|back|face number>, card <id> ungroup or "
+    static constexpr auto USAGE = "Use card <id> flip, card <id> show <front|back|face number>, card <id> name <n> [name], card <id> ungroup or "
                                   "card <id> workspace <number|name:<name>|special[:<name>]> [silent], or "
                                   "card <id or 0x address> hold|leave|reveal [speed from 0.05 to 4].";
     std::istringstream input(arguments);
@@ -1620,6 +1651,17 @@ Result Controller::cardAction(const std::string &arguments) {
         return {false, "No card has id " + text + ". Read the ids from status."};
     if (verb == "flip" && !(input >> extra))
         return flip(std::nullopt, p);
+    if (verb == "name" && input >> value) {
+        // card <id> name <face from 1> [name...]; no name gives back the default.
+        unsigned face = 0;
+        const auto [last, bad] = std::from_chars(value.data(), value.data() + value.size(), face);
+        const auto s = state(*p);
+        if (bad != std::errc{} || last != value.data() + value.size() || !face || !s || face > s->count)
+            return {false, "Use card <id> name <face number from 1 to " + std::to_string(s ? s->count : 2) + "> [name]."};
+        std::string rest;
+        std::getline(input, rest);
+        return nameFace(*p, face - 1, rest);
+    }
     if (verb == "show" && input >> value && !(input >> extra)) {
         // front and back, or a face by its number from 1: front is 1, back is 2.
         unsigned face = 0;
@@ -1938,7 +1980,26 @@ Result Controller::restore(const std::string &arguments) {
         const auto [end, error] = std::from_chars(text.data() + 2, text.data() + text.size(), value, 16);
         return error == std::errc{} && end == text.data() + text.size();
     };
+    std::array<std::string, CONTAINER_MAX_FACES> names;
     while (input >> token) {
+        if (token == "name") {
+            // name <face from 1> <name, percent-encoded so it is one word>
+            unsigned face = 0;
+            std::string encoded, decoded;
+            if (!(input >> face >> encoded) || !face || face > CONTAINER_MAX_FACES)
+                return {false, "Use name <face> <percent-encoded name> in a card description."};
+            for (size_t i = 0; i < encoded.size(); ++i) {
+                unsigned byte = 0;
+                if (encoded[i] == '%' && i + 2 < encoded.size() &&
+                    std::from_chars(encoded.data() + i + 1, encoded.data() + i + 3, byte, 16).ec == std::errc{}) {
+                    decoded += char(byte);
+                    i += 2;
+                } else
+                    decoded += encoded[i];
+            }
+            names[face - 1] = decoded.substr(0, CONTAINER_NAME_SIZE - 1);
+            continue;
+        }
         if (token == "front" || token == "back" || token == "face") {
             if (token == "face" && faces >= CONTAINER_MAX_FACES)
                 return {false, "A card has at most " + std::to_string(CONTAINER_MAX_FACES) + " faces."};
@@ -1964,6 +2025,8 @@ Result Controller::restore(const std::string &arguments) {
         snapshot.ratios[side][snapshot.count[side]++] = ratio;
     }
     snapshot.faces = faces;
+    for (unsigned s = 0; s < faces; ++s)
+        names[s].copy(snapshot.names[s], CONTAINER_NAME_SIZE - 1);
     for (unsigned s = 0; s < faces; ++s)
         if (!snapshot.count[s])
             return {false, faces > 2 ? "Every face of a card needs an app." : "A card needs apps on both faces."};
@@ -2036,6 +2099,7 @@ Result Controller::floating() {
         snapshot.count[side] = current->faces[side].size();
         snapshot.focused[side] = reinterpret_cast<uintptr_t>(current->focused[side].get());
         snapshot.vertical[side] = current->vertical[side];
+        current->names[side].copy(snapshot.names[side], CONTAINER_NAME_SIZE - 1);
         for (unsigned i = 0; i < current->faces[side].size(); ++i) {
             snapshot.windows[side][i] = reinterpret_cast<uintptr_t>(current->faces[side][i].get());
             snapshot.ratios[side][i] = current->ratios[side][i] > 0 ? current->ratios[side][i] : 1. / current->faces[side].size();
@@ -2132,6 +2196,14 @@ Result Controller::dispatch(const std::string &action) {
             return {true, "ok"};
         }
         return {false, "Use swipe begin <fingers>, move <dx> [ms], end or cancel."};
+    }
+    if (action.starts_with("face "))
+        return showFace(action.substr(5));
+    if (action == "name" || action.starts_with("name ")) {
+        auto p = find(Desktop::focusState()->window());
+        const auto s = p && valid(*p) ? state(*p) : std::nullopt;
+        if (!s || !p->containerID) return {false, "Focus a card to name the face it shows."};
+        return nameFace(*p, s->active, action.size() > 5 ? action.substr(5) : "");
     }
     if (action == "switcher" || action.starts_with("switcher "))
         return switcherAction(action.size() > 9 ? action.substr(9) : "");
@@ -2293,6 +2365,8 @@ std::string Controller::status() {
             }
             json += ']';
         }
+        json += "],\"names\":[";
+        for (unsigned side = 0; side < s->count; ++side) json += (side ? "," : "") + quote(s->names[side]);
         json += "],\"native_group\":" + std::string(p.providerEpoch == FloatingCards::EPOCH ? "true" : "false") +
                 ",\"fullscreen\":" + std::string(std::ranges::any_of(s->windows(), [](const auto &w) { return Fullscreen::controller()->isFullscreen(w.lock()); }) ? "true" : "false") + ",\"floating\":" + std::string(s->focused[s->active]->m_isFloating ? "true" : "false");
         const auto space = s->focused[s->active]->m_workspace;

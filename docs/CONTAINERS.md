@@ -146,6 +146,15 @@ flick moves one face. `plugin:hyprflip:swipe_fingers` changes the number of
 fingers, and 0 turns the swipe off; elsewhere on the screen the same swipe
 still does whatever Hyprland is set to do.
 
+**Super+Ctrl+Alt+1** to **4** go straight to that face, sliding past the
+faces between; `hyprctl hyprflip face <n>` does the same from scripts.
+
+Faces can be named, say Mail or Code, in place of Front, Back, Face 3 and
+Face 4: **Name this face…** in Edit card names the face shown, and
+`card <id> name <n> [name]` names any face; leaving the name empty gives the
+default back. The name shows in the card header, the switcher and the drop
+target, and saved cards, updates and `restore` keep it.
+
 Scripts use `hyprctl hyprflip switcher
 open|step [back]|pick <n>|commit|cancel|last`.
 

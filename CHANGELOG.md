@@ -19,6 +19,16 @@
   a quick flick moves one face. `plugin:hyprflip:swipe_fingers` (3; 0 turns it
   off) sets the fingers. The swipe is taken only over such a card, so a
   workspace swipe elsewhere keeps working. `status` reports `swiping`.
+- Super+Ctrl+Alt+1 to 4 go straight to a face of the focused card, sliding
+  past the faces between (`hyprctl hyprflip face <n>`, Lua
+  `hyprflip.face(n)`). They are listed in the shortcut settings.
+- Faces can have names, such as Mail or Code, in place of Front, Back, Face 3
+  and Face 4: **Name this face…** in Edit card, `hyprctl hyprflip name
+  [text]` for the focused face, or `card <id> name <n> [text]`; an empty name
+  gives back the default. Names show in the card header, the switcher and
+  the drop target, and are kept by saved cards, updates and `restore`
+  (`name <n> <percent-encoded name>`). `status` lists `names` per card. The
+  internal container interface moves to version 9.
 - `hyprctl hyprflip switcher open|step [back]|pick <n>|commit|cancel|last`
   drives the same switcher; `last` goes to the last face. `status` reports
   `switcher` and `switch_pending`.

@@ -116,7 +116,8 @@ def snapshot(ipc):
                 layouts = card.get('layouts') or []
                 for index, face in enumerate(faces):
                     layout = (layouts[index] if index < len(layouts) else None) or {}
-                    face_rows.append({'index': index, 'name': w.face_name(index), 'axis': layout.get('axis', 'horizontal'),
+                    own = (card.get('names') or [])[index] if index < len(card.get('names') or []) else ''
+                    face_rows.append({'index': index, 'name': own or w.face_name(index), 'axis': layout.get('axis', 'horizontal'),
                                       'panes': [{'address': a, 'label': w.app_name(windows[a]),
                                                  'title': w.clean(windows[a].get('title', '')), 'icon': icon(windows[a])} for a in face]})
                 cards.append({'id': card['id'], 'kind': kind, 'key': f"{kind}:{card['id']}",

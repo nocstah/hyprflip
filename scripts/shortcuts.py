@@ -23,6 +23,10 @@ DEFINITIONS = (
     ('attach_v', 'Add app below', 'V', 'attach pane below'),
     ('release', 'Remove focused app', 'E', 'release focused pane'),
     ('attach_face', 'Add app as new face', 'N', 'attach app as a new face'),
+    ('face_1', 'Go to face 1', '1', 'go to face 1'),
+    ('face_2', 'Go to face 2', '2', 'go to face 2'),
+    ('face_3', 'Go to face 3', '3', 'go to face 3'),
+    ('face_4', 'Go to face 4', '4', 'go to face 4'),
     ('fullscreen', 'Fullscreen whole card', 'Return', 'fullscreen the whole card'),
     ('cancel', 'Cancel pairing', 'Escape', 'cancel pairing'),
 )

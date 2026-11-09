@@ -14,6 +14,7 @@ struct CardDropOffer {
     CBox box;
     std::vector<PHLWINDOWREF> members;
     std::string refusal;
+    std::string name; // the face's own name, if it has one
 };
 
 // Observes native window moves; never takes over the compositor's drag state.

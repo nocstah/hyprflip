@@ -23,6 +23,7 @@ struct SwitcherView {
     CBox captured;            // the card in the snapshots, in monitor pixels
     unsigned count = 0, active = 0, selected = 0;
     std::vector<SP<Render::IFramebuffer>> faces; // a snapshot per face; may be empty
+    std::vector<std::string> names;
 };
 class FaceSwitcher {
   public:

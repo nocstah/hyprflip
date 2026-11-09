@@ -21,6 +21,7 @@ import sys
 import tempfile
 import time
 import unicodedata
+import urllib.parse
 import uuid
 
 
@@ -65,6 +66,15 @@ def mark_address(ipc, address):
 def face_name(index):
     """A card face as the core names it: Front, Back, Face 3, Face 4."""
     return ('Front', 'Back')[index] if index in (0, 1) else f'Face {index + 1}'
+
+
+def name_words(names):
+    """Face names for the core's restore line: name <face from 1> <percent-encoded name>."""
+    words = []
+    for index, name in enumerate(names):
+        if isinstance(name, str) and name.strip():
+            words += ["name", str(index + 1), urllib.parse.quote(name.strip()[:47], safe="")]
+    return words
 
 
 def restore_words(count):
@@ -1077,7 +1087,8 @@ class Setup:
                 raise SetupError('The card action is unavailable.')
             line += (f' {side} {face["axis"]} {face["windows"][face["focus"]]}' +
                      ''.join(f' {a}:{r:.12g}' for a, r in zip(face['windows'], face['ratios'])))
-        return line
+        names = name_words([face.get('name', '') for face in arrangement['faces']])
+        return line + (' ' + ' '.join(names) if names else '')
 
     def box(self, arrangement, floating, workspace, windows):
         """A tiled card's box is its front app's tile there, or else the screen's free area; a floating
@@ -1146,7 +1157,8 @@ class Setup:
                                if r and len(r) == len(members)), [1 / len(members)] * len(members))
                 focus = members.index(layout['focused']) if layout.get('focused') in members else 0
                 arrangement['faces'].append({'windows': list(members), 'ratios': ratios,
-                                             'axis': saved.get('axis') or layout.get('axis', 'horizontal'), 'focus': focus})
+                                             'axis': saved.get('axis') or layout.get('axis', 'horizontal'), 'focus': focus,
+                                             'name': saved.get('name', '')})
             reply = self.ipc.batch([f'hyprflip card {card["id"]} ungroup'])[-1]
             if not reply.startswith('ok'):
                 raise SetupError(clean(reply.removeprefix('error: '), 240) or 'The card could not be floated again.')
@@ -1206,6 +1218,7 @@ class EditPlan:
     removal: str | None = None
     transition: str | None = None
     order: tuple[str, ...] | None = None
+    name: str | None = None
 
 
 class Edit(Setup):
@@ -1324,6 +1337,10 @@ class Edit(Setup):
                        for c in window_choices([windows[anchor]] + [windows[a] for a in face if a != anchor])]
             prompt = (f'Edit card: this side is full ({limit} apps)' if len(face) >= limit
                       else f'Edit card: {len(face)} apps on this side')
+        if 'names' in card:
+            own = (card['names'] + [''] * count)[side]
+            choices.append(Choice('name_face', 'Name this face…',
+                                  f'Now “{own}”' if own else f'Instead of {face_name(side)} · Shown in the header and switcher'))
         if state.get('transition_modes'):
             label = TRANSITIONS.get(state.get('transition'), ('Flip', ''))[0]
             choices.append(Choice('transition', 'Transition', label + ' · All cards'))
@@ -1383,6 +1400,11 @@ class Edit(Setup):
             if result is None: raise Cancelled()
             return result
         if action == 'saved': return Saved(self.ipc, self.menu).prepare_restore()
+        if action == 'name_face':
+            text = self.menu.input(f'Name {face_name(side)} (leave empty for {face_name(side)})')
+            text = ' '.join((text or '').replace(';', ',').split())
+            if len(text) > 47: raise SetupError('Use a face name of at most 47 characters.')
+            return EditPlan(anchor, plan.card, deepcopy(members), action, name=text)
         if action == 'transition':
             mode = self.choose_transition(plan)
             return EditPlan(anchor, plan.card, deepcopy(members), action, transition=mode)
@@ -1434,6 +1456,12 @@ class Edit(Setup):
             raise SetupError('Update the container plugins before changing the layout.')
         if plan.action == 'transition':
             self.ipc.save_transition(plan.transition)
+            return
+        if plan.action == 'name_face':
+            side = next((i for i, f in enumerate(plan.card['faces']) if plan.anchor in f), None)
+            if side is None: raise SetupError('The card changed. Open Edit card again.')
+            reply = self.ipc.action(f'card {plan.card["id"]} name {side + 1} {plan.name or ""}'.rstrip())
+            if not reply.startswith('ok'): raise SetupError(clean(reply.removeprefix('error: '), 240))
             return
         if plan.action == 'add_face':
             if 'container_max_faces' not in state:
@@ -1741,6 +1769,7 @@ class RecipeStore:
                 raise ValueError()
             if any(type(r) not in (float, int) or not math.isfinite(r) or not 0 < r <= 1 for r in ratios): raise ValueError()
             if abs(sum(ratios) - 1) > .001: raise ValueError()
+            if 'name' in face and (not isinstance(face['name'], str) or len(face['name']) > 47): raise ValueError()
             for app in apps:
                 for key in ('class', 'initial_class', 'title', 'label'):
                     if not isinstance(app[key], str) or len(app[key]) > 512: raise ValueError()
@@ -1839,6 +1868,8 @@ class Saved(Setup):
             layouts = card.get('layouts') or []
             if layout := (layouts[side] if side < len(layouts) else None):
                 faces[-1].update(axis=layout['axis'], ratios=list(layout['ratios']), focus=members.index(layout['focused']))
+            names = card.get('names') or []
+            if side < len(names) and names[side]: faces[-1]['name'] = names[side]
         recipe = {'faces': faces, 'active': card['active']}
         if card.get('floating'): recipe['floating'] = True
         return recipe
@@ -2990,7 +3021,7 @@ class Unattended(Saved):
                 nearest = min(present, key=lambda j: (abs(j - face['focus']), j))
                 arrangement['faces'].append({'windows': [chosen[indexes[j]] for j in present], 'axis': face['axis'],
                                              'ratios': [face['ratios'][j] / share for j in present],
-                                             'focus': present.index(nearest)})
+                                             'focus': present.index(nearest), 'name': face.get('name', '')})
             ours = {a for face in arrangement['faces'] for a in face['windows']}
 
             # 6. The commit, under the lock again. A signal stops it until the batch goes out.
