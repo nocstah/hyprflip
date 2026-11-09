@@ -59,57 +59,27 @@ float field(vec2 p) {
     return mix(mix(hash(cell), hash(cell + vec2(1.0, 0.0)), f.x),
                mix(hash(cell + vec2(0.0, 1.0)), hash(cell + vec2(1.0, 1.0)), f.x), f.y);
 }
-vec4 carouselFace(int i, vec2 p) {
+vec4 faceAt(int i, vec2 p) {
     if (i == 0) return sampleFace(source, p);
     if (i == 1) return sampleFace(secondSource, p);
     if (i == 2) return sampleFace(thirdSource, p);
     return sampleFace(fourthSource, p);
 }
-// The faces stand side by side on a wide ring that turns about a vertical
-// axis far behind the card. At rest the front face fills the card's
-// rectangle. While it turns the camera eases back, so the neighbours come
-// into view beside it and the strip slides round to the next face.
-vec4 carousel(float e) {
-    const float PI = 3.14159265;
-    const float spacing = 0.7; // radians between neighbouring faces
+// The faces stand in a row with a small gap, and the card slides along it:
+// the next face comes in from the right, the one before from the left. A
+// face more than one step away slides past the ones between. Offsets wrap the
+// short way round; a face wraps only while it is outside the card.
+vec4 strip(float e) {
+    const float gap = 0.04;
     float n = float(faceCount);
-    float radius = 1.12 * aspect / sin(spacing * 0.5);
-    float eye = 3.0 * aspect;
-    float lift = sin(PI * e);
-    float zoom = 1.0 - 0.4 * lift;
-    vec3 origin = vec3(0.0, 0.0, eye);
-    vec3 ray = vec3(local.x * aspect / zoom, local.y / zoom, -eye);
     float position = spinFrom + e * travel;
-    vec4 nearest = vec4(0.0), second = vec4(0.0);
-    float nearDepth = 1e9, secondDepth = 1e9;
+    vec4 result = vec4(0.0);
     for (int i = 0; i < 4; ++i) {
-        // Each face's place relative to the front, the short way round;
-        // a face fades out before it wraps to the other side.
+        if (i >= faceCount) break;
         float offset = mod(float(i) - position + n * 0.5, n) - n * 0.5;
-        float phi = offset * spacing;
-        vec3 normal = vec3(sin(phi), 0.0, cos(phi));
-        vec3 tangent = vec3(cos(phi), 0.0, -sin(phi));
-        vec3 centre = vec3(0.0, 0.0, -radius) + radius * normal;
-        float facing = dot(ray, normal);
-        float depth = dot(centre - origin, normal) / min(facing, -0.00001);
-        vec3 hit = origin + depth * ray - centre;
-        vec2 p = vec2(dot(hit, tangent) / aspect, hit.y);
-        // Derivatives come before any divergent branch.
-        vec2 edge = clamp((1.0 - abs(p)) / max(fwidth(p), vec2(0.00001)) + 0.5, 0.0, 1.0);
-        if (i >= faceCount || facing >= -0.00001 || edge.x * edge.y <= 0.0) continue;
-        vec4 c = carouselFace(i, clamp(p, -1.0, 1.0)) * (edge.x * edge.y);
-        c.rgb *= 1.0 - 0.3 * min(abs(offset), 1.0);
-        c *= 1.0 - smoothstep(n * 0.5 - 0.6, n * 0.5 - 0.05, abs(offset));
-        if (depth < nearDepth) {
-            second = nearest; secondDepth = nearDepth;
-            nearest = c; nearDepth = depth;
-        } else if (depth < secondDepth) {
-            second = c; secondDepth = depth;
-        }
+        vec2 p = local - vec2(offset * (2.0 + gap), 0.0);
+        if (abs(p.x) <= 1.0) result += faceAt(i, p);
     }
-    vec4 result = nearest + second * (1.0 - nearest.a);
-    // Soften the card's sides while turning, where neighbours pass.
-    result *= mix(1.0, smoothstep(1.0, 0.86, abs(local.x)), lift);
     return result;
 }
 void main() {
@@ -121,7 +91,7 @@ void main() {
         if (any(greaterThan(abs(local), vec2(1.0)))) return;
         float t = clamp(progress, 0.0, 1.0);
         float e = t * t * t * (t * (6.0 * t - 15.0) + 10.0);
-        if (mode == 6) { color = carousel(e); return; }
+        if (mode == 7) { color = strip(e); return; }
         if (t <= 0.0) { color = sampleFace(source, local); return; }
         if (t >= 1.0) { color = sampleFace(secondSource, local); return; }
         if (mode == 2) {

@@ -93,7 +93,7 @@ class Controller {
         unsigned target = 1;
         unsigned face(bool second) const { return second ? target : source; }
         float sign() const { return target > source ? 1.F : -1.F; }
-        // A carousel's turn in faces: signed, the short way round.
+        // A slide along the faces, in faces: signed, the short way round.
         static float travel(unsigned from, unsigned to, unsigned count) {
             const unsigned ahead = (to + count - from) % count;
             return ahead * 2 <= count ? float(ahead) : -float(count - ahead);

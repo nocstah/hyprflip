@@ -1139,7 +1139,7 @@ Result Controller::flip(std::optional<Transition> preview, Pair *target, std::op
     auto pose = std::make_shared<Pose>();
     pose->mode = mode;
     pose->direction = goal > source ? 1.F : -1.F;
-    pose->count = mode == Transition::Carousel ? s->count : 2;
+    pose->count = mode == Transition::Strip ? s->count : 2;
     pose->from = float(source);
     pose->travel = travel;
     pose->leader = s->focused[source];
@@ -1149,9 +1149,9 @@ Result Controller::flip(std::optional<Transition> preview, Pair *target, std::op
         pose->containerBox = s->geometry;
     m_turn.emplace(Turn{p->id,
                         source,
-                        // A longer spin takes a little longer, not proportionally.
+                        // A longer slide takes a little longer, not proportionally.
                         Timeline(double(m_settings.duration->value()) *
-                                 (mode == Transition::Carousel ? 1.15 + .3 * (std::abs(travel) - 1) : 1.0)),
+                                 (mode == Transition::Strip ? 1.0 + .3 * (std::abs(travel) - 1) : 1.0)),
                         Clock::now(),
                         pose,
                         {},
@@ -1200,7 +1200,7 @@ Result Controller::flip(std::optional<Transition> preview, Pair *target, std::op
         auto monitor = a->m_monitor.lock();
         // The peak capture budget is one native-sized RGBA buffer per face,
         // one temporary pane and one reusable transition output.
-        const bool ring = mode == Transition::Carousel;
+        const bool ring = mode == Transition::Strip;
         const unsigned captures = ring ? s->count : 2;
         if (!monitor || !g_pHyprRenderer->glBackend() ||
             monitor->m_pixelSize.x * monitor->m_pixelSize.y * 4 * (captures + 2) > 256 * 1024 * 1024) {
@@ -1983,7 +1983,7 @@ Result Controller::dispatch(const std::string &action) {
         return switcherAction(action.size() > 9 ? action.substr(9) : "");
     if (action.starts_with("preview ")) {
         auto mode = transition(action.substr(8));
-        if (!mode) return {false, "Choose flip, vertical, slide, fade, dissolve, portal, carousel or instant."};
+        if (!mode) return {false, "Choose flip, vertical, slide, fade, dissolve, portal or instant."};
         return flip(mode);
     }
     if (action == "unpair")
@@ -2085,7 +2085,7 @@ std::string Controller::status() {
     reconcile();
     std::string json = "{\"version\":\"" HYPRFLIP_VERSION "\",\"marked\":" + address(m_marked.lock()) +
                        ",\"transition\":" + quote(std::string(name(transition(m_settings.transition->value()).value_or(Transition::Flip)))) +
-                       ",\"transition_modes\":[\"flip\",\"vertical\",\"slide\",\"fade\",\"dissolve\",\"portal\",\"carousel\",\"instant\"]" +
+                       ",\"transition_modes\":[\"flip\",\"vertical\",\"slide\",\"fade\",\"dissolve\",\"portal\",\"instant\"]" +
                        ",\"capture_ms\":" + std::format("{}", m_captureMs) +
                        ",\"card_frame\":" + (m_settings.cardFrame->value() ? "true" : "false") +
                        ",\"card_gap\":" + std::to_string(m_settings.cardGap->value()) +

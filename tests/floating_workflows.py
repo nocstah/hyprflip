@@ -118,7 +118,7 @@ try:
     ipc.focus(b)
     passed('focusing or flipping a floating card raises every app of both faces above other floating windows')
 
-    for mode in ('flip','vertical','slide','fade','dissolve','portal','carousel'):
+    for mode in ('flip','vertical','slide','fade','dissolve','portal'):
         ipc.call('eval',f'hl.config({{animations={{enabled=true}},plugin={{hyprflip={{duration_ms=120,transition="{mode}"}}}}}})')
         source=card()['active'];ipc.action('flip');wait(lambda:not ipc.status()['animating'])
         assert card()['active']==1-source;visible()

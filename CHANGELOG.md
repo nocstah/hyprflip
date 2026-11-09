@@ -2,11 +2,11 @@
 
 ## Unreleased
 
-- Cards with three or more faces spin round a carousel instead of flipping:
-  the card eases back, the faces slide round side by side and the next one
-  comes to the front. Two-face cards keep the flip. `carousel` is also a
-  transition of its own (`plugin:hyprflip:transition`), for two-face cards too;
-  slide, fade, dissolve, portal and instant are kept on every card.
+- Cards with three or more faces slide sideways instead of flipping: the faces
+  stand in a row, the next comes in from the right and the one before from
+  the left, and a face further away slides past the ones between. Two-face
+  cards keep the transition chosen; flip, vertical and slide all slide on
+  bigger cards, while fade, dissolve, portal and instant are kept.
 - Face switcher. On a card with three or more faces, a tap of the flip key
   goes back to the last face shown. Holding it shows a strip of face
   previews: press the key again (or Tab, the arrow keys) to step, a digit

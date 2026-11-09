@@ -109,10 +109,10 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE h) {
                                                     SIntValueOptions{.min = 0, .max = 2000}));
     settings.enabled = config(makeConfigValue<Bool>("plugin:hyprflip:enabled", "Animate flips", true));
     settings.transition = config(makeConfigValue<String>("plugin:hyprflip:transition",
-        "Card transition: flip, vertical, slide, fade, dissolve, portal, carousel or instant", "flip",
+        "Card transition: flip, vertical, slide, fade, dissolve, portal or instant", "flip",
         SStringValueOptions{.validator = [](const std::string &value) -> std::expected<void, std::string> {
             if (Hyprflip::transition(value)) return {};
-            return std::unexpected("Choose flip, vertical, slide, fade, dissolve, portal, carousel or instant");
+            return std::unexpected("Choose flip, vertical, slide, fade, dissolve, portal or instant");
         }}));
     settings.switcher = config(makeConfigValue<Bool>("plugin:hyprflip:switcher",
         "Hold the flip key on a card with three or more faces to pick a face; a tap goes back to the last face", true));

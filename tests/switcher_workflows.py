@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""The face switcher and the carousel, in a disposable compositor with only the core loaded.
+"""The face switcher and the face slide, in a disposable compositor with only the core loaded.
 
-Cards with three or more faces spin round a carousel instead of flipping. Holding
+Cards with three or more faces slide sideways along their faces instead of flipping. Holding
 the flip key shows a strip of face previews; the same switcher is driven here
 through hyprctl hyprflip switcher open|step|pick|cancel|last, since simulated
 keys do not reach bindings in a nested session.

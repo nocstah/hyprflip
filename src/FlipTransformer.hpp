@@ -10,8 +10,8 @@ struct Pose {
     Transition mode = Transition::Flip;
     float progress = 0, direction = 1;
     bool dirty = true;
-    // Two snapshots, source then target. A carousel keeps one per face,
-    // in face order, and spins from face `from` by `travel` faces.
+    // Two snapshots, source then target. A card sliding along three or more faces keeps one per face,
+    // in face order, and slides from face `from` by `travel` faces.
     std::array<SP<Render::IFramebuffer>, 4> faces;
     unsigned count = 2;
     float from = 0, travel = 1;

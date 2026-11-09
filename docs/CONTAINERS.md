@@ -128,7 +128,9 @@ card apart as before. Unfolding lays every face out side by side, each with at
 least the room its apps need. Saved cards, updates and `restore` keep every
 face; `restore` writes faces after the back as `face …`.
 
-A card with three or more faces spins round a carousel instead of flipping.
+A card with three or more faces slides sideways instead of flipping: the faces
+stand in a row, the next one comes in from the right and the one before from
+the left, and a face further away slides past the ones between.
 A tap of the flip key goes back to the last face shown, so two faces in use
 are one tap apart. Hold the key to see every face: a strip of previews opens
 over the card after `switcher_delay_ms` (200 ms). Press the key again, Tab or
