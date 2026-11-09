@@ -2,6 +2,7 @@
 #include "ContainerABI.hpp"
 #include "CardFrames.hpp"
 #include "CardDrop.hpp"
+#include "FaceSwitcher.hpp"
 #include "FlipTransformer.hpp"
 #include "InputGuard.hpp"
 #include "Timeline.hpp"
@@ -16,8 +17,8 @@
 
 namespace Hyprflip {
 struct Settings {
-    SP<Config::Values::Int> duration, cardGap, fullscreenDivider;
-    SP<Config::Values::Bool> enabled, notifications, cardFrame, dragToAdd, accentRing, desktopNotifications;
+    SP<Config::Values::Int> duration, cardGap, fullscreenDivider, switcherDelay;
+    SP<Config::Values::Bool> switcher, enabled, notifications, cardFrame, dragToAdd, accentRing, desktopNotifications;
     SP<Config::Values::Float> perspective, retreat;
     SP<Config::Values::String> transition, accentColor, dividerColor;
 };
@@ -55,6 +56,9 @@ class Controller {
         bool previousLock = false;
         uint64_t containerID = 0, providerEpoch = 0;
         bool frame = false;
+        // The face shown before the current one: a tap of the flip key on a
+        // card with three or more faces goes back to it.
+        std::optional<unsigned> lastFace;
     };
     struct State {
         // Faces 0..count-1; a plain pair always has two.
@@ -89,6 +93,11 @@ class Controller {
         unsigned target = 1;
         unsigned face(bool second) const { return second ? target : source; }
         float sign() const { return target > source ? 1.F : -1.F; }
+        // A carousel's turn in faces: signed, the short way round.
+        static float travel(unsigned from, unsigned to, unsigned count) {
+            const unsigned ahead = (to + count - from) % count;
+            return ahead * 2 <= count ? float(ahead) : -float(count - ahead);
+        }
     };
     Pair *find(PHLWINDOW window);
     Pair *find(uint64_t id);
@@ -113,9 +122,21 @@ class Controller {
     Result pair(bool multiApp = false);
     Result adopt(const std::string &front, const std::string &back);
     // A card addressed by its id (target) turns without taking the focus.
-    Result flip(std::optional<Transition> preview = std::nullopt, Pair *target = nullptr);
+    // `to` picks a face; by default the card turns to the next one round.
+    Result flip(std::optional<Transition> preview = std::nullopt, Pair *target = nullptr,
+                std::optional<unsigned> to = std::nullopt);
     Result show(Pair &pair, unsigned side);
     Result cardAction(const std::string &arguments);
+    // The flip key: a tap turns; on a card with three or more faces it goes
+    // back to the last face, and holding it opens the face switcher.
+    Result flipKey();
+    Result switcherAction(const std::string &arguments);
+    void openSwitcher();
+    void commitSwitch();
+    void cancelSwitch();
+    bool switchHeld() const;
+    bool switcherKey(const IKeyboard::SKeyEvent &key);
+    void remember(Pair &pair, unsigned shown, unsigned next);
     Result peek();
     Result endPeek();
     bool canReturnPeek() const;
@@ -159,6 +180,17 @@ class Controller {
         std::vector<PHLWINDOWREF> windows;
     };
     std::optional<Peek> m_peek;
+    struct Switch {
+        uint64_t pairID;
+        std::optional<uint32_t> key; // the flip key while it is down; none from IPC
+        unsigned selected, count;
+        bool open = false, scripted = false;
+    };
+    std::optional<Switch> m_switch;
+    std::unique_ptr<FaceSwitcher> m_switcher;
+    SP<CEventLoopTimer> m_switchTimer;
+    UP<SEventLoopDoLaterLock> m_switchLater;
+    bool m_eatSwitchRelease = false;
     std::shared_ptr<FlipShader> m_shader;
     std::unique_ptr<CardFrames> m_frames;
     PHLMONITORREF m_renderingMonitor;

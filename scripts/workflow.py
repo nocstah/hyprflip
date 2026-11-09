@@ -141,6 +141,7 @@ TRANSITIONS = {
     'fade': ('Fade', 'Blend faces gently'),
     'dissolve': ('Dissolve', 'Experimental · Reveal in soft fragments'),
     'portal': ('Portal', 'Experimental · Reveal from the centre'),
+    'carousel': ('Carousel', 'Spin round the faces · cards with 3+ faces always spin'),
     'instant': ('Instant', 'Switch without motion'),
 }
 

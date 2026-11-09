@@ -31,6 +31,11 @@ in vec2 screenUV;
 out vec4 color;
 uniform sampler2D source;
 uniform sampler2D secondSource;
+uniform sampler2D thirdSource;
+uniform sampler2D fourthSource;
+uniform int faceCount;
+uniform float spinFrom;
+uniform float travel;
 uniform sampler2D backdrop;
 uniform int useBackdrop;
 uniform vec4 pane; // this window's own rectangle in card coordinates: min, max
@@ -54,6 +59,59 @@ float field(vec2 p) {
     return mix(mix(hash(cell), hash(cell + vec2(1.0, 0.0)), f.x),
                mix(hash(cell + vec2(0.0, 1.0)), hash(cell + vec2(1.0, 1.0)), f.x), f.y);
 }
+vec4 carouselFace(int i, vec2 p) {
+    if (i == 0) return sampleFace(source, p);
+    if (i == 1) return sampleFace(secondSource, p);
+    if (i == 2) return sampleFace(thirdSource, p);
+    return sampleFace(fourthSource, p);
+}
+// The faces stand side by side on a wide ring that turns about a vertical
+// axis far behind the card. At rest the front face fills the card's
+// rectangle. While it turns the camera eases back, so the neighbours come
+// into view beside it and the strip slides round to the next face.
+vec4 carousel(float e) {
+    const float PI = 3.14159265;
+    const float spacing = 0.7; // radians between neighbouring faces
+    float n = float(faceCount);
+    float radius = 1.12 * aspect / sin(spacing * 0.5);
+    float eye = 3.0 * aspect;
+    float lift = sin(PI * e);
+    float zoom = 1.0 - 0.4 * lift;
+    vec3 origin = vec3(0.0, 0.0, eye);
+    vec3 ray = vec3(local.x * aspect / zoom, local.y / zoom, -eye);
+    float position = spinFrom + e * travel;
+    vec4 nearest = vec4(0.0), second = vec4(0.0);
+    float nearDepth = 1e9, secondDepth = 1e9;
+    for (int i = 0; i < 4; ++i) {
+        // Each face's place relative to the front, the short way round;
+        // a face fades out before it wraps to the other side.
+        float offset = mod(float(i) - position + n * 0.5, n) - n * 0.5;
+        float phi = offset * spacing;
+        vec3 normal = vec3(sin(phi), 0.0, cos(phi));
+        vec3 tangent = vec3(cos(phi), 0.0, -sin(phi));
+        vec3 centre = vec3(0.0, 0.0, -radius) + radius * normal;
+        float facing = dot(ray, normal);
+        float depth = dot(centre - origin, normal) / min(facing, -0.00001);
+        vec3 hit = origin + depth * ray - centre;
+        vec2 p = vec2(dot(hit, tangent) / aspect, hit.y);
+        // Derivatives come before any divergent branch.
+        vec2 edge = clamp((1.0 - abs(p)) / max(fwidth(p), vec2(0.00001)) + 0.5, 0.0, 1.0);
+        if (i >= faceCount || facing >= -0.00001 || edge.x * edge.y <= 0.0) continue;
+        vec4 c = carouselFace(i, clamp(p, -1.0, 1.0)) * (edge.x * edge.y);
+        c.rgb *= 1.0 - 0.3 * min(abs(offset), 1.0);
+        c *= 1.0 - smoothstep(n * 0.5 - 0.6, n * 0.5 - 0.05, abs(offset));
+        if (depth < nearDepth) {
+            second = nearest; secondDepth = nearDepth;
+            nearest = c; nearDepth = depth;
+        } else if (depth < secondDepth) {
+            second = c; secondDepth = depth;
+        }
+    }
+    vec4 result = nearest + second * (1.0 - nearest.a);
+    // Soften the card's sides while turning, where neighbours pass.
+    result *= mix(1.0, smoothstep(1.0, 0.86, abs(local.x)), lift);
+    return result;
+}
 void main() {
     if (mode == -1) { color = texture(source, screenUV); return; }
     // Blur matte for a snapshot transition: Hyprland blurs where red is 1.
@@ -63,6 +121,7 @@ void main() {
         if (any(greaterThan(abs(local), vec2(1.0)))) return;
         float t = clamp(progress, 0.0, 1.0);
         float e = t * t * t * (t * (6.0 * t - 15.0) + 10.0);
+        if (mode == 6) { color = carousel(e); return; }
         if (t <= 0.0) { color = sampleFace(source, local); return; }
         if (t >= 1.0) { color = sampleFace(secondSource, local); return; }
         if (mode == 2) {
@@ -122,6 +181,36 @@ void main() {
 }
 )glsl";
 
+constexpr const char *PREVIEW_VERTEX = R"glsl(#version 300 es
+precision highp float;
+uniform mat3 targetToClip;
+uniform mat3 sourceToClip;
+out vec2 unit;
+out vec2 uv;
+void main() {
+    const vec2 corners[6] = vec2[6](vec2(0, 0), vec2(1, 0), vec2(0, 1), vec2(0, 1), vec2(1, 0), vec2(1, 1));
+    unit = corners[gl_VertexID];
+    gl_Position = vec4((targetToClip * vec3(unit, 1.0)).xy, 0.0, 1.0);
+    uv = (sourceToClip * vec3(unit, 1.0)).xy * 0.5 + 0.5;
+}
+)glsl";
+constexpr const char *PREVIEW_FRAGMENT = R"glsl(#version 300 es
+precision highp float;
+in vec2 unit;
+in vec2 uv;
+out vec4 color;
+uniform sampler2D face;
+uniform float alpha;
+uniform vec2 size;
+uniform float radius;
+void main() {
+    vec2 p = abs(unit - 0.5) * size;
+    vec2 q = p - (size * 0.5 - vec2(radius));
+    float d = length(max(q, 0.0)) - radius;
+    float mask = clamp(0.5 - d, 0.0, 1.0);
+    color = texture(face, clamp(uv, 0.0, 1.0)) * (alpha * mask);
+}
+)glsl";
 GLuint compile(GLenum type, const char *source, std::string &error) {
     GLuint s = glCreateShader(type);
     glShaderSource(s, 1, &source, nullptr);
@@ -140,7 +229,7 @@ GLuint compile(GLenum type, const char *source, std::string &error) {
 
 // Restore real GL state, including bindings, so Hyprland's state caches remain valid.
 struct GLState {
-    GLint program, vao, activeTexture, texture[3], sampler[3], readFramebuffer;
+    GLint program, vao, activeTexture, texture[5], sampler[5], readFramebuffer;
     GLint blendSrcRGB, blendDstRGB, blendSrcAlpha, blendDstAlpha, blendEqRGB, blendEqAlpha;
     GLboolean blend, scissor, depth, stencil, cull, depthMask, colorMask[4];
     GLState() {
@@ -149,7 +238,7 @@ struct GLState {
         glGetBooleanv(GL_DEPTH_WRITEMASK, &depthMask);
         glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &vao);
         glGetIntegerv(GL_ACTIVE_TEXTURE, &activeTexture);
-        for (unsigned i = 0; i < 3; ++i) {
+        for (unsigned i = 0; i < 5; ++i) {
             glActiveTexture(GL_TEXTURE0 + i);
             glGetIntegerv(GL_TEXTURE_BINDING_2D, &texture[i]);
             glGetIntegerv(GL_SAMPLER_BINDING, &sampler[i]);
@@ -172,7 +261,7 @@ struct GLState {
         glBindFramebuffer(GL_READ_FRAMEBUFFER, readFramebuffer);
         glDepthMask(depthMask);
         glBindVertexArray(vao);
-        for (unsigned i = 0; i < 3; ++i) {
+        for (unsigned i = 0; i < 5; ++i) {
             glActiveTexture(GL_TEXTURE0 + i);
             glBindTexture(GL_TEXTURE_2D, texture[i]);
             glBindSampler(i, sampler[i]);
@@ -198,6 +287,8 @@ FlipShader::~FlipShader() {
         g_pHyprRenderer->glBackend()->makeEGLCurrent();
         if (program)
             glDeleteProgram(program);
+        if (previewProgram)
+            glDeleteProgram(previewProgram);
         if (vao)
             glDeleteVertexArrays(1, &vao);
     }
@@ -231,12 +322,40 @@ bool FlipShader::initialize(std::string &error) {
     }
     program = p;
     glGenVertexArrays(1, &vao);
+    GLuint pv = compile(GL_VERTEX_SHADER, PREVIEW_VERTEX, error);
+    GLuint pf = pv ? compile(GL_FRAGMENT_SHADER, PREVIEW_FRAGMENT, error) : 0;
+    if (pv && pf) {
+        previewProgram = glCreateProgram();
+        glAttachShader(previewProgram, pv);
+        glAttachShader(previewProgram, pf);
+        glLinkProgram(previewProgram);
+        glGetProgramiv(previewProgram, GL_LINK_STATUS, &ok);
+        if (!ok) {
+            glDeleteProgram(previewProgram);
+            previewProgram = 0;
+        }
+    }
+    if (pv) glDeleteShader(pv);
+    if (pf) glDeleteShader(pf);
+    if (previewProgram) {
+        previewTarget = glGetUniformLocation(previewProgram, "targetToClip");
+        previewSource = glGetUniformLocation(previewProgram, "sourceToClip");
+        previewTexture = glGetUniformLocation(previewProgram, "face");
+        previewAlpha = glGetUniformLocation(previewProgram, "alpha");
+        previewSize = glGetUniformLocation(previewProgram, "size");
+        previewRadius = glGetUniformLocation(previewProgram, "radius");
+    }
     matrix = glGetUniformLocation(p, "boxToClip");
     composite = glGetUniformLocation(p, "outputToClip");
     rotation = glGetUniformLocation(p, "rotation");
     perspective = glGetUniformLocation(p, "perspective");
     texture = glGetUniformLocation(p, "source");
     secondTexture = glGetUniformLocation(p, "secondSource");
+    thirdTexture = glGetUniformLocation(p, "thirdSource");
+    fourthTexture = glGetUniformLocation(p, "fourthSource");
+    faceCount = glGetUniformLocation(p, "faceCount");
+    from = glGetUniformLocation(p, "spinFrom");
+    travel = glGetUniformLocation(p, "travel");
     mode = glGetUniformLocation(p, "mode");
     progress = glGetUniformLocation(p, "progress");
     direction = glGetUniformLocation(p, "direction");
@@ -285,6 +404,36 @@ SP<Render::IFramebuffer> FlipShader::captureFace(const std::vector<PHLWINDOW> &w
         g_pHyprRenderer->endRender();
     }
     return face;
+}
+
+void FlipShader::drawPreview(const SP<Render::IFramebuffer> &face, CBox from, CBox to, float alpha, float radius) {
+    if (!previewProgram || !face || !face->getTexture())
+        return;
+    auto &render = g_pHyprRenderer->m_renderData;
+    const CBox size = to;
+    render.renderModif.applyToBox(from);
+    render.renderModif.applyToBox(to);
+    const auto target = g_pHyprRenderer->projectBoxToTarget(to, HYPRUTILS_TRANSFORM_NORMAL).copy().transpose();
+    const auto source = g_pHyprRenderer->projectBoxToTarget(from, HYPRUTILS_TRANSFORM_NORMAL).copy().transpose();
+    GLState state;
+    glEnable(GL_BLEND);
+    glBlendEquation(GL_FUNC_ADD);
+    glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_STENCIL_TEST);
+    glDisable(GL_CULL_FACE);
+    glUseProgram(previewProgram);
+    glBindVertexArray(vao);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, face->getTexture()->m_texID);
+    glBindSampler(0, 0);
+    glUniform1i(previewTexture, 0);
+    glUniform1f(previewAlpha, alpha);
+    glUniform2f(previewSize, size.w, size.h);
+    glUniform1f(previewRadius, radius);
+    glUniformMatrix3fv(previewTarget, 1, GL_FALSE, target.getMatrix().data());
+    glUniformMatrix3fv(previewSource, 1, GL_FALSE, source.getMatrix().data());
+    glDrawArrays(GL_TRIANGLES, 0, 6);
 }
 
 FlipTransformer::FlipTransformer(PHLWINDOW window, std::shared_ptr<Pose> pose, std::shared_ptr<FlipShader> shader, bool glass)
@@ -402,11 +551,20 @@ SP<Render::IFramebuffer> FlipTransformer::transform(SP<Render::IFramebuffer> in)
     glBindSampler(0, 0);
     glUniform1i(m_shader->texture, 0);
     if (snapshot) {
-        glActiveTexture(GL_TEXTURE1);
-        glBindTexture(GL_TEXTURE_2D, m_pose->faces[1]->getTexture()->m_texID);
-        glBindSampler(1, 0);
-        glUniform1i(m_shader->secondTexture, 1);
+        // Units 0, 1, 3 and 4 hold faces; unit 2 is the glass backdrop.
+        const std::array<std::pair<GLint, unsigned>, 3> more{
+            std::pair{m_shader->secondTexture, 1U}, {m_shader->thirdTexture, 3U}, {m_shader->fourthTexture, 4U}};
+        for (unsigned i = 0; i < more.size(); ++i) {
+            const auto &face = m_pose->faces[i + 1] ? m_pose->faces[i + 1] : m_pose->faces[0];
+            glActiveTexture(GL_TEXTURE0 + more[i].second);
+            glBindTexture(GL_TEXTURE_2D, face->getTexture()->m_texID);
+            glBindSampler(more[i].second, 0);
+            glUniform1i(more[i].first, more[i].second);
+        }
     }
+    glUniform1i(m_shader->faceCount, m_pose->count);
+    glUniform1f(m_shader->from, m_pose->from);
+    glUniform1f(m_shader->travel, m_pose->travel);
     const auto &blur = monitor->resources()->m_blurFB;
     const bool backdrop = m_glass && !snapshot && blur && blur->getTexture();
     if (backdrop) {

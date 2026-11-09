@@ -5,7 +5,7 @@ if hl.plugin.hyprflip and hl.plugin.hyprflip.preview then
     if file then
         local mode = (file:read("*l") or ""):match("^%s*(%a+)%s*$")
         file:close()
-        local allowed = {flip=true,vertical=true,slide=true,fade=true,dissolve=true,portal=true,instant=true}
+        local allowed = {flip=true,vertical=true,slide=true,fade=true,dissolve=true,portal=true,carousel=true,instant=true}
         if allowed[mode] then hl.config({plugin={hyprflip={transition=mode}}}) end
     end
     local duration_file = io.open(root .. "/hyprflip/duration_ms", "r")

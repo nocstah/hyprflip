@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased
+
+- Cards with three or more faces spin round a carousel instead of flipping:
+  the card eases back, the faces slide round side by side and the next one
+  comes to the front. Two-face cards keep the flip. `carousel` is also a
+  transition of its own (`plugin:hyprflip:transition`), for two-face cards too;
+  slide, fade, dissolve, portal and instant are kept on every card.
+- Face switcher. On a card with three or more faces, a tap of the flip key
+  goes back to the last face shown. Holding it shows a strip of face
+  previews: press the key again (or Tab, the arrow keys) to step, a digit
+  1–4 or a click to pick, Escape to put it away; letting go turns to the face
+  highlighted. `plugin:hyprflip:switcher` (on) and
+  `plugin:hyprflip:switcher_delay_ms` (200) control it. Flips from hyprctl,
+  scripts and the Flip button still turn to the next face.
+- `hyprctl hyprflip switcher open|step [back]|pick <n>|commit|cancel|last`
+  drives the same switcher; `last` goes to the last face. `status` reports
+  `switcher` and `switch_pending`.
+- Ending a peek on a card with three or more faces returns to the face it
+  started from, not the next one round.
+
 ## 0.3.0-rc.15 — 2026-11-09
 
 - Cards can have up to four faces. Mark an app and press Super+Ctrl+Alt+N

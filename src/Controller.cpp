@@ -33,6 +33,7 @@
 #include <hyprland/src/render/decorations/IHyprWindowDecoration.hpp>
 #include <limits>
 #include <cctype>
+#include <linux/input-event-codes.h>
 #include <sstream>
 
 namespace Hyprflip {
@@ -123,6 +124,14 @@ Controller::Controller(HANDLE handle, Settings settings)
         finish();
     }, nullptr);
     g_pEventLoopManager->addTimer(m_timer);
+    m_switcher = std::make_unique<FaceSwitcher>(m_shader);
+    m_switchTimer = makeShared<CEventLoopTimer>(std::nullopt, [this](SP<CEventLoopTimer>, void *) {
+        // Still held after the delay: show the faces. Released already: a tap.
+        if (!m_switch || m_switch->open) return;
+        if (m_switch->scripted || switchHeld()) openSwitcher();
+        else commitSwitch();
+    }, nullptr);
+    g_pEventLoopManager->addTimer(m_switchTimer);
     FloatingCards::install(handle);
     m_frames = std::make_unique<CardFrames>([this]() { return frameViews(); }, [this](uint64_t id) {
         // A button is a click on release. Leave the input dispatch stack before
@@ -190,6 +199,7 @@ Controller::Controller(HANDLE handle, Settings settings)
     }));
     m_listeners.emplace_back(e.workspace.active.listen([this](PHLWORKSPACE) {
         if (!m_mutating) {
+            cancelSwitch();
             m_peek.reset();
             finish();
         }
@@ -205,6 +215,23 @@ Controller::Controller(HANDLE handle, Settings settings)
     m_listeners.emplace_back(g_pSessionLockManager->m_events.lock.listen([this]() { m_peek.reset(); finish(false); }));
     m_listeners.emplace_back(
         e.input.mouse.button.listen([this](const IPointer::SButtonEvent &event, Event::SCallbackInfo &info) {
+            if (m_eatSwitchRelease && event.state == WL_POINTER_BUTTON_STATE_RELEASED) {
+                m_eatSwitchRelease = false;
+                info.cancelled = true;
+                return;
+            }
+            if (m_switch && m_switch->open && event.state == WL_POINTER_BUTTON_STATE_PRESSED) {
+                // A click on a face picks it; anywhere else puts the switcher away.
+                info.cancelled = true;
+                m_eatSwitchRelease = true;
+                const auto face = m_switcher->hit(g_pInputManager->getMouseCoordsInternal());
+                if (face && event.button == BTN_LEFT) {
+                    m_switch->selected = *face;
+                    commitSwitch();
+                } else
+                    cancelSwitch();
+                return;
+            }
             if (!m_frames->button(event, info)) settleInput();
         }));
     m_listeners.emplace_back(
@@ -214,7 +241,11 @@ Controller::Controller(HANDLE handle, Settings settings)
     m_listeners.emplace_back(
         e.input.tablet.tip.listen([this](const CTablet::STipEvent &, Event::SCallbackInfo &) { settleInput(); }));
     m_listeners.emplace_back(
-        e.input.keyboard.key.listen([this](const IKeyboard::SKeyEvent &key, Event::SCallbackInfo &) {
+        e.input.keyboard.key.listen([this](const IKeyboard::SKeyEvent &key, Event::SCallbackInfo &info) {
+            if (m_switch && switcherKey(key)) {
+                info.cancelled = true;
+                return;
+            }
             // Observe the physical key release, even when modifiers were
             // released first. No release binding or background helper is needed.
             if (key.state == WL_KEYBOARD_KEY_STATE_RELEASED && m_peek && m_peek->triggerKey == key.keycode) {
@@ -234,6 +265,14 @@ Controller::Controller(HANDLE handle, Settings settings)
 Controller::~Controller() {
     m_stopping = true;
     m_peek.reset();
+    m_switch.reset();
+    m_switchLater.reset();
+    if (m_switchTimer) {
+        m_switchTimer->cancel();
+        g_pEventLoopManager->removeTimer(m_switchTimer);
+        m_switchTimer.reset();
+    }
+    m_switcher.reset();
     m_listeners.clear();
     Reveal::shutdown();
     m_reconcileLater.reset();
@@ -552,6 +591,12 @@ void Controller::onClose(PHLWINDOW w) {
 void Controller::onFocus(PHLWINDOW w) {
     if (m_mutating)
         return;
+    if (m_switch) {
+        // Focus leaving the card puts its switcher away.
+        const auto p = find(m_switch->pairID);
+        const auto s = p ? state(*p) : std::nullopt;
+        if (!s || !s->contains(w)) cancelSwitch();
+    }
     FloatingCards::focused(w);
     if (m_peek) {
         m_peek.reset();
@@ -622,8 +667,11 @@ void Controller::finish(bool applyDestination) {
     if (!m_turn)
         return;
     if (applyDestination)
-        if (auto p = find(m_turn->pairID))
-            select(*p, m_turn->face(m_turn->timeline.destination()));
+        if (auto p = find(m_turn->pairID)) {
+            const auto destination = m_turn->face(m_turn->timeline.destination());
+            remember(*p, m_turn->source, destination);
+            select(*p, destination);
+        }
     if (auto p = find(m_turn->pairID); p && p->containerID)
         if (auto api = provider(p->providerEpoch))
             api->animating(p->containerID, false);
@@ -856,6 +904,163 @@ Result Controller::peek() {
     if (result.ok) m_peek = std::move(pending);
     return result;
 }
+void Controller::remember(Pair &pair, unsigned shown, unsigned next) {
+    if (shown != next) pair.lastFace = shown;
+}
+bool Controller::switchHeld() const {
+    return m_switch && (m_switch->key || g_pInputManager->getModsFromAllKBs() != 0);
+}
+Result Controller::flipKey() {
+    auto p = find(Desktop::focusState()->window());
+    if (m_switch) {
+        if (p && p->id == m_switch->pairID) {
+            // Each further press steps along the faces.
+            if (m_eventKey) m_switch->key = m_eventKey;
+            m_switch->selected = (m_switch->selected + 1) % m_switch->count;
+            if (!m_switch->open) openSwitcher();
+            if (m_switch) m_switcher->select(m_switch->selected);
+            return {true, "ok"};
+        }
+        cancelSwitch();
+    }
+    if (!m_eventKey || !p || !valid(*p) || !m_settings.switcher->value() || (m_turn && m_turn->pairID == p->id))
+        return flip();
+    const auto s = state(*p);
+    if (!s || s->count <= 2 || s->unfolded)
+        return flip();
+    const unsigned last =
+        p->lastFace && *p->lastFace < s->count && *p->lastFace != s->active ? *p->lastFace : s->next();
+    m_switch = Switch{p->id, m_eventKey, last, s->count};
+    m_switchTimer->updateTimeout(std::chrono::milliseconds(std::max<int64_t>(1, m_settings.switcherDelay->value())));
+    return {true, "ok"};
+}
+bool Controller::switcherKey(const IKeyboard::SKeyEvent &key) {
+    if (key.state != WL_KEYBOARD_KEY_STATE_PRESSED) {
+        if (m_switch->key == key.keycode) m_switch->key.reset();
+        // Modifiers change after this event; decide once it has gone through.
+        if (!m_switch->scripted)
+            m_switchLater = g_pEventLoopManager->doLaterLock([this]() {
+                if (m_switch && !m_switch->scripted && !switchHeld()) commitSwitch();
+            });
+        return false;
+    }
+    if (m_switch->key == key.keycode) return false;
+    const auto step = [this](int by) {
+        m_switch->selected = (m_switch->selected + m_switch->count + by) % m_switch->count;
+        if (!m_switch->open) openSwitcher();
+        if (m_switch) m_switcher->select(m_switch->selected);
+    };
+    switch (key.keycode) {
+        case KEY_ESC: cancelSwitch(); return true;
+        case KEY_ENTER:
+        case KEY_KPENTER:
+        case KEY_SPACE: commitSwitch(); return true;
+        case KEY_LEFT:
+        case KEY_UP: step(-1); return true;
+        case KEY_RIGHT:
+        case KEY_DOWN:
+        case KEY_TAB: step(1); return true;
+        default: break;
+    }
+    if (key.keycode >= KEY_1 && key.keycode <= KEY_9) {
+        // Digits pick a face, and never reach bindings such as SUPER + 1.
+        const unsigned face = key.keycode - KEY_1;
+        if (face < m_switch->count) {
+            m_switch->selected = face;
+            commitSwitch();
+        }
+        return true;
+    }
+    return false;
+}
+void Controller::openSwitcher() {
+    auto p = m_switch ? find(m_switch->pairID) : nullptr;
+    auto s = p && valid(*p) ? state(*p) : std::nullopt;
+    if (!s || s->unfolded || s->count < 2) return cancelSwitch();
+    finish();
+    s = state(*p);
+    const auto monitor = s ? s->focused[s->active]->m_monitor.lock() : nullptr;
+    if (!monitor) return cancelSwitch();
+    SwitcherView view{.pairID = p->id, .monitor = monitor, .card = s->geometry, .count = s->count,
+                      .active = s->active, .selected = m_switch->selected};
+    view.captured = s->geometry.copy().translate(-monitor->m_position).scale(monitor->m_scale);
+    // Hidden faces do not draw, so the previews are snapshots taken now.
+    if (g_pHyprRenderer->glBackend() &&
+        monitor->m_pixelSize.x * monitor->m_pixelSize.y * 4 * (s->count + 1) <= 256 * 1024 * 1024) {
+        std::string error;
+        m_mutating = true;
+        for (unsigned face = 0; face < s->count; ++face) {
+            select(*p, face, false);
+            view.faces.push_back(m_shader->captureFace(s->faces[face], monitor, error));
+        }
+        select(*p, s->active);
+        m_mutating = false;
+    }
+    m_switch->open = true;
+    m_switcher->show(std::move(view));
+}
+void Controller::commitSwitch() {
+    if (!m_switch) return;
+    const auto chosen = *m_switch;
+    cancelSwitch();
+    auto p = find(chosen.pairID);
+    const auto s = p && valid(*p) ? state(*p) : std::nullopt;
+    if (!s || chosen.selected >= s->count || chosen.selected == s->active) return;
+    const auto result = flip(std::nullopt, p, chosen.selected);
+    if (!result.ok) notify(result);
+}
+void Controller::cancelSwitch() {
+    m_switch.reset();
+    if (m_switchTimer) m_switchTimer->updateTimeout(std::nullopt);
+    if (m_switcher) m_switcher->hide();
+}
+Result Controller::switcherAction(const std::string &arguments) {
+    // For scripts and tests: the same switcher, driven without holding keys.
+    std::istringstream input(arguments);
+    std::string verb, value, extra;
+    input >> verb;
+    if (verb == "open") {
+        auto p = find(Desktop::focusState()->window());
+        const auto s = p && valid(*p) ? state(*p) : std::nullopt;
+        if (!s || s->count <= 2) return {false, "Focus a card with three or more faces."};
+        if (s->unfolded) return {false, "Fold the card with O before switching faces."};
+        cancelSwitch();
+        const unsigned last =
+            p->lastFace && *p->lastFace < s->count && *p->lastFace != s->active ? *p->lastFace : s->next();
+        m_switch = Switch{p->id, std::nullopt, last, s->count, false, true};
+        openSwitcher();
+        return {m_switch.has_value(), m_switch ? "ok" : "The switcher could not open."};
+    }
+    if (verb == "last") {
+        // What a tap of the flip key does on a card with three or more faces.
+        auto p = find(Desktop::focusState()->window());
+        const auto s = p && valid(*p) ? state(*p) : std::nullopt;
+        if (!s) return {false, "Focus a card first."};
+        const unsigned last =
+            p->lastFace && *p->lastFace < s->count && *p->lastFace != s->active ? *p->lastFace : s->next();
+        return flip(std::nullopt, p, last);
+    }
+    if (!m_switch) return {false, "The face switcher is not open."};
+    if (verb == "step") {
+        int by = 1;
+        if (input >> value) by = value == "back" ? -1 : 1;
+        m_switch->selected = (m_switch->selected + m_switch->count + by) % m_switch->count;
+        m_switcher->select(m_switch->selected);
+        return {true, "ok"};
+    }
+    if (verb == "pick" && input >> value && !(input >> extra)) {
+        unsigned face = 0;
+        const auto [end, error] = std::from_chars(value.data(), value.data() + value.size(), face);
+        if (error != std::errc{} || end != value.data() + value.size() || !face || face > m_switch->count)
+            return {false, "Pick a face from 1 to " + std::to_string(m_switch->count) + "."};
+        m_switch->selected = face - 1;
+        commitSwitch();
+        return {true, "ok"};
+    }
+    if (verb == "commit") { commitSwitch(); return {true, "ok"}; }
+    if (verb == "cancel") { cancelSwitch(); return {true, "ok"}; }
+    return {false, "Use switcher open, step [back], pick <n>, commit, cancel or last."};
+}
 Result Controller::endPeek() {
     if (!m_peek) return {true, "ok"};
     const auto pending = *m_peek;
@@ -869,26 +1074,31 @@ Result Controller::endPeek() {
     }
     auto p = find(pending.pairID);
     auto s = p ? state(*p) : std::nullopt;
-    return s && s->active != pending.source ? flip() : Result{true, "ok"};
+    return s && s->active != pending.source ? flip(std::nullopt, p, pending.source) : Result{true, "ok"};
 }
-Result Controller::flip(std::optional<Transition> preview, Pair *target) {
+Result Controller::flip(std::optional<Transition> preview, Pair *target, std::optional<unsigned> to) {
     auto p = target ? target : find(Desktop::focusState()->window());
     if (!p || !valid(*p))
         return {false, "This window has no reverse side. Use mark, then pair."};
     if (inputBusy())
         return {false, "Finish the active grab or drag before flipping."};
-    if (m_turn && m_turn->pairID == p->id) {
+    if (m_turn && m_turn->pairID == p->id && (!to || *to == m_turn->source || *to == m_turn->target)) {
         m_turn->previewReturn = false;
         if (preview) return {false, "Wait for this turn to finish before previewing another transition."};
-        m_turn->timeline.reverse();
+        if (!to || *to != m_turn->face(m_turn->timeline.destination()))
+            m_turn->timeline.reverse();
         return {true, "ok"};
     }
     finish();
     auto s = state(*p);
     if (!s)
         return {false, "This card changed. Pair its windows again."};
-    const unsigned source = s->active, goal = s->next();
-    const auto mode = preview.value_or(transition(m_settings.transition->value()).value_or(Transition::Flip));
+    const unsigned source = s->active, goal = to.value_or(s->next());
+    if (goal >= s->count || goal == source)
+        return {false, goal == source ? "This face is already showing." : "This card has no such face."};
+    const auto mode = preview.value_or(
+        forFaces(transition(m_settings.transition->value()).value_or(Transition::Flip), s->count));
+    const float travel = Turn::travel(source, goal, s->count);
     if (s->unfolded) {
         if (preview) return {false, "Fold the card with O before previewing a transition."};
         for (const auto &ref : s->windows())
@@ -897,6 +1107,7 @@ Result Controller::flip(std::optional<Transition> preview, Pair *target) {
         auto api = provider(p->providerEpoch);
         m_mutating = true;
         const bool ok = api && api->unfold(p->containerID, false) && api->select(p->containerID, goal, true);
+        if (ok) remember(*p, source, goal);
         m_mutating = false;
         return {ok, ok ? "ok" : "The layout could not fold this card."};
     }
@@ -919,6 +1130,7 @@ Result Controller::flip(std::optional<Transition> preview, Pair *target) {
     if (!reason.empty() || mode == Transition::Instant) {
         // A preview of Instant leaves the card where it started.
         if (preview) return {true, "ok"};
+        remember(*p, source, goal);
         select(*p, goal);
         damage(*p);
         m_lastFallback = reason.empty() ? "" : "Instant switch: " + reason;
@@ -927,6 +1139,9 @@ Result Controller::flip(std::optional<Transition> preview, Pair *target) {
     auto pose = std::make_shared<Pose>();
     pose->mode = mode;
     pose->direction = goal > source ? 1.F : -1.F;
+    pose->count = mode == Transition::Carousel ? s->count : 2;
+    pose->from = float(source);
+    pose->travel = travel;
     pose->leader = s->focused[source];
     pose->perspective = m_settings.perspective->value();
     pose->retreat = m_settings.retreat->value();
@@ -934,7 +1149,9 @@ Result Controller::flip(std::optional<Transition> preview, Pair *target) {
         pose->containerBox = s->geometry;
     m_turn.emplace(Turn{p->id,
                         source,
-                        Timeline(double(m_settings.duration->value())),
+                        // A longer spin takes a little longer, not proportionally.
+                        Timeline(double(m_settings.duration->value()) *
+                                 (mode == Transition::Carousel ? 1.15 + .3 * (std::abs(travel) - 1) : 1.0)),
                         Clock::now(),
                         pose,
                         {},
@@ -981,24 +1198,26 @@ Result Controller::flip(std::optional<Transition> preview, Pair *target) {
     if (snapshots(mode)) {
         const auto started = Clock::now();
         auto monitor = a->m_monitor.lock();
-        // Four native-sized RGBA buffers is the peak capture budget: two
-        // faces, one temporary pane and one reusable transition output.
+        // The peak capture budget is one native-sized RGBA buffer per face,
+        // one temporary pane and one reusable transition output.
+        const bool ring = mode == Transition::Carousel;
+        const unsigned captures = ring ? s->count : 2;
         if (!monitor || !g_pHyprRenderer->glBackend() ||
-            monitor->m_pixelSize.x * monitor->m_pixelSize.y * 16 > 256 * 1024 * 1024) {
+            monitor->m_pixelSize.x * monitor->m_pixelSize.y * 4 * (captures + 2) > 256 * 1024 * 1024) {
             pose->error = "Snapshot transition exceeds the 256 MiB buffer budget";
         } else {
             m_mutating = true;
-            for (unsigned side = 0; side < 2; ++side) {
-                const auto face = m_turn->face(side);
+            for (unsigned slot = 0; slot < captures; ++slot) {
+                const auto face = ring ? slot : m_turn->face(slot);
                 select(*p, face, false);
-                pose->faces[side] = m_shader->captureFace(s->faces[face], monitor, pose->error);
-                if (!pose->faces[side]) break;
+                pose->faces[slot] = m_shader->captureFace(s->faces[face], monitor, pose->error);
+                if (!pose->faces[slot]) break;
             }
             select(*p, source);
             m_mutating = false;
         }
         m_captureMs = std::chrono::duration<double, std::milli>(Clock::now() - started).count();
-        if (!pose->faces[0] || !pose->faces[1]) {
+        if (std::any_of(pose->faces.begin(), pose->faces.begin() + captures, [](const auto &f) { return !f; })) {
             m_lastFallback = "Instant switch: " + pose->error;
             finish(!preview);
             return {true, "ok"};
@@ -1759,10 +1978,12 @@ Result Controller::dispatch(const std::string &action) {
         return adopt(front, back);
     }
     if (action == "flip")
-        return flip();
+        return flipKey();
+    if (action == "switcher" || action.starts_with("switcher "))
+        return switcherAction(action.size() > 9 ? action.substr(9) : "");
     if (action.starts_with("preview ")) {
         auto mode = transition(action.substr(8));
-        if (!mode) return {false, "Choose flip, vertical, slide, fade, dissolve, portal or instant."};
+        if (!mode) return {false, "Choose flip, vertical, slide, fade, dissolve, portal, carousel or instant."};
         return flip(mode);
     }
     if (action == "unpair")
@@ -1864,7 +2085,7 @@ std::string Controller::status() {
     reconcile();
     std::string json = "{\"version\":\"" HYPRFLIP_VERSION "\",\"marked\":" + address(m_marked.lock()) +
                        ",\"transition\":" + quote(std::string(name(transition(m_settings.transition->value()).value_or(Transition::Flip)))) +
-                       ",\"transition_modes\":[\"flip\",\"vertical\",\"slide\",\"fade\",\"dissolve\",\"portal\",\"instant\"]" +
+                       ",\"transition_modes\":[\"flip\",\"vertical\",\"slide\",\"fade\",\"dissolve\",\"portal\",\"carousel\",\"instant\"]" +
                        ",\"capture_ms\":" + std::format("{}", m_captureMs) +
                        ",\"card_frame\":" + (m_settings.cardFrame->value() ? "true" : "false") +
                        ",\"card_gap\":" + std::to_string(m_settings.cardGap->value()) +
@@ -1940,6 +2161,8 @@ std::string Controller::status() {
            ",\"native_cards\":true,\"floating_cards\":true,\"workspace_protection\":true,\"container_provider\":true" +
            ",\"layout_controls\":true,\"repair_cards\":true,\"card_ungroup\":true,\"pane_replacement\":true" +
            ",\"reveal\":true,\"container_max_panes\":" + std::to_string(CONTAINER_MAX_PANES) +
-           ",\"container_max_faces\":" + std::to_string(CONTAINER_MAX_FACES) + "}";
+           ",\"container_max_faces\":" + std::to_string(CONTAINER_MAX_FACES) +
+           ",\"switcher\":" + m_switcher->status() + ",\"switch_pending\":" +
+           (m_switch && !m_switch->open ? "true" : "false") + "}";
 }
 } // namespace Hyprflip

@@ -128,6 +128,17 @@ card apart as before. Unfolding lays every face out side by side, each with at
 least the room its apps need. Saved cards, updates and `restore` keep every
 face; `restore` writes faces after the back as `face …`.
 
+A card with three or more faces spins round a carousel instead of flipping.
+A tap of the flip key goes back to the last face shown, so two faces in use
+are one tap apart. Hold the key to see every face: a strip of previews opens
+over the card after `switcher_delay_ms` (200 ms). Press the key again, Tab or
+the arrow keys to step, a digit to pick, Escape to put it away, or click a
+preview; letting go of the key and its modifiers turns to the face
+highlighted. The previews are snapshots taken as the strip opens, since a
+hidden face does not draw. `plugin:hyprflip:switcher = false` makes every tap
+turn to the next face. Scripts use `hyprctl hyprflip switcher
+open|step [back]|pick <n>|commit|cancel|last`.
+
 ## Temporary unfold
 
 **Super+Ctrl+Alt+O** shows both faces in the card's existing tile. The wider axis

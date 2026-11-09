@@ -256,6 +256,7 @@ back; Use remembers the mode across reloads and restarts.
 | **Fade** | Fade between face snapshots |
 | **Dissolve** | Experimental patterned dissolve |
 | **Portal** | Experimental portal-style reveal |
+| **Carousel** | Faces spin round side by side. Cards with three or more faces use it in place of flip and vertical |
 | **Instant** | Switch without an animation |
 
 Snapshot effects hold app pixels only during the turn, then return to live
@@ -267,7 +268,7 @@ For custom Lua configurations:
 ```lua
 hl.config({ plugin = { hyprflip = {
     duration_ms = 420,    -- 0–2000; 0 switches instantly
-    transition = "flip", -- flip, vertical, slide, fade, dissolve, portal, instant
+    transition = "flip", -- flip, vertical, slide, fade, dissolve, portal, carousel, instant
     enabled = true,
     notifications = true,
     desktop_notifications = true, -- false: Hyprland's own notification bar
