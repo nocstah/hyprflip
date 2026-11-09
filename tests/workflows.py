@@ -20,7 +20,7 @@ config = root / 'hyprland.lua'
 original = config.read_text()
 processes, checks = [], []
 completed = False
-second_output = None
+second_output = third_output = None
 
 
 def ctl(*arguments, success=True):
@@ -88,15 +88,12 @@ def passed(name):
 
 try:
     assert not json.loads(ctl('-j', 'plugin', 'list')), 'Use a fresh nested fixture'
-    for source, name in ((project / 'build/hyprflip.so', 'hyprflip.so'),
-                         (project / 'build/containers/provider/upstream/libhy3.so', 'libhy3.so'),
-                         (args.hyprglass, 'hyprglass.so')):
+    for source, name in ((project / 'build/hyprflip.so', 'hyprflip.so'), (args.hyprglass, 'hyprglass.so')):
         shutil.copy2(source, root / name)
     core = (project / 'examples/hyprflip.lua').read_text().replace(
         'os.getenv("HOME") .. "/.local/lib/hyprflip/hyprflip.so"', json.dumps(str(root / 'hyprflip.so')))
-    trial = (project / 'examples/containers-trial.lua').read_text().replace(
-        'os.getenv("HOME") .. "/.local/lib/hyprflip/containers/libhy3.so"', json.dumps(str(root / 'libhy3.so'))
-    ).replace('local trial_workspace = "8"', 'local trial_workspace = nil')
+    # The pane shortcuts (attach, release, unfold) without the guided setup.
+    trial = (project / 'examples/pane-keys.lua').read_text()
     # Record callbacks without modifying the module under test.
     capture_binds = '''
 _G.hyprflip_test_binds = {}
@@ -113,7 +110,7 @@ local hl = setmetatable({ bind = record_bind }, { __index = hl })
                   'hl.config({input={resolve_binds_by_sym=true}})\n')
     config.write_text(configured)
     ctl('reload'); assert not ctl('configerrors')
-    wait(lambda: status()['container_provider'])
+    wait(lambda: status().get('native_cards'))
     assert any(m['name'] != 'FALLBACK' for m in json.loads(ctl('-j', 'monitors'))), 'The test session needs an output'
     ctl('dispatch', 'hl.dsp.focus({workspace=1})')
     a = next(w['address'] for w in clients().values() if w['class'] == 'hyprflip-front')
@@ -121,7 +118,7 @@ local hl = setmetatable({ bind = record_bind }, { __index = hl })
     for address in (a, b):
         ctl('dispatch', f'hl.dsp.window.move({{window="address:{address}",workspace="1",follow=false}})')
     c, outside = spawn('companion'), spawn('outside')
-    focus(a); action('mark'); focus(b); action('pair')
+    focus(a); action('mark'); focus(b); action('card')
     focus(c); action('mark'); focus(b); action('attach horizontal')
     members = {a, b, c}
     faces = card()['faces']
@@ -149,13 +146,13 @@ local hl = setmetatable({ bind = record_bind }, { __index = hl })
     bind('SUPER + SHIFT + code:10')
     passed('silent moves select a remaining source window; ordinary window shortcuts still work')
 
+    # Cards and every destination now share the dwindle layout, so there is no
+    # longer an unsupported layout to move to; only malformed requests remain.
     focus(c)
-    lua('hl.workspace_rule({workspace="4",layout="dwindle"})')
-    bind('SUPER + SHIFT + code:13')
-    assert all(clients()[w]['workspace']['id'] == 1 for w in members) and card()['faces'] == faces
     for invalid in ('workspace 0', 'workspace -1', 'workspace 2 silent junk', 'move sideways'):
         assert ctl('hyprflip', invalid, success=False).startswith('error:')
-    passed('unsupported destinations and invalid movement never detach a pane')
+    assert all(clients()[w]['workspace']['id'] == 1 for w in members) and card()['faces'] == faces
+    passed('invalid destinations and movement never detach a pane')
 
     before = card()['box']
     bind('SUPER + SHIFT + LEFT')
@@ -198,6 +195,8 @@ local hl = setmetatable({ bind = record_bind }, { __index = hl })
     focus(front_pane); bind('SUPER + CTRL + ALT + O')
     assert not card()['unfolded'] and card()['current'] == front_pane
     action('release')
+    # The released app keeps focus, so closing the active window closes it.
+    assert active() == front_pane, (active(), front_pane, card())
     ctl('dispatch','hl.dsp.window.close()')
     wait(lambda: front_pane not in clients())
     assert card()['faces'] == faces
@@ -221,7 +220,7 @@ local hl = setmetatable({ bind = record_bind }, { __index = hl })
     extra = next(m for m in json.loads(ctl('-j', 'monitors')) if m['name'] not in {m['name'] for m in monitors})
     second_output = extra['name']
     lua(f'hl.monitor({{output={json.dumps(second_output)},mode="1280x800@60",position="1280x0",scale=1.6,transform=1}})')
-    lua(f'hl.workspace_rule({{workspace="6",monitor={json.dumps(second_output)},layout="hy3"}})')
+    lua(f'hl.workspace_rule({{workspace="6",monitor={json.dumps(second_output)},layout="dwindle"}})')
     bind('SUPER + SHIFT + code:15')
     wait(lambda: all(clients()[w]['monitor'] == extra['id'] for w in members))
     assert workspace() == 6 and card()['faces'] == faces and active() == a
@@ -238,23 +237,37 @@ local hl = setmetatable({ bind = record_bind }, { __index = hl })
     passed('follow and silent moves cross scaled, rotated outputs without losing panes or stealing focus')
 
     ctl('dispatch', 'hl.dsp.window.fullscreen({action="set",layout_aware=false})')
-    assert ctl('hyprflip', 'unfold', success=False).startswith('error:')
+    # A dwindle card fullscreens as a whole and keeps unfolding there
+    # (docs/CONTAINERS.md), so unfold works while fullscreen.
+    wait(lambda: card()['fullscreen'])
+    action('unfold'); assert card()['unfolded'] and card()['fullscreen'], card(); visible()
+    action('unfold'); assert not card()['unfolded'] and card()['fullscreen'], card(); visible()
     bind('SUPER + SHIFT + code:10')
     assert all(clients()[w]['workspace']['id'] == 2 for w in members)
     ctl('dispatch', 'hl.dsp.window.fullscreen({action="unset",layout_aware=false})')
     action('unfold'); focus(c); action('release')
-    assert card()['unfolded'] and card()['faces'] == [[a], [b]]
+    assert card()['unfolded'] and card()['faces'] == [[a], [b]], (card(), [a, b, c])
     focus(b); action('unpair')
     assert not status()['containers']
     assert all(clients()[w]['acceptsInput'] for w in members)
-    passed('fullscreen guards movement; release and unpair work while unfolded')
+    passed('fullscreen cards unfold and move whole; release and unpair work while unfolded')
 
-    # Genuine application minimum sizes, not window-rule overrides.
+    # Genuine application minimum sizes, not window-rule overrides. A dwindle
+    # card checks them when it is made, so use an output that holds one
+    # 900 x 550 face but not two, and give both apps that minimum: the core
+    # unfolds by giving each app at least its minimum.
+    outputs = {m['name'] for m in json.loads(ctl('-j', 'monitors'))}
+    ctl('output', 'create', 'headless')
+    wait(lambda: len(json.loads(ctl('-j', 'monitors'))) > len(outputs))
+    third_output = next(m['name'] for m in json.loads(ctl('-j', 'monitors')) if m['name'] not in outputs)
+    lua(f'hl.monitor({{output={json.dumps(third_output)},mode="1280x800@60",position="3000x0",scale=1}})')
+    lua(f'hl.workspace_rule({{workspace="5",monitor={json.dumps(third_output)}}})')
+    ctl('dispatch', f'hl.dsp.focus({{monitor={json.dumps(third_output)}}})')
     ctl('dispatch', 'hl.dsp.focus({workspace=5})')
     large = spawn('large', gtk=True, minimum=(900, 550))
     time.sleep(.5)
-    partner = spawn('large-partner')
-    focus(large); action('mark'); focus(partner); action('pair')
+    partner = spawn('large-partner', gtk=True, minimum=(900, 550))
+    focus(large); action('mark'); focus(partner); action('card')
     assert len(status()['containers']) == 1
     assert ctl('hyprflip', 'unfold', success=False).startswith('error:')
     assert not status()['containers'][0]['unfolded'] and active() == large
@@ -264,8 +277,8 @@ local hl = setmetatable({ bind = record_bind }, { __index = hl })
     completed = True
 finally:
     try:
-        if second_output:
-            ctl('output', 'remove', second_output)
+        for name in (second_output, third_output):
+            if name: ctl('output', 'remove', name)
         config.write_text(original + f'\nhl.plugin.load({json.dumps(str(root / "hyprglass.so"))})\n')
         ctl('reload'); assert not ctl('configerrors')
         config.write_text(original)

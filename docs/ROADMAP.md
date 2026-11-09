@@ -7,7 +7,7 @@ another kind of group or requiring users to manage a layout tree.
 ## Current milestone
 
 - Native multi-app cards work directly on dwindle with the core and guided
-  helper. Hy3 is an optional backend for existing hy3 workspaces. A separate
+  helper; the core's own card engine builds them, tiled or floating. A separate
   `card` action enables editable cards while M/P keeps two-window pairing.
 - Normal workspace shortcuts move the entire card. Silent moves keep the user
   on the source workspace; an unsupported destination leaves the card intact.
@@ -17,8 +17,9 @@ another kind of group or requiring users to manage a layout tree.
 - Temporary unfold shows both faces in the card's footprint. Fold restores the
   two-sided view onto the face containing the focused application. Inner splits
   retain their proportions. Applications remain live and usable throughout.
-- An explicit experimental updater restores cards after replacing both libraries
-  and rolls back a failed load. The native installer refuses active containers.
+- The supplied installer keeps open dwindle and floating cards across a core
+  update, rebuilding them with their apps, sides, proportions and focus, and
+  rolls back a failed load.
 - Optional guided setup makes O create a card when the focused window
   has none. Choose one to five back apps in the native menu; cancellation leaves
   the windows unchanged. Creation finishes folded onto the front. Existing cards
@@ -34,9 +35,9 @@ another kind of group or requiring users to manage a layout tree.
   side explains its five-app limit; removing a side's only app is explicitly
   labeled Ungroup card.
 - Each side supports up to five apps in one row or column. A third app keeps the
-  split direction and relative sizes already chosen. H/V establish the first
-  split; no nested layout editor or additional shortcuts are introduced. The
-  matching core/provider and updater handle cards with up to ten apps.
+  split direction and relative sizes already chosen. `attach horizontal` and
+  `attach vertical` establish the first split; no nested layout editor or
+  additional shortcuts are introduced. Updates keep cards with up to ten apps.
   Unfold keeps rows of three or more apps above one another and columns beside one another,
   trying the alternate arrangement when application minimums need it.
 - The transition picker offers Flip, Vertical Flip, Slide, Fade, Instant and
@@ -51,22 +52,21 @@ another kind of group or requiring users to manage a layout tree.
 - Super+Ctrl+Alt+L opens the searchable card launcher, displaying the workspace
   of running cards. C → Manage card updates the saved layout without retyping
   its name; Rename and Duplicate change saved definitions atomically.
-- Beside, Stacked and Equal sizes, plus moving a pane to the other face, were
-  introduced in ABI 4. The current ABI 7 build keeps both faces populated with
-  five apps maximum on each face. Refused changes
+- Beside, Stacked and Equal sizes, plus moving a pane to the other face, keep
+  both faces populated with five apps maximum on each face. Refused changes
   restore the original arrangement in place.
 - C → Reopen missing apps fills a partially intact saved card in place. It
   preserves the current face, remembered focus, unfolded state and surviving
   proportions, asks when several saved setups match, and restores saved pane
-  positions through ABI 5's guarded face arrangement operation. It shares the
+  positions through a guarded face arrangement operation. It shares the
   existing launcher, cancellation and workspace-protection flow.
 - C → Layout offers a direct two-app swap and directional three-app reordering.
   Pane proportions remain attached to their slots; keyboard focus follows the
   same app. Super+J keeps its existing split-direction toggle.
 - C → Replace exchanges any pane with an open app, including an unfocused pane,
-  a full side or a side's only app. The old app remains open. ABI 6 exchanges
-  existing leaf slots without dissolving groups, checks size limits on both
-  apps, and preserves the card's identity, focus and folded/unfolded state.
+  a full side or a side's only app. The old app remains open. The two apps
+  trade places without dissolving the card; size limits are checked on both
+  apps, and the card's identity, focus and folded/unfolded state are kept.
   Remote/floating choices reuse the guarded workspace handoff and rollback.
 - Hold Super+Ctrl+Alt+Space to peek. Release returns smoothly; input, focus,
   popups, workspace changes and lifecycle interruptions cancel the return.
@@ -85,22 +85,15 @@ another kind of group or requiring users to manage a layout tree.
 - Find an open app on either face with Super+Ctrl+Alt+K, including cards on other
   workspaces. Optional modifier + middle-click flips the focused card.
 
-## To do: remove hy3
+## To do: finish removing hy3
 
 Decided 2026-11-01: hy3 support is no longer needed. Cards run on Hyprland's
-own dwindle with the core alone, and that is what is used. Until the removal,
-hy3 suites are not run and new features need no hy3 path; refusing hy3 cards
-is enough. Strip later:
+own dwindle with the core alone. The hy3 lookup in the core, the external
+bridge symbol, `integrations/hy3`, `scripts/build-containers`, the container
+updater and the hy3 suites are gone; `src/ContainerABI.hpp` is now an internal
+boundary between the controller and `FloatingCards.cpp`. Left to strip:
 
-- The core: the hy3 lookup in `provider()` (native cards keep their own API
-  table), the provider epochs, `CONTAINER_SYMBOL`, the hy3-only refusals and
-  the `pair` path that asks for a hy3 workspace.
-- `integrations/hy3`, `scripts/build-containers`,
-  `examples/containers-trial.lua`, the `--containers` demo in
-  `tests/nested_session.py`, and the hy3 suites and branches in `tests/`.
-- The hy3 items under "Before a wider container preview" below, and the docs
-  that describe hy3 as a backend (README, INSTALL, CONTAINERS, SAVED_CARDS,
-  TRANSITIONS, PANEL_API, SCRIPTING, BETA).
+- The core's provider epochs, kept as an internal check.
 - OmaCards: its hy3 mentions and pin checks (`tests/pin_check.py`,
   `tests/run-native.py`).
 
@@ -117,23 +110,20 @@ with a `WindowHandle` to drag it by, and real pointer input from
 `wlr-virtual-pointer-unstable-v1.xml` protocol file passed with `--protocol`,
 as `tests/card_interactions.py` takes it.
 
-## Before a wider container preview
+## Before a wider preview
 
-- The reproduced native-group migration crash has a pinned hy3 lifetime fix;
-  provider unload clears retained render passes before its code is unmapped.
-  Preserve those regressions as the implementation changes.
 - Virtual monitor hotplug and DPMS off/on are covered. Physical monitor
   reconnection, actual system suspend/resume and longer daily use still need
   desktop evidence. Keep isolated checks separate from hardware claims.
-- Publish the matching core/provider sources together, with exact ABI pins,
-  recovery instructions and a short communications-workflow recording.
+- Publish the release with recovery instructions and a short
+  communications-workflow recording on dwindle.
 
 ## Earlier ideas, ordered by likely usefulness
 
 Saved setups, missing-pane recovery, layout controls, pane order/replacement and hold-to-peek are
 implemented. The next candidates are:
 
-Drag-to-add is implemented for multi-app containers: the visible face has an
+Drag-to-add is implemented for multi-app cards: the visible face has an
 explicit temporary target, Escape cancels, and the five-app/size limits remain.
 The hidden face is intentionally reached by flipping or unfolding first.
 
@@ -147,6 +137,6 @@ The hidden face is intentionally reached by flipping or unfolding first.
 
 - Linked flips need a concrete use case before several cards change together.
 - Arbitrary nesting, more faces, and unlimited panes obscure the two-sided
-  model. Existing workspaces and hy3 groups already cover larger arrangements.
+  model. Existing workspaces and ordinary tiles already cover larger arrangements.
 
 These are proposed directions, not promises or evidence of implementation.

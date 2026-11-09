@@ -6,6 +6,9 @@ workflows and global motion controls. See [the implemented protocol](PANEL_API.m
 and [OmaCards](https://github.com/nocstah/omacards) for current behavior and installation.
 The sections below preserve the original scope; floating cards, workspace
 destinations and editable shortcuts were added during implementation.
+The plan assumes the optional hy3 provider that multi-app cards needed at the
+time. That provider has since been removed: the core builds cards itself on
+dwindle or floating, and nothing extra is installed or pinned for them.
 
 The user selected a compact bar panel alongside the existing keyboard shortcuts.
 

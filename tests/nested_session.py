@@ -16,16 +16,14 @@ import time
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--directory", type=Path, required=True)
-demo_flags = parser.add_mutually_exclusive_group()
-demo_flags.add_argument("--containers", action="store_true", help="Open an interactive hy3 card demo")
-demo_flags.add_argument("--native-cards", action="store_true", help="Open an interactive dwindle card demo using only the core")
+parser.add_argument("--native-cards", action="store_true", help="Open an interactive dwindle card demo using only the core")
 parser.add_argument("--aquamarine", type=Path,
                     help="Aquamarine build with tests/aquamarine-render-node.patch: render on a non-NVIDIA GPU (see TESTING.md)")
 parser.add_argument("--render-node", type=Path, help="render node for --aquamarine (default: first non-NVIDIA)")
 parser.add_argument("--notify-recorder", action="store_true",
                     help="record desktop notifications in <directory>/notify-send.log, one JSON list of arguments per line")
 args = parser.parse_args()
-demo = args.containers or args.native_cards
+demo = args.native_cards
 root = args.directory.resolve()
 # sockaddr_un.sun_path is 108 bytes including NUL. Hyprland's signature and
 # socket filename need room too; a long test path otherwise silently truncates.
@@ -35,11 +33,9 @@ root.mkdir(parents=True, exist_ok=True)
 if (root / "session.json").exists():
     raise SystemExit("This directory already has a session. Close it first or choose a fresh /tmp path.")
 project = Path(__file__).resolve().parent.parent
-demo_libraries = ([project / "build/hyprflip.so"] if args.native_cards else
-                  [project / "build/containers/provider/upstream/libhy3.so",
-                   project / "build/containers/core/hyprflip.so"])
+demo_libraries = [project / "build/hyprflip.so"]
 if demo and any(not library.exists() for library in demo_libraries):
-    raise SystemExit("Build first: make test" if args.native_cards else "Build first: ./scripts/build-containers")
+    raise SystemExit("Build first: make test")
 for directory in ("runtime", "config", "cache", "data", "state"):
     (root / directory).mkdir(mode=0o700, exist_ok=True)
 runtime = root / "runtime"
@@ -150,7 +146,7 @@ try:
             library = root / source.name
             shutil.copy2(source, library)
             ctl("plugin", "load", str(library))
-        config.write_text((base_config if args.native_cards else base_config.replace('layout="dwindle"', 'layout="hy3"')) + '''
+        config.write_text(base_config + '''
 if hl.plugin.hyprflip then
     hl.config({plugin={hyprflip={duration_ms=420,notifications=true}}})
     local function run(action, argument)

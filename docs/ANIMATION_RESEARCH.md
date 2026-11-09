@@ -67,7 +67,7 @@ The installed Omarchy defaults already define the same `easeOutQuint`,
 `easeInOutCubic`, `linear`, `almostLinear` and `quick` curves. Cybex's distinctive
 choices are the overshoot, slides and their assignments. Its preset cannot alter
 Hyprflip's custom angle calculation. It can influence unfold/fold because those
-operations resize real windows through hy3 and Hyprland.
+operations resize real windows through Hyprland's layout.
 
 For Hyprflip, prefer a restrained deceleration for layout transitions. A rebound
 in a pane containing small text can make the interface feel less settled. Any
@@ -120,7 +120,7 @@ should preserve location and focus while keeping text readable.
 
 The first rendering prototype belongs in `FlipTransformer.cpp` and its shared
 `Pose`. Reversal work belongs in `Timeline.hpp` and `Controller.cpp`. The card model
-and core/provider ABI need no new feature for these changes.
+and the core's card engine need no new feature for these changes.
 
 A shared projected light field does not require combining panes into one texture.
 Effects spanning empty gaps, one outer shadow, or transitions blending both faces'
@@ -158,7 +158,7 @@ The first pass adds one directional light field to the existing shader and a
 short exponential response when reversing. It keeps the 420 ms default and the
 existing angle curve for ordinary turns. Analytical integration preserves the
 trajectory across varying frame intervals, including a coast that reaches an
-endpoint before returning. Container geometry, the provider ABI and desktop
+endpoint before returning. Card geometry, the card engine and desktop
 animation settings remain unchanged.
 
 The render probe also exposed a missed redraw request: `RENDER_POST` runs after

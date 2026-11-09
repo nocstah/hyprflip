@@ -639,7 +639,7 @@ class InstallerTest(unittest.TestCase):
 
     def test_active_hy3_containers_reject_native_upgrade_before_mutation(self):
         self.containers = [{"faces": [["0xc"], ["0xd", "0xe"]]}]
-        with self.assertRaisesRegex(SystemExit, "hy3 cards are active"):
+        with self.assertRaisesRegex(SystemExit, "retired hy3 provider"):
             self.run_installer()
         for path, content in self.originals.items():
             self.assertEqual(path.read_bytes(), content)

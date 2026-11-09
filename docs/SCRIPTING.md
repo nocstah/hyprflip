@@ -2,8 +2,8 @@
 
 A workspace manager, a launcher or a phone companion can build and drive cards
 over `hyprctl hyprflip` without taking the keyboard from the person at the
-desktop. Everything here works on native cards with only the core loaded;
-[hy3 cards](CONTAINERS.md) take part where noted.
+desktop. Everything here works on dwindle and floating cards with only the core
+loaded; [multi-app cards](CONTAINERS.md) describes the cards themselves.
 
 ## Find a card
 
@@ -65,8 +65,7 @@ hyprctl hyprflip restore quiet tiled 0 0 0 0 1200 900 \
 
 A workspace is a number, `name:<name>`, `special` or `special:<name>` (names of
 letters, digits, `-`, `_` and `.`, up to 64). Relative forms such as `+1` or
-`previous` are refused: they depend on where the focus is. Named and special
-workspaces take native cards; hy3 cards move to numbered ones. A pair shows,
+`previous` are refused: they depend on where the focus is. A pair shows,
 flips and ungroups by id; move its windows with Hyprland.
 
 None of these take the focus. When the focus is on one of the card's apps it

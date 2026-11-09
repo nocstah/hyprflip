@@ -23,13 +23,13 @@ def window(address, **overrides):
 class IPC:
     def __init__(self):
         self.clients = {a: window(a) for a in ('0xa', '0xb', '0xc')}
-        self.snapshot = dict(containers=[], pairs=[], marked='0xc', container_provider=True, container_max_panes=3)
+        self.snapshot = dict(containers=[], pairs=[], marked='0xc', container_provider=True, native_cards=True, container_max_panes=3)
         self.mutations = []
 
     def windows(self): return self.clients
     def status(self): return self.snapshot
     def data(self, *args):
-        if args == ('-j', 'workspaces'): return [{'id': 2, 'tiledLayout': 'hy3'}]
+        if args == ('-j', 'workspaces'): return [{'id': 2, 'tiledLayout': 'dwindle'}]
         if args == ('-j', 'activeworkspace'): return {'id': 2}
         raise AssertionError(args)
     def focus(self, address): self.mutations.append(('focus', address))

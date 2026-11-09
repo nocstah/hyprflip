@@ -2,7 +2,7 @@
 
 We are looking for a few people using Omarchy's default **dwindle** layout to
 try [Hyprflip 0.3.0-rc.13](https://github.com/nocstah/hyprflip/releases/tag/v0.3.0-rc.13).
-No hy3 installation or layout change is needed. This preview targets
+No other layout plugin or layout change is needed. This preview targets
 **Hyprland 0.56.2** with matching headers and compiler.
 
 ## Install
@@ -56,7 +56,7 @@ with a short result, including successful installs:
 Omarchy version:
 Hyprland version/commit:
 Hyprflip tag/commit:
-Default dwindle, without hy3: yes / no
+Default dwindle layout: yes / no
 Display resolution and scale:
 Apps tested:
 Install: pass / blocked at command ...

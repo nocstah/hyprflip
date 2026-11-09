@@ -20,7 +20,9 @@ not a fresh Omarchy installation.
 
 Real desktop footage: Gmail on the front, WhatsApp and Telegram sharing the
 back. The clip shows flipping, temporarily unfolding all three apps, folding
-back and returning to Gmail. It uses the experimental hy3 container build.
+back and returning to Gmail. It was recorded with the experimental hy3
+container build, which has since been removed; the dwindle demo above shows
+current behavior.
 
 - [Video](hyprflip-demo.mp4): silent 1920×1080, 60 fps H.264.
 - [Looping preview](hyprflip-preview.gif): 1000×562, 25 fps GIF.

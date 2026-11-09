@@ -25,6 +25,7 @@ config = root / 'hyprland.lua'
 original = config.read_text()
 processes, checks = [], []
 completed = False
+extra_output = None
 
 
 class Picker:
@@ -68,12 +69,8 @@ def spawn(name, gtk=False, minimum=None):
 
 try:
     assert not ipc.data('-j', 'plugin', 'list')
-    for source, name in ((project / 'build/hyprflip.so', 'setup-hyprflip.so'),
-                         (project / 'build/containers/provider/upstream/libhy3.so', 'setup-hy3.so')):
-        shutil.copy2(source, root / name)
-    config.write_text(original + '\n' + ''.join(f'hl.plugin.load({json.dumps(str(root / name))})\n'
-                      for name in ('setup-hyprflip.so', 'setup-hy3.so')) + '''
-if hl.plugin.hy3 then hl.config({general={layout="hy3"}}) end
+    shutil.copy2(project / 'build/hyprflip.so', root / 'setup-hyprflip.so')
+    config.write_text(original + '\n' + f'hl.plugin.load({json.dumps(str(root / "setup-hyprflip.so"))})\n' + '''
 if hl.plugin.hyprflip then hl.config({plugin={hyprflip={notifications=false,duration_ms=0}}}) end
 ''')
     ipc.call('reload'); assert not ipc.call('configerrors')
@@ -189,10 +186,20 @@ local hl = setmetatable({
     passed('a third-app attachment failure dissolves only the new card, returns the remote app and leaves every app accessible')
 
     # Creation needs room for one face, even if simultaneous display cannot fit.
+    # The nested session's own output is smaller than one face, so use an
+    # output that holds one 900 x 550 face but not two side by side or stacked.
+    outputs = {m['name'] for m in ipc.data('-j', 'monitors')}
+    ipc.call('output', 'create', 'headless')
+    extra_output = next(m['name'] for m in ipc.data('-j', 'monitors') if m['name'] not in outputs)
+    ipc.call('repl', f'hl.monitor({{output="{extra_output}",mode="1280x800@60",position="2000x0",scale=1}}); '
+                    f'hl.workspace_rule({{workspace="4",monitor="{extra_output}"}})')
+    ipc.call('dispatch', f'hl.dsp.focus({{monitor="{extra_output}"}})')
     ipc.call('dispatch', 'hl.dsp.focus({workspace=4})')
     big = spawn('minimum', gtk=True, minimum=(900, 550))
     time.sleep(.4)
-    partner = spawn('minimum-back')
+    # The dwindle core unfolds by giving each app at least its minimum, so a
+    # small partner would fit beside the big app; give the back a minimum too.
+    partner = spawn('minimum-back', gtk=True, minimum=(900, 550))
     ipc.focus(big)
     create(big, partner, 'create')
     assert card(big)['faces'] == [[big], [partner]] and not card(big)['unfolded']
@@ -209,6 +216,7 @@ finally:
     try:
         config.write_text(original)
         ipc.call('reload'); assert not ipc.call('configerrors')
+        if extra_output: ipc.call('output', 'remove', extra_output)
     finally:
         for proc in processes:
             if proc.poll() is None: proc.terminate()

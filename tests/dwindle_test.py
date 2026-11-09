@@ -74,16 +74,15 @@ class DwindleTest(unittest.TestCase):
             setup.Setup(ipc, Picker()).prepare('0xa')
         self.assertEqual(ipc.mutations, [])
 
-    def test_hy3_remains_optional_and_older_provider_status_is_supported(self):
-        legacy = dict(container_provider=True)
-        self.assertTrue(setup.card_layout_available(legacy, 'hy3'))
-        self.assertFalse(setup.card_layout_available(legacy, 'dwindle'))
-        native = legacy | dict(native_cards=True, hy3_provider=False)
+    def test_cards_need_the_dwindle_layout_and_a_core_with_native_cards(self):
+        native = dict(container_provider=True, native_cards=True)
         self.assertTrue(setup.card_layout_available(native, 'dwindle'))
-        self.assertFalse(setup.card_layout_available(native, 'hy3'))
-        self.assertTrue(setup.card_layout_available(native | dict(hy3_provider=True), 'hy3'))
+        # hy3 is retired: even a core that still reports a provider gets no cards there.
+        for layout in ('hy3', 'master', 'scrolling', None):
+            self.assertFalse(setup.card_layout_available(native | dict(hy3_provider=True), layout))
+        self.assertFalse(setup.card_layout_available(dict(container_provider=True), 'dwindle'))
 
-    def test_saved_definition_accepts_dwindle_and_rejects_missing_hy3(self):
+    def test_saved_definition_accepts_dwindle_and_rejects_other_layouts(self):
         ipc = DwindleIPC()
         for index, window in enumerate(ipc.clients.values()):
             window.update(size=[600, 700], at=[index * 610, 0])

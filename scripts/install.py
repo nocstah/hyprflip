@@ -69,8 +69,8 @@ def shown(containers):
 containers = installed_state.get("containers", [])
 cards = shown(containers)
 if any(not card.get("native_group") for card in cards):
-    raise SystemExit("hy3 cards are active. Use the matching core/provider updater in docs/INSTALL.md; "
-                     "this installer preserves native pairs and dwindle/floating cards.")
+    raise SystemExit("Cards from the retired hy3 provider are open. Take them apart with Super+Ctrl+Alt+U, "
+                     "then update; this installer keeps native pairs and dwindle and floating cards.")
 if any(card.get("fullscreen") for card in cards):
     raise SystemExit("Leave fullscreen on every card before updating; open cards are kept through the update.")
 saved_pairs = installed_state.get("pairs", [])

@@ -592,6 +592,9 @@ bool release(uint64_t id, uintptr_t address) {
         return false;
     if (c->faces[*s].size() == 1)
         return dissolve(id);
+    // The keyboard stays where it was: on the released app when it had it, so
+    // the app just taken out is the one you are using, else where the user left it.
+    const auto had = Desktop::focusState()->window();
     return c->keepFullscreen([&] {
         c->changing = true;
         c->restore(w);
@@ -606,7 +609,11 @@ bool release(uint64_t id, uintptr_t address) {
             c->focused[*s] = c->faces[*s][0];
         c->changing = false;
         c->refresh();
-        select(id, c->active, true);
+        select(id, c->active, false);
+        if (had == w)
+            Desktop::focusState()->fullWindowFocus(w, Desktop::FOCUS_REASON_KEYBIND);
+        else if (had && c->side(had))
+            Desktop::focusState()->fullWindowFocus(had, Desktop::FOCUS_REASON_KEYBIND);
         return true;
     });
 }
@@ -705,10 +712,21 @@ bool edit(uint64_t id, uintptr_t address, ContainerEdit op) {
             return false;
         auto faces = c->faces;
         auto ratios = c->ratios;
-        std::erase(c->faces[*side], w);
+        const auto had = Desktop::focusState()->window();
+        const bool inside = had && c->side(had).has_value();
+        // The panes left behind keep their proportions among themselves; the
+        // moved one joins the other face with an equal share, as an attach gives.
+        const auto index = std::ranges::find(c->faces[*side], w) - c->faces[*side].begin();
+        c->faces[*side].erase(c->faces[*side].begin() + index);
+        c->ratios[*side].erase(c->ratios[*side].begin() + index);
+        const double rest = std::accumulate(c->ratios[*side].begin(), c->ratios[*side].end(), 0.);
+        for (auto &weight : c->ratios[*side])
+            weight = rest > 0 ? weight / rest : 1. / c->ratios[*side].size();
         c->faces[other].push_back(w);
-        for (unsigned s = 0; s < 2; ++s)
-            c->ratios[s].assign(c->faces[s].size(), 1. / c->faces[s].size());
+        const double share = 1. / c->faces[other].size();
+        for (auto &weight : c->ratios[other])
+            weight *= 1. - share;
+        c->ratios[other].push_back(share);
         if (!c->fits(c->group->m_target->position())) {
             c->faces = faces;
             c->ratios = ratios;
@@ -718,6 +736,8 @@ bool edit(uint64_t id, uintptr_t address, ContainerEdit op) {
             c->focused[*side] = c->faces[*side][0];
         c->focused[other] = w;
         c->refresh();
+        // The card follows the pane onto the other face, with the keyboard if it was in the card.
+        select(id, other, inside);
         return true;
     }
     std::array<uintptr_t, CONTAINER_MAX_PANES> windows{};
@@ -736,28 +756,73 @@ bool replace(uint64_t id, uintptr_t outgoing, uintptr_t incoming) {
     auto s = c ? c->side(old) : std::nullopt;
     if (!s || !c->valid() || !supports(incoming) || next->m_workspace != old->m_workspace)
         return false;
+    // A tiled replacement leaves a tile behind, and the outgoing app takes it:
+    // the two exchange places and the card keeps its own. One that could not
+    // fit there is refused before anything moves.
+    const bool exchange = !c->floats() && !c->bare() && !next->m_isFloating && next->m_target;
+    const CBox cardBox = c->group->m_target->position();
+    if (exchange) {
+        const CBox slot = next->m_target->position();
+        const double border = 2. * old->getRealBorderSize();
+        if (const auto min = old->minSize(); min && (min->x + border > slot.w + .5 || min->y + border > slot.h + .5))
+            return false;
+    }
     auto it = std::ranges::find(c->faces[*s], old);
     *it = next;
     if (!c->fits(c->bare() ? *c->fullscreenBox() : c->group->m_target->position())) {
         *it = old;
         return false;
     }
+    const auto had = Desktop::focusState()->window();
     return c->keepFullscreen([&] {
         c->changing = true;
+        // A tiled exchange takes the outgoing app out first, so it gets a tile
+        // of its own, trades that tile for the incoming app's, and only then
+        // groups the incoming app: its borrowed tile closes, the card gets its
+        // whole place back, and the outgoing app sits where the other one was.
+        if (exchange) {
+            c->restore(old);
+            c->group->remove(old);
+            if (old->m_target && next->m_target)
+                g_layoutManager->switchTargets(old->m_target, next->m_target, false);
+        }
         c->group->add(next);
         auto p = PaneTarget::create(next->m_target, c);
         c->targets[incoming] = p;
         next->m_target = p;
         if (c->flat || c->quiet)
             Card::style(next, c->flat, c->quiet);
-        c->restore(old);
-        c->group->remove(old);
+        if (!exchange) {
+            c->restore(old);
+            c->group->remove(old);
+        }
         if (c->focused[*s] == old)
             c->focused[*s] = next;
         c->changing = false;
         c->decos();
         c->refresh();
-        select(id, c->active, true);
+        // The card's own tile is the one it had; dwindle can still have nudged
+        // the split it shares while the tiles traded, so put its size back.
+        if (exchange) {
+            auto now = c->group->m_target->position();
+            for (const bool across : {true, false}) {
+                const double want = across ? cardBox.w : cardBox.h, have = across ? now.w : now.h;
+                if (std::abs(want - have) <= 1)
+                    continue;
+                const auto along = [&](double d) { return across ? Vector2D{d, 0.} : Vector2D{0., d}; };
+                g_layoutManager->resizeTarget(along(want - have), c->group->m_target);
+                now = c->group->m_target->position();
+                const double after = across ? now.w : now.h;
+                // A split on the left or top grows the card the other way: the same step, reversed, lands it.
+                if (std::abs(want - after) > std::abs(want - have) + 1) {
+                    g_layoutManager->resizeTarget(along(after - want), c->group->m_target);
+                    now = c->group->m_target->position();
+                }
+            }
+            c->refresh();
+        }
+        const bool inside = had && (had == old || c->side(had).has_value());
+        select(id, c->active, inside);
         return true;
     });
 }

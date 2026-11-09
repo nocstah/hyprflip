@@ -67,13 +67,12 @@ def spawn(name, minimum=None):
 
 try:
     assert not ipc.data('-j','plugin','list')
-    for source in (project / 'build/containers/provider/upstream/libhy3.so', project / 'build/containers/core/hyprflip.so'):
+    for source in (project / 'build/hyprflip.so',):
         target = root / ('pane-' + source.name); shutil.copy2(source,target)
         ipc.call('plugin','load',str(target)); loaded.append(target)
     if args.hyprglass:
         target = root / 'pane-hyprglass.so'; shutil.copy2(args.hyprglass,target)
         ipc.call('plugin','load',str(target)); loaded.append(target)
-    config.write_text(original.replace('layout="dwindle"','layout="hy3"'))
     ipc.call('reload'); assert not ipc.call('configerrors')
     ipc.call('eval','hl.config({animations={enabled=false},plugin={hyprflip={duration_ms=0,notifications=false}}})')
     if args.hyprglass: ipc.call('eval','hl.plugin.hyprglass.config({enabled=true,manage_window_blur=true})')
@@ -88,15 +87,18 @@ try:
         ipc.call('eval','CHILLMODE_OPTS={auto=true,auto_max=3,notify=false,keybind="",key_hide="",key_restore="",hide=false}; '
                  + f'dofile({json.dumps(str(engine))})')
     a,b,c,d = [spawn(n) for n in ('front','back','third','fourth')]
-    ipc.focused((a,'mark'),(b,'pair'))
+    ipc.focused((a,'mark'),(b,'card'))
     for extra in (c,d): ipc.focused((extra,'mark'),(b,'attach horizontal'))
     arrange([b,c,d], 'horizontal', [.5,.3,.2]); ipc.focus(b)
     before = deepcopy(card()); identity = before['id']
-    ipc.call('dispatch','hl.dsp.layout("togglesplit")')
+    # On dwindle the layout only sees the whole card's tile, so Super+J on a
+    # multi-app face is bound to `layout toggle` (examples/containers-setup.lua).
+    assert ipc.call('repl','return hl.plugin.hyprflip.face_size()') == '3'
+    ipc.action('layout toggle')
     assert card()['layouts'][1]['axis'] == 'vertical'
-    ipc.call('dispatch','hl.dsp.layout("togglesplit")')
+    ipc.action('layout toggle')
     assert card() == before
-    passed('the existing Super+J dispatcher still toggles beside/stacked and preserves pane order and proportions')
+    passed('the Super+J layout toggle still toggles beside/stacked and preserves pane order and proportions')
 
     for axis, move in (('horizontal','2:1'),('vertical','1:2')):
         edit(b,'layout','layout ' + axis)
@@ -112,15 +114,15 @@ try:
     edit(b,'replace',target,x)
     expected = deepcopy(before['faces']); expected[1][1] = x
     assert card()['faces'] == expected and card()['id'] == identity and active() == b
-    assert card()['layouts'] == before['layouts'] and card()['box'] == before['box']
-    assert boxes([x])[x] == positions[target] and boxes([target])[target] == positions[x]
+    assert card()['layouts'] == before['layouts'] and card()['box'] == before['box'], (card(), before)
+    assert boxes([x])[x] == positions[target] and boxes([target])[target] == positions[x], (boxes([x,target]), positions)
     assert target in ipc.windows(); visible()
     passed('an unfocused pane on a full side is replaced atomically, keeping its slot, card and focus; the old app stays open')
 
     # The outgoing original front may close after replacement; it must no longer own this card.
     ipc.focus(a); before = deepcopy(card()); edit(a,'replace',target)
     assert card()['faces'][0] == [target] and card()['id'] == identity and active() == target
-    assert card()['box'] == before['box']; close(a)
+    assert card()['box'] == before['box'], (card(), before); close(a)
     assert card()['id'] == identity and card()['faces'][0] == [target]; visible()
     front = target
     passed('the sole front app can be replaced, and subsequently closing the released original leaves the card intact')
@@ -130,8 +132,8 @@ try:
     ipc.focus(b); before = deepcopy(card()); positions = boxes([front,*before['faces'][1],y])
     edit(b,'replace',b,y)
     assert card()['unfolded'] and card()['current'] == y and active() == y
-    assert card()['box'] == before['box'] and card()['layouts'][0] == before['layouts'][0]
-    assert boxes([y])[y] == positions[b]
+    assert card()['box'] == before['box'] and card()['layouts'][0] == before['layouts'][0], (card(), before)
+    assert boxes([y])[y] == positions[b], (boxes([y]), positions)
     close(b); assert card()['id'] == identity; visible()
     passed('focused replacement keeps unequal unfolded face geometry and follows the new app; closing the old back is safe')
 
@@ -181,21 +183,25 @@ try:
     ipc.focused((remote,'release')); ipc.focus(y)
     before = deepcopy(card()); edit(y,'layout','reorder')
     assert card()['faces'][1] == list(reversed(before['faces'][1]))
-    assert card()['layouts'] == before['layouts'] and card()['unfolded'] and active() == y
+    # Each slot keeps its size; the native core recomputes the shares, so
+    # compare them with a tolerance for floating-point noise.
+    after = card()['layouts']
+    assert [(l['axis'], l['focused']) for l in after] == [(l['axis'], l['focused']) for l in before['layouts']], (after, before)
+    assert all(abs(x - y) < 1e-9 for l, m in zip(after, before['layouts']) for x, y in zip(l['ratios'], m['ratios'])), (after, before)
+    assert card()['unfolded'] and active() == y, (card(), active(), y)
     ipc.action('unfold'); ipc.action('flip'); ipc.action('flip'); visible()
     passed('two-pane Swap app positions needs one layout choice; folding and flipping remain usable afterward')
 
-    # A replacement may come from an ordinary hy3 split. The released app must
-    # fit that vacated slot too, and the surrounding group must remain intact.
+    # A replacement may come from an ordinary dwindle split. The released app
+    # must fit that vacated slot too, and the surrounding tiles must remain intact.
     ipc.action('unpair')
     for address,w in ipc.windows().items():
         if w['class'].startswith('hyprflip-pane-'): ipc.move(address,61)
     ipc.call('dispatch','hl.dsp.focus({workspace=60})')
     ipc.action('reserve 60 pane-fixture 120')
     large = spawn('large-outgoing', [100,900]); back = spawn('new-back')
-    ipc.focused((large,'mark'),(back,'pair'))
+    ipc.focused((large,'mark'),(back,'card'))
     source = spawn('nested-source')
-    ipc.call('dispatch','hl.plugin.hy3.make_group("v")')
     siblings = [spawn('nested-' + n) for n in ('second','third')]
     assert ipc.windows()[source]['size'][1] < 900
     ipc.focus(large); before = deepcopy(card()); positions = boxes([large,back,source,*siblings])
@@ -208,20 +214,24 @@ try:
     ipc.focus(back); before = deepcopy(card()); positions = boxes(positions)
     edit(back,'replace',source)
     assert card()['faces'] == [[large],[source]] and card()['id'] == before['id'] and active() == source
-    assert boxes([source])[source] == positions[back] and boxes([back])[back] == positions[source]
-    assert boxes(siblings) == {a:positions[a] for a in siblings}
+    assert boxes([source])[source] == positions[back] and boxes([back])[back] == positions[source], (boxes([source, back]), positions, card())
+    assert boxes(siblings) == {a:positions[a] for a in siblings}, (boxes(siblings), positions)
+    # Omarchy turns on dwindle's preserve_split, without which togglesplit does nothing.
+    ipc.call('eval','hl.config({dwindle={preserve_split=true}})')
     stable = deepcopy(card()); positions = boxes([large,source,back,*siblings])
     ipc.focus(siblings[0]); ipc.call('dispatch','hl.dsp.layout("togglesplit")')
-    outside = [ipc.windows()[a] for a in [back,*siblings]]
-    assert len({w['at'][1] for w in outside}) == 1 and len({w['at'][0] for w in outside}) == 3
+    # Super+J outside the card is Omarchy's plain dwindle split toggle: it
+    # reshapes the two siblings' split and leaves the card alone.
+    toggled = boxes(siblings)
+    assert toggled != {a:positions[a] for a in siblings} and boxes([back])[back] == positions[back], (toggled, positions)
     assert card() == stable
     ipc.call('dispatch','hl.dsp.layout("togglesplit")')
     assert boxes(positions) == positions; visible()
-    passed('replacing from an ordinary hy3 split preserves its siblings, proportions and independent layout controls')
+    passed('replacing from an ordinary dwindle split preserves its siblings, proportions and independent layout controls')
     completed = True
 finally:
     if args.engine: ipc.call('eval','if chillmode then chillmode.unload() end')
-    for name in ('pane-hyprflip.so','pane-libhy3.so','pane-hyprglass.so'):
+    for name in ('pane-hyprflip.so','pane-hyprglass.so'):
         target = root / name
         if target in loaded: ipc.call('plugin','unload',str(target))
     config.write_text(original); ipc.call('reload')

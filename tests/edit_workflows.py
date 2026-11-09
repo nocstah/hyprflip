@@ -50,7 +50,7 @@ def passed(message): checks.append(message); print('PASS', message, flush=True)
 def active(): return ipc.data('-j', 'activewindow').get('address')
 def card(front): return next(c for c in ipc.status()['containers'] if front in c['faces'][0])
 def geometry(): return {a: (w['at'], w['size'], w['workspace'], w['acceptsInput']) for a, w in ipc.windows().items()}
-def pair(a, b): ipc.focus(a); ipc.action('mark'); ipc.focus(b); ipc.action('pair')
+def make_card(a, b): ipc.focus(a); ipc.action('mark'); ipc.focus(b); ipc.action('card')
 def edit(anchor, *answers):
     flow = setup.Edit(ipc, Picker(*answers))
     flow.apply(flow.prepare(anchor))
@@ -88,12 +88,8 @@ def settled():
 
 try:
     assert not ipc.data('-j', 'plugin', 'list')
-    for source, name in ((project / 'build/hyprflip.so', 'edit-hyprflip.so'),
-                         (project / 'build/containers/provider/upstream/libhy3.so', 'edit-hy3.so')):
-        shutil.copy2(source, root / name)
-    config.write_text(original + '\n' + ''.join(f'hl.plugin.load({json.dumps(str(root / name))})\n'
-                      for name in ('edit-hyprflip.so', 'edit-hy3.so')) + '''
-if hl.plugin.hy3 then hl.config({general={layout="hy3"}}) end
+    shutil.copy2(project / 'build/hyprflip.so', root / 'edit-hyprflip.so')
+    config.write_text(original + '\n' + f'hl.plugin.load({json.dumps(str(root / "edit-hyprflip.so"))})\n' + '''
 if hl.plugin.hyprflip then hl.config({plugin={hyprflip={notifications=false,duration_ms=0}}}) end
 hl.config({input={resolve_binds_by_sym=true}})
 ''')
@@ -101,7 +97,7 @@ hl.config({input={resolve_binds_by_sym=true}})
     primary_output = ipc.data('-j', 'monitors')[0]['name']
     ipc.call('dispatch', 'hl.dsp.focus({workspace=3})')
     a, b, c, d = (spawn(name) for name in ('front', 'back', 'companion', 'outside'))
-    pair(a, b)
+    make_card(a, b)
     ipc.focus(d); ipc.action('mark'); ipc.focus(b); time.sleep(.4)
     for choices in ((None,), ('add', None)):
         before, boxes = settled(), geometry()
@@ -125,7 +121,7 @@ hl.config({input={resolve_binds_by_sym=true}})
     passed('adding an app targets the back, focuses the new pane and leaves room for a third app')
 
     edit(c, 'release:' + c)
-    assert card(a)['faces'] == [[a], [b]] and active() == c and ipc.windows()[c]['acceptsInput']
+    assert card(a)['faces'] == [[a], [b]] and active() == c and ipc.windows()[c]['acceptsInput'], (card(a), active(), [a, b, c])
     visible(card(a))
     passed('removing a companion preserves both faces and leaves the removed app open and focused')
 
@@ -146,7 +142,7 @@ hl.config({input={resolve_binds_by_sym=true}})
     assert card(a)['faces'] == [[a, d], [b, c]] and card(a)['unfolded'] and active() == c
     visible(card(a))
     ipc.focus(d); edit(d, 'release:' + d)
-    assert card(a)['faces'] == [[a], [b, c]] and card(a)['unfolded'] and active() == d
+    assert card(a)['faces'] == [[a], [b, c]] and card(a)['unfolded'] and active() == d, (card(a), active(), d)
     visible(card(a))
     ipc.focus(a)
     picker = Picker('unpair'); flow = setup.Edit(ipc, picker)
@@ -155,7 +151,7 @@ hl.config({input={resolve_binds_by_sym=true}})
     assert not ipc.status()['containers'] and all(ipc.windows()[w]['acceptsInput'] for w in (a, b, c, d))
     passed('unfolded edits retain all live panes; removing the last app is explicitly an ungroup action')
 
-    pair(a, b); ipc.focus(b)
+    make_card(a, b); ipc.focus(b)
     flow = setup.Edit(ipc, Picker('add', c))
     selected = flow.prepare(b)
     ipc.call('dispatch', f'hl.dsp.window.move({{window="address:{c}",workspace="2",follow=false}})')
@@ -200,7 +196,7 @@ local hl = setmetatable({
     passed('the real C chord captures the focused address for editing; O still unfolds directly')
     ipc.action('unpair')
 
-    # Import an ordinary window from dwindle on a different, rotated monitor.
+    # Import an ordinary window from a different, rotated monitor.
     outputs = {m['name'] for m in ipc.data('-j', 'monitors')}
     ipc.call('output', 'create', 'headless')
     second_output = next(m['name'] for m in ipc.data('-j', 'monitors') if m['name'] not in outputs)
@@ -209,7 +205,7 @@ local hl = setmetatable({
     ipc.call('dispatch', f'hl.dsp.focus({{monitor="{second_output}"}})')
     ipc.call('dispatch', 'hl.dsp.focus({workspace=5})')
     ipc.move(c, 5)
-    ipc.focus(a); pair(a, b); ipc.focus(b)
+    ipc.focus(a); make_card(a, b); ipc.focus(b)
     for choices in (('add', 'workspace:5', None), ('add', 'workspace:5', 'back', None)):
         before = settled()
         try: edit(b, *choices)
@@ -230,7 +226,7 @@ local hl = setmetatable({
     ipc.focus(b); edit(b, 'release:' + c)
     assert card(a)['unfolded'] and active() == b
     ipc.action('unpair')
-    passed('imports cross layouts and rotated monitors, including unfolded cards, without switching the source display')
+    passed('imports across rotated monitors, including unfolded cards, without switching the source display')
 
     ipc.move(c, 5); ipc.move(d, 6); ipc.focus(a)
     flow = setup.Setup(ipc, Picker('workspace:5', c, 'workspace:6', d, 'create'))
@@ -261,13 +257,13 @@ local hl = setmetatable({
     assert ipc.windows()[c]['workspace']['id'] == 5 and ipc.windows()[d]['workspace']['id'] == 6
     passed('failed creation returns both imported apps to their original workspaces')
 
-    ipc.call('repl', f'hl.workspace_rule({{workspace="4",monitor="{primary_output}",layout="hy3"}})')
+    ipc.call('repl', f'hl.workspace_rule({{workspace="4",monitor="{primary_output}",layout="dwindle"}})')
     ipc.call('dispatch', f'hl.dsp.focus({{monitor="{primary_output}"}})')
     ipc.call('dispatch', 'hl.dsp.focus({workspace=4})')
     big = spawn('minimum', gtk=True, minimum=(900, 550))
     time.sleep(.4)
     partner = spawn('minimum-back')
-    pair(big, partner)
+    make_card(big, partner)
     extra = spawn('minimum-extra')
     ipc.focus(extra); ipc.action('mark'); ipc.focus(big)
     flow = setup.Edit(ipc, Picker('add', extra))

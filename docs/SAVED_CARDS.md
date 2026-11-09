@@ -54,7 +54,7 @@ Focus your card, press **Super+Ctrl+Alt+C**, and choose **Manage card…**:
   open wherever you are, or **Always use a workspace…** and enter its number.
   For example, assign **Comms** to **3** to open it on workspace 3 from anywhere.
   The library shows this destination. An already open card moves there instead
-  of creating a duplicate. The destination needs the hy3 layout.
+  of creating a duplicate. The destination needs the dwindle layout.
 - **Delete saved card** removes the definition after confirmation and keeps
   running apps and cards open.
 
@@ -78,8 +78,7 @@ side and unfolded state remain intact. No additional confirmation is needed.
 A uniquely matching saved setup is selected automatically. If several match,
 choose a name. Surviving apps must still be in their original face and order;
 indistinguishable browser windows with changed titles are not guessed. Save the
-complete arrangement before closing apps. The feature needs matching ABI 5 or later
-core/provider builds; older providers keep their existing menu.
+complete arrangement before closing apps.
 
 The helper reuses eligible open apps, including floating apps on other
 workspaces, and launches only missing apps. It never takes an app from another
@@ -187,13 +186,12 @@ For custom bindings, call `hl.plugin.hyprflip.peek()`. External tools can use
 `hyprctl hyprflip peek` followed by `hyprctl hyprflip 'peek end'`, or the Lua
 `end_peek()` function. IPC callers must send the explicit end action because
 they have no physical trigger key. Status exposes `peek_available` and `peeking`.
-Peek also works with native two-window pairs; saved multi-app arrangements use
-the optional hy3 container provider.
+Peek also works with native two-window pairs; saved multi-app arrangements
+open as dwindle or floating cards.
 
-## Update an existing container installation
+## Updating
 
-Unlock the desktop, build the matching libraries with `./scripts/build-containers`, then run
-`python scripts/update-containers.py` and `python scripts/install-setup.py`.
-The updater retains existing cards and the setup installer retains user
-configuration and saved definitions, backing up replaced files. See
-[the container installation guide](CONTAINERS.md) for prerequisites and recovery.
+Run `python3 scripts/bootstrap.py` from an updated checkout. Open dwindle and
+floating cards stay open, and the setup installer retains user configuration
+and saved definitions, backing up replaced files. See
+[updating](INSTALL.md#update) for details and recovery.

@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Reopen a saved card from closed Brave app windows in a disposable compositor."""
+"""Reopen a saved card from closed Brave app windows on dwindle in a disposable compositor.
+
+Loads only the core plugin (plus optional Hyprglass). Start a fresh nested session without a demo flag.
+"""
 import argparse
 from copy import deepcopy
 import importlib.util
@@ -88,13 +91,12 @@ def passed(message): checks.append(message); print('PASS', message, flush=True)
 
 try:
     assert not ipc.data('-j', 'plugin', 'list')
-    for source in (project / 'build/containers/provider/upstream/libhy3.so', project / 'build/containers/core/hyprflip.so'):
+    for source in (project / 'build/hyprflip.so',):
         target = root / source.name; shutil.copy2(source, target)
         ipc.call('plugin', 'load', str(target)); loaded.append(target)
     if args.hyprglass:
         target = root / 'hyprglass.so'; shutil.copy2(args.hyprglass, target)
         ipc.call('plugin', 'load', str(target)); loaded.append(target)
-    config.write_text(original.replace('layout="dwindle"', 'layout="hy3"'))
     ipc.call('reload'); assert not ipc.call('configerrors')
     ipc.call('eval', 'hl.config({animations={enabled=false},plugin={hyprflip={duration_ms=0,notifications=false}}})')
     if args.hyprglass: ipc.call('eval', 'hl.plugin.hyprglass.config({enabled=true,manage_window_blur=true})')
@@ -129,7 +131,7 @@ h1{{margin:60px}}.corner{{position:fixed;width:40px;height:40px;background:#00cc
     a, b, c = addresses()
     with setup.Setup(ipc, Menu()).reserve(ipc.windows(), ipc.status(), 60):
         for address in (a, b, c): ipc.tile(ipc.windows()[address])
-        ipc.focused((a, 'mark'), (b, 'pair')); ipc.focused((c, 'mark'), (b, 'attach horizontal'))
+        ipc.focused((a, 'mark'), (b, 'card')); ipc.focused((c, 'mark'), (b, 'attach horizontal'))
     ipc.focus(a)
     for index, (address, command) in enumerate(zip((a, b, c), commands)):
         # A tiny script avoids desktop-entry argument escaping obscuring the test.
@@ -163,6 +165,11 @@ h1{{margin:60px}}.corner{{position:fixed;width:40px;height:40px;background:#00cc
                 current = addresses()
                 ipc.call('dispatch', f'hl.dsp.window.close({{window="address:{current[missing]}"}})')
                 wait(lambda: addresses()[missing] is None)
+                if args.engine:
+                    # Auto Chill chills a workspace holding only a native card, as
+                    # one floating window (hy3 cards kept Chill out). Let it settle:
+                    # the editor rightly refuses a card that changes under it.
+                    wait(lambda: ipc.status()['containers'][0]['floating']); time.sleep(.3)
                 ipc.focus(current[0])
                 before = deepcopy(ipc.status()['containers'][0])
                 survivors = {w: ipc.windows()[w]['pid'] for face in before['faces'] for w in face}
@@ -174,8 +181,19 @@ h1{{margin:60px}}.corner{{position:fixed;width:40px;height:40px;background:#00cc
                 assert after['current'] == before['current'] and after['unfolded'] == before['unfolded']
                 assert all(ipc.windows()[w]['pid'] == pid for w,pid in survivors.items())
                 time.sleep(.4)
-                assert all(not ipc.windows()[w]['floating'] for w in (a,b,c))
+                # The reopened app joins the card as it is: tiled, or chilled in
+                # the same floating frame.
+                after = ipc.status()['containers'][0]
+                assert after['floating'] == before['floating'] == bool(args.engine), after
+                assert after['box'] == before['box'], (before, after)
+                assert all(ipc.windows()[w]['floating'] == after['floating'] for w in (a,b,c))
                 passed(f'back app {missing} reopens in place with Chill/Glass, attempt {attempt + 1}')
+            if args.engine:
+                ipc.call('eval', 'chillmode.toggle(60)')
+                wait(lambda: not ipc.status()['containers'][0]['floating'])
+                time.sleep(.3)
+                assert all(not ipc.windows()[w]['floating'] for w in addresses())
+                passed(f'leaving Chill tiles the repaired card back whole, attempt {attempt + 1}')
             if attempt == 2:
                 ipc.action('flip'); time.sleep(.4)
                 subprocess.run(['grim', '-o', output, str(root / 'repaired-back.png')], env=env, check=True, timeout=8)
@@ -186,8 +204,8 @@ finally:
     (root / 'results.json').write_text(json.dumps({'completed': completed, 'checks': checks}, indent=2))
     close_all()
     if args.engine: ipc.call('eval', 'if chillmode then chillmode.unload() end')
-    # Unload core and layout while Hyprglass is still mapped.
-    for target in (root / 'hyprflip.so', root / 'libhy3.so', root / 'hyprglass.so'):
+    # Unload the core while Hyprglass is still mapped.
+    for target in (root / 'hyprflip.so', root / 'hyprglass.so'):
         if target in loaded: ipc.call('plugin', 'unload', str(target))
     config.write_text(original); ipc.call('reload')
     if output: ipc.call('output', 'remove', output)

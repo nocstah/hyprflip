@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Record card motion and verify interruption on a disposable GPU-rendered output.
 
+Cards run natively on dwindle with only the core and motion probe loaded.
 Timings measure CPU render submission and render intervals, not GPU execution or
 physical scanout. Captures and unfold sampling are separate from measured turns.
 """
@@ -112,12 +113,10 @@ def capture(name):
 
 try:
     assert not json.loads(ctl('-j', 'plugin', 'list')), 'Use a fixture without loaded plugins'
-    for source, name in ((Path('build/containers/provider/upstream/libhy3.so'), 'motion-hy3.so'),
-                         (args.plugin, 'motion-core.so'), (Path('build/motion_probe.so'), 'motion-probe.so')):
+    for source, name in ((args.plugin, 'motion-core.so'), (Path('build/motion_probe.so'), 'motion-probe.so')):
         target = root / name
         shutil.copy2(source, target)
         ctl('plugin', 'load', target); loaded.append(target)
-    config.write_text(original.replace('layout="dwindle"', 'layout="hy3"'))
     ctl('reload'); assert not ctl('configerrors')
     names = {m['name'] for m in json.loads(ctl('-j', 'monitors'))}
     ctl('output', 'create', 'headless')
@@ -130,7 +129,7 @@ try:
               for side in ('front', 'back')]
     for app in sum(extras, []):
         ctl('dispatch', f'hl.dsp.window.move({{window="address:{app}",workspace="31",follow=false}})')
-    focus(a); action('mark'); focus(b); action('pair')
+    focus(a); action('mark'); focus(b); action('card')
     for transform in (0, 1):
         lua(f'hl.monitor({{output="{output}",mode="3840x2160@60",position="2000x0",scale=1.5,transform={transform}}})')
         # Use the installed Omarchy movement curve for the unfold comparison.

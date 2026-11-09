@@ -80,3 +80,17 @@ if hl.plugin.hyprflip and hl.plugin.hyprflip.fullscreen then
         if plugin and plugin.fullscreen then plugin.fullscreen() end
     end, { description = "Hyprflip: fullscreen the whole card" })
 end
+
+if hl.plugin.hyprflip and hl.plugin.hyprflip.attach then
+    -- Grow or shrink a card: add the focused app beside or below the card it
+    -- moves into, or take the focused app out of its card.
+    local function run(action, argument)
+        return function()
+            local plugin = hl.plugin.hyprflip
+            if plugin and plugin[action] then plugin[action](argument) end
+        end
+    end
+    shortcuts.bind("SUPER + CTRL + ALT + H", run("attach", "horizontal"), { description = "Hyprflip: attach pane beside" })
+    shortcuts.bind("SUPER + CTRL + ALT + V", run("attach", "vertical"), { description = "Hyprflip: attach pane below" })
+    shortcuts.bind("SUPER + CTRL + ALT + E", run("release"), { description = "Hyprflip: release focused pane" })
+end

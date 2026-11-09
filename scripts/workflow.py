@@ -47,8 +47,8 @@ class CoreUnavailable(SetupError):
 def fullscreen_card_only(card, windows, workspace):
     """True when every fullscreen app on the workspace belongs to this native card.
 
-    Native dwindle/floating cards keep editing while fullscreen; hy3 cards and
-    two-window groups, or an unrelated fullscreen app, still need it left first.
+    Native dwindle/floating cards keep editing while fullscreen; two-window
+    groups, or an unrelated fullscreen app, still need it left first.
     """
     fullscreen = {a for a, w in windows.items() if w.get('fullscreen') and w['workspace']['id'] == workspace}
     members = {a for face in card.get('faces', []) for a in face}
@@ -63,12 +63,8 @@ def mark_address(ipc, address):
 
 
 def card_layout_available(state, layout):
-    """New cores own dwindle cards; older cores require their hy3 provider."""
-    if not state.get('container_provider'):
-        return False
-    if layout == 'dwindle':
-        return bool(state.get('native_cards'))
-    return layout == 'hy3' and state.get('hy3_provider', True)
+    """Cards live on Omarchy's default dwindle layout, built by the core itself."""
+    return bool(state.get('container_provider') and state.get('native_cards')) and layout == 'dwindle'
 
 
 MENU_BACKENDS = ('auto', 'omarchy', 'fuzzel', 'rofi', 'wofi')
@@ -776,7 +772,7 @@ class Find:
             card, state = self.check(plan)
             if state.get('animating'):
                 raise SetupError('Another turn started. Open Find app again.')
-            # Native cards and pairs turn while fullscreen; hy3 cards cannot,
+            # Native cards and pairs turn while fullscreen; any other card cannot,
             # so revealing a hidden app there leaves fullscreen first.
             if (plan.kind == 'containers' and not card.get('native_group') and not card.get('unfolded')
                     and card['active'] != side):
@@ -920,7 +916,7 @@ class Setup:
         workspace = source['workspace']['id']
         layouts = {w['id']: w['tiledLayout'] for w in self.ipc.data('-j', 'workspaces')}
         if workspace < 1 or not card_layout_available(state, layouts.get(workspace)):
-            raise SetupError('Use a normal dwindle workspace, or enable the optional hy3 provider, then open setup again.')
+            raise SetupError('Cards open on a normal dwindle workspace. Switch this workspace back to dwindle, then open setup again.')
         eligible = self.eligible(windows, state)
         if front not in eligible:
             if source.get('floating') and not state.get('workspace_protection'):
@@ -2058,7 +2054,7 @@ class Saved(Setup):
         layout = layouts.get(destination)
         if (not state.get('container_provider') or destination < 1 or
                 (not card_layout_available(state, layout) and not (layout is None and recipe.get('workspace') == destination))):
-            raise SetupError('Open a card on a normal dwindle workspace, or enable the optional hy3 provider.')
+            raise SetupError('Cards open on a normal dwindle workspace. Switch this workspace back to dwindle, then try again.')
         if any(len(face['apps']) > state.get('container_max_panes', 2) for face in recipe['faces']):
             raise SetupError('Update the container plugins before opening this card; it needs more apps per side.')
 
@@ -2460,7 +2456,7 @@ class Saved(Setup):
         self.ipc.call('dispatch', f'hl.dsp.focus({{workspace={destination}}})')
         layouts = {w['id']: w['tiledLayout'] for w in self.ipc.data('-j', 'workspaces')}
         if not card_layout_available(self.ipc.status(), layouts.get(destination)):
-            raise SetupError(f'Workspace {destination} needs a supported card layout (dwindle or optional hy3).')
+            raise SetupError(f'Workspace {destination} needs the dwindle layout for cards.')
         return replace(plan, workspace=destination, focus=self.ipc.data('-j', 'activewindow').get('address'))
 
     @staticmethod

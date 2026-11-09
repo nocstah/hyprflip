@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Check multi-pane transitions, reversals and cleanup on a disposable 4K output."""
+"""Check multi-pane transitions, reversals and cleanup on a disposable 4K output.
+
+Cards run natively on dwindle with only the core and motion probe loaded.
+"""
 import argparse
 import json
 from pathlib import Path
@@ -63,10 +66,9 @@ def capture(name):
 
 try:
     assert not data('-j','plugin','list')
-    for source in (project/'build/containers/provider/upstream/libhy3.so',project/'build/containers/core/hyprflip.so',project/'build/motion_probe.so'):
+    for source in (project/'build/hyprflip.so',project/'build/motion_probe.so'):
         target=root/('transitions-'+source.name);shutil.copy2(source,target)
         ctl('plugin','load',target);loaded.append(target)
-    config.write_text(original.replace('layout="dwindle"','layout="hy3"'))
     ctl('reload');assert not ctl('configerrors')
     names={m['name'] for m in data('-j','monitors')};ctl('output','create','headless')
     output=next(m['name'] for m in data('-j','monitors') if m['name'] not in names)
@@ -74,7 +76,7 @@ try:
     ctl('dispatch',f'hl.dsp.focus({{monitor="{output}"}})');ctl('dispatch','hl.dsp.focus({workspace=30})')
     setting('flip',0)
     a,b=spawn('front','244961'),spawn('back','674455')
-    focus(a);action('mark');focus(b);action('pair')
+    focus(a);action('mark');focus(b);action('card')
     extras=[]
     for name,color in (('front-2','345a62'),('front-3','28484d'),('back-2','694b3b'),('back-3','5b3e54')):
         address=spawn(name,color);extras.append(address)

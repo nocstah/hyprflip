@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Real input and output lifecycle checks for hold-to-peek, in a disposable session."""
+"""Real input and output lifecycle checks for hold-to-peek, in a disposable session.
+
+Cards run natively on dwindle with only the core loaded.
+"""
 import argparse
 import json
 from pathlib import Path
@@ -49,10 +52,10 @@ def held(*keys):
 
 try:
     assert not data('-j', 'plugin', 'list')
-    for source in (project / 'build/containers/provider/upstream/libhy3.so', project / 'build/containers/core/hyprflip.so'):
+    for source in (project / 'build/hyprflip.so',):
         target = root / ('peek-' + source.name); shutil.copy2(source, target)
         ctl('plugin', 'load', target); loaded.append(target)
-    config.write_text(original.replace('layout="dwindle"', 'layout="hy3"') + '''
+    config.write_text(original + '''
 -- The synthetic wtype keyboard has its own keymap. Physical bindings retain
 -- the user's existing resolver setting; this override is only in this fixture.
 hl.config({input={resolve_binds_by_sym=true}})
@@ -68,7 +71,7 @@ hl.bind("SUPER + CTRL + ALT + SPACE", function() hl.plugin.hyprflip.peek() end)
     clients = {w['class']: w['address'] for w in data('-j', 'clients')}
     a, b = clients['hyprflip-front'], clients['hyprflip-back']
     for address in (a, b): ctl('dispatch', f'hl.dsp.window.move({{window="address:{address}",workspace="{workspace}",follow=false}})')
-    focus(a); action('mark'); focus(b); action('pair'); focus(a)
+    focus(a); action('mark'); focus(b); action('card'); focus(a)
     time.sleep(.6)
     for mode in state()['transition_modes']:
         setting(mode)
@@ -156,7 +159,6 @@ hl.bind("SUPER + CTRL + ALT + SPACE", function() hl.plugin.hyprflip.peek() end)
     passed('unloading while holding releases the card without hidden survivors')
     core = root / 'peek-hyprflip.so'
     ctl('plugin', 'load', core); loaded.append(core)
-    lua('hl.config({general={layout="dwindle"}})'); time.sleep(.4)
     setting('instant'); focus(a); action('mark'); focus(b); action('pair'); focus(a)
     assert len(state()['pairs']) == 1 and not state()['containers']
     action('peek'); assert state()['peeking'] and state()['pairs'][0]['current'] == b

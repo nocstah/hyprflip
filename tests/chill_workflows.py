@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Exercise automatic Chill, guided tiling and rollback in a disposable compositor."""
+"""Exercise automatic Chill, guided tiling and rollback on dwindle in a disposable compositor.
+
+Loads only the core plugin, from a throwaway home that scripts/install.py then
+updates in place. Start a fresh nested session without a demo flag and pass an
+Omachill engine prepared by integrations/omachill/prepare-source.py (or 1.5+).
+"""
 import argparse
 from copy import deepcopy
 import importlib.util
@@ -23,7 +28,8 @@ setup = importlib.util.module_from_spec(spec); sys.modules[spec.name] = setup; s
 ipc = setup.Hyprctl(env)
 config = root / 'hyprland.lua'; original = config.read_text()
 loaded, processes, checks = [], [], []
-installed = root / 'chill-installed'
+home = root / 'home'
+installed = home / '.local/lib/hyprflip'
 
 
 class Picker:
@@ -53,11 +59,9 @@ def spawn(name):
 
 try:
     assert not ipc.data('-j', 'plugin', 'list')
-    for source in (project / 'build/containers/provider/upstream/libhy3.so', project / 'build/containers/core/hyprflip.so'):
-        target = installed / ('containers/libhy3.so' if source.name == 'libhy3.so' else 'hyprflip.so')
-        target.parent.mkdir(parents=True, exist_ok=True); shutil.copy2(source, target)
-        ipc.call('plugin', 'load', str(target)); loaded.append(target)
-    config.write_text(original.replace('layout="dwindle"', 'layout="hy3"'))
+    target = installed / 'hyprflip.so'
+    target.parent.mkdir(parents=True, exist_ok=True); shutil.copy2(project / 'build/hyprflip.so', target)
+    ipc.call('plugin', 'load', str(target)); loaded.append(target)
     ipc.call('reload'); assert not ipc.call('configerrors')
     lua('hl.config({plugin={hyprflip={duration_ms=0,notifications=false}}})')
     a,b = [w['address'] for w in ipc.windows().values() if w['class'] in ('hyprflip-front','hyprflip-back')]
@@ -74,7 +78,7 @@ try:
     assert restored['floating'] and restored['at'] == plain['at'] and restored['size'] == plain['size']
     ipc.tile(restored)
     passed('ordinary floating apps regain their original size and position after a failed handoff')
-    home = root / 'home'; (home / '.local/state').mkdir(parents=True, exist_ok=True)
+    (home / '.local/state').mkdir(parents=True, exist_ok=True)
     engine = root / 'chillmode.lua'
     engine.write_text(args.engine.read_text().replace('os.getenv("HOME")', json.dumps(str(home))))
     engine_code = ('CHILLMODE_OPTS={auto=true,auto_max=3,notify=false,keybind="",key_hide="",key_restore="",hide=false}; '
@@ -93,23 +97,34 @@ try:
     flow = setup.Setup(ipc, Picker(b)); selected = flow.prepare(a)
     flow.apply(selected)
     assert protect(1) and ipc.status()['containers'][0]['faces'] == [[a],[b]]
+    def shape():
+        card = ipc.status()['containers'][0]
+        return card['id'], card['faces'], card['floating'], card['box']
+    created = shape()
     assert all(not any(t.rstrip('*') == 'chillmode' for t in ipc.windows()[w]['tags']) for w in (a,b))
     config.write_text(config.read_text() + '\n' + engine_code + '\n')
-    result = subprocess.run(['python', str(project / 'scripts/update-containers.py'), '--library-root', str(installed),
-                             '--state-dir', str(root / 'chill-updates')], env=env, capture_output=True, text=True, timeout=45)
+    # Update the core in place with the installer, into a throwaway home whose
+    # library path is the one loaded above.
+    (home / '.config/hypr').mkdir(parents=True, exist_ok=True)
+    (home / '.config/hypr/hyprland.lua').write_text('-- disposable installer test configuration\n')
+    result = subprocess.run(['python3', str(project / 'scripts/install.py')], capture_output=True, text=True, timeout=120,
+                            env=env | {'HOME': str(home), 'XDG_CONFIG_HOME': str(home / '.config'),
+                                       'XDG_DATA_HOME': str(home / '.local/share')})
     assert result.returncode == 0, (result.stdout, result.stderr)
-    assert protect(1) and ipc.status()['containers'][0]['faces'] == [[a],[b]]
+    assert protect(1) and shape() == created
     assert all(ipc.windows()[w]['floating'] for w in (a,b))
     passed('a live plugin upgrade preserves the card while automatic Chill remains enabled')
     for _ in range(3):
         lua('chillmode.toggle(1)')
         time.sleep(.12)
-        assert all(ipc.windows()[w]['floating'] for w in (a,b))
+        assert all(ipc.windows()[w]['floating'] for w in (a,b)) and shape() == created
+    # A native card's workspace is open to Chill (hy3 cards kept it out), so
+    # automatic Chill may take the new app; either way the card is untouched.
     c = spawn('hyprflip-chill-extra'); time.sleep(.15)
-    assert not ipc.windows()[c]['floating']
+    assert shape() == created and c not in sum(created[1], [])
     processes[-1].terminate(); processes[-1].wait(timeout=5)
     time.sleep(.15)
-    assert all(ipc.windows()[w]['floating'] for w in (a,b))
+    assert all(ipc.windows()[w]['floating'] for w in (a,b)) and shape() == created
     passed('guided creation takes apps out of Chill; auto, manual toggle and open/close preserve the card')
 
     ipc.focus(a); ipc.action('workspace 8')
@@ -127,20 +142,20 @@ try:
     wait(lambda: all(ipc.windows()[w]['floating'] for w in (a,b,c)))
     passed('movement and reload preserve the card; ungrouping lets automatic Chill resume')
 
-    # One selected app from another workspace, then a deliberately rejected pair.
+    # One selected app from another workspace, then a deliberately rejected card.
     ipc.move(c, 9); ipc.focus(a); time.sleep(.2)
     before = deepcopy(ipc.windows())
     flow = setup.Setup(ipc, Picker('workspace:9', c, 'create'))
     selected = flow.prepare(a)
     real_focused = ipc.focused
-    def reject_pair(*operations):
-        # Cores with native cards create them with `card`; older ones with `pair`.
-        if any(action in ('pair', 'card') for _, action in operations): raise setup.SetupError('Injected pair failure')
+    def reject_card(*operations):
+        # The dwindle core creates a multi-app card with `card`.
+        if any(action == 'card' for _, action in operations): raise setup.SetupError('Injected card failure')
         return real_focused(*operations)
-    ipc.focused = reject_pair
+    ipc.focused = reject_card
     try: flow.apply(selected)
     except setup.SetupError as error: assert 'Injected' in str(error), error
-    else: raise AssertionError('Expected a pair rejection')
+    else: raise AssertionError('Expected a card rejection')
     finally: ipc.focused = real_focused
     for w in (a,c):
         current = ipc.windows()[w]

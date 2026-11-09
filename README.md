@@ -12,8 +12,9 @@ both faces together. Each app stays a real, live window with its own state.
 [Poster](media/dwindle-poster.png) · [Recording details](media/README.md)
 
 Actual compositor footage with sample windows, using **dwindle and the core
-plugin alone**. The [earlier Gmail demo](media/hyprflip-demo.mp4) uses the
-optional hy3 integration.
+plugin alone**. The [earlier Gmail demo](media/hyprflip-demo.mp4) was recorded
+with the since-removed hy3 integration; the dwindle demo above shows current
+behavior.
 
 [Features](#features) · [Install](#install) · [First card](#make-your-first-card) ·
 [Shortcuts](#shortcuts) · [Transitions](#transitions) ·
@@ -21,8 +22,8 @@ optional hy3 integration.
 
 **Early release:** targets **Hyprland 0.56.2**, with matching development headers
 and compiler ABI. The core is a native C++/GLES plugin. **Multi-app cards work on
-dwindle with the core plugin alone.** Existing hy3 setups can use the optional
-pinned provider. **Omarchy is optional:** menus prefer its
+dwindle with the core plugin alone**, tiled or floating; no other layout plugin
+is needed. **Omarchy is optional:** menus prefer its
 running shell, then automatically fall back to **Fuzzel, Rofi or Wofi**.
 
 ## Features
@@ -56,12 +57,12 @@ running shell, then automatically fall back to **Fuzzel, Rofi or Wofi**.
 | | Two-window pairs | Multi-app cards |
 | --- | --- | --- |
 | Apps per face | One | One to five |
-| Layout | Native Hyprland groups; dwindle tested | Native groups on dwindle; optional pinned provider on hy3 |
+| Layout | Native Hyprland groups; dwindle tested | One native outer group per card, placed by dwindle |
 | Floating windows | A pair can be floating | Whole multi-app cards can float, move and resize together |
 | Flip, transitions and peek | Yes; custom binding for peek | Yes |
 | Unfold, pane editing and whole-card navigation | — | Yes |
 | Guided menus and saved-card library | — | Optional helper: Omarchy shell, Fuzzel, Rofi or Wofi |
-| Installation | Supplied core installer or hyprpm | Core + optional helper; hy3 provider only for hy3 layouts |
+| Installation | Supplied core installer or hyprpm | Core + optional guided helper |
 
 Native dwindle cards are available in the **0.3.0-rc.13 preview**. The five-app
 limit is Hyprflip's supported model. Try the [short beta checklist](docs/BETA.md)
@@ -80,6 +81,14 @@ Run from a terminal in your Hyprland session:
 ```sh
 git clone https://github.com/nocstah/hyprflip.git
 cd hyprflip
+python3 scripts/bootstrap.py
+```
+
+`bootstrap.py` checks the prerequisites (naming any missing packages), builds
+and self-tests, then runs `scripts/install.py` and `scripts/install-setup.py`.
+`--check` only checks. To run the steps by hand instead:
+
+```sh
 make test
 python3 scripts/install.py --dry-run
 python3 scripts/install.py
@@ -92,9 +101,11 @@ two-window native pairs and customized settings are preserved during an update.
 The helper adds creation, editing and saved-card menus. Keep the workspace on
 **dwindle**; no additional layout plugin is needed.
 
-Updating keeps open dwindle and floating cards: `python3 scripts/bootstrap.py`
-checks the prerequisites, builds, installs and rebuilds open cards afterwards.
-Existing hy3 users should follow the separate provider update instructions.
+Updating keeps open dwindle and floating cards: after `git pull`, run
+`python3 scripts/bootstrap.py` again; it rebuilds open cards after replacing the
+core. An older setup that still loads the removed hy3 provider should follow
+[leaving the hy3 provider](docs/INSTALL.md#leaving-the-retired-hy3-provider)
+first.
 
 Prefer hyprpm? Use the [hyprpm instructions](docs/INSTALL.md#hyprpm).
 For another configuration layout, use the
@@ -111,29 +122,6 @@ python3 tests/nested_session.py --directory /tmp/hf-demo --native-cards
 
 This needs `foot` and a running Wayland session. Click inside and press **F8**
 to flip. Stop the launcher with **Ctrl+C**. Demo shortcuts apply only there.
-
-### Optional hy3 integration
-
-The container build fetches the pinned hy3 source and builds both libraries:
-
-```sh
-./scripts/build-containers
-```
-
-Try it in a disposable nested desktop before enabling a real workspace:
-
-```sh
-python3 tests/nested_session.py --directory /tmp/hf-demo --containers
-```
-
-This demo needs `foot` and a running Wayland session. Click inside it and use
-**F8** to flip. Stop its launcher with **Ctrl+C** when finished. F6/F7/F8 are
-**demo-only** shortcuts.
-
-Then follow **[first-time container activation](docs/INSTALL.md#first-time-activation)**
-to install the provider, enable workspace 8 and add the guided menus. The guide
-also covers all-workspace operation, navigation bindings, upgrades and removal.
-Building alone does not install or load either library.
 
 ### Without Omarchy
 
@@ -228,14 +216,14 @@ Hold **Super + Ctrl + Alt** for the following keys:
 | **M** / **P** | Mark the front / pair the focused app as the back | Core bindings |
 | **U** | Ungroup the card; keep its apps open | Core bindings |
 | **Escape** | Cancel a pending mark | Core bindings |
-| **O** | Unfold/fold; on an ungrouped app, open guided creation | Containers; helper for creation |
+| **O** | Unfold/fold; on an ungrouped app, open guided creation | Guided helper |
 | **C** | Edit a card, choose transitions or manage saved cards | Guided helper |
 | **L** | Search and open saved cards | Guided helper |
 | **K** | Find an app on either face of any open card | Guided helper |
 | **Space**, held | Peek at the other side; release to return | Helper binding, or a custom core binding |
-| **H** / **V** | Attach a marked app beside / below the focused pane | Container bindings |
-| **E** | Release the focused pane | Container bindings |
 | **Return** | Fullscreen the whole dwindle or floating card; press again to leave | Guided helper |
+| **H** / **V** | Add the marked app beside or below the focused pane | Guided helper |
+| **E** | Take the focused app out of its card | Guided helper |
 
 Use **K** when you remember the app, and **L** when you want a saved arrangement.
 Results in K show the workspace, face and whether the app is hidden.
@@ -250,8 +238,9 @@ Optional [navigation bindings](docs/INSTALL.md#move-cards-with-normal-shortcuts)
 | **Super+Shift+arrows** | Reorder the whole card toward a neighboring tile |
 
 Without that module, ordinary window-move shortcuts may move only the focused
-pane. Workspace destinations must be numbered; tiled hy3 cards also need a
-hy3 destination. Floating cards keep their shared frame on other normal layouts.
+pane. Shortcut destinations must be numbered; named and special workspaces are
+reached [by card id](docs/SCRIPTING.md). Floating cards keep their shared frame
+on other normal layouts.
 
 ## Transitions
 
@@ -307,10 +296,8 @@ receive typing. Existing keyboard shortcuts continue to work.
 The frame uses your Hyprland border colors and groupbar font settings. It is
 built into Hyprflip; no additional border plugin is required. It replaces tab
 bars only on cards owned by Hyprflip. Set `card_frame = false` to disable it;
-native pairs and hy3 containers then use their original tab bars. Floating
-and native dwindle multi-app cards use their border-only appearance with this setting.
-The hy3 frame needs the matching updated provider; older providers keep their
-tabs until updated.
+two-window pairs then use their native group tab bar, and dwindle and floating
+multi-app cards use a border-only appearance.
 
 **Desktop spacing** follows `general:gaps_in` and workspace `gaps_in`
 overrides, including directional gaps. **Compact spacing** leaves 12 logical
@@ -324,15 +311,15 @@ drag the app onto **Drop to add to Front/Back** near the card’s top. Release
 there to add it to that side. Escape or releasing elsewhere keeps the normal
 window move. When unfolded, each face has its own target. A full side explains
 its five-app limit; application size limits can also refuse a drop. This works
-with both appearances, for native dwindle, hy3 and floating cards. Native one-app
-pairs need to be converted to a container first. Set `drag_to_add = false` to
-turn off these targets.
+with both appearances, for dwindle and floating cards. Two-window pairs have no
+drop target: ungroup one and recreate it with O first. Set `drag_to_add = false`
+to turn off these targets.
 
 ## Compatibility and limits
 
 - **Version pin:** Hyprland 0.56.2 only. Rebuild after compositor or ABI changes;
   other versions need adaptation and testing.
-- **Containers:** one workspace, two faces, at most five apps in a row or
+- **Cards:** one workspace, two faces, at most five apps in a row or
   column per face, tiled or floating. Nested flip cards and arbitrary pane trees
   are not implemented. Native dwindle and floating cards give unfolded faces
   unequal space when their apps need it, while preserving each face's pane
@@ -342,18 +329,18 @@ turn off these targets.
   dwindle and floating cards fullscreen as a whole card: the visible face fills
   the screen, split by a thin accent divider, and flip, peek, unfold, layout
   changes and adding, replacing or releasing apps keep working. Leave
-  fullscreen before moving a card, or flipping an hy3 container. With Omachill
+  fullscreen before moving a card. With Omachill
   adapter v2, Chill floats a native card as one window.
   Floating cards move and resize as a unit with normal desktop mouse bindings.
-  Tiled card reordering uses the optional navigation bindings. Named/special-workspace
-  card moves are not implemented.
+  Tiled card reordering uses the optional navigation bindings. Moves to named
+  and special workspaces are available by card id only
+  ([scripting](docs/SCRIPTING.md)).
 - **Saved setups:** live card identities do not survive a compositor restart.
   The optional saved-card launcher recreates named arrangements when requested.
 - **Omachill:** integration is optional and targets Omachill 1.2.0. Install the
   [adapter](docs/TRANSITIONS.md#chill-mode) before using Auto Chill with cards.
 - **Hyprglass:** tested with the documented builds; its extra background pass
-  is temporarily suppressed during a turn and restored afterward. Keep it
-  loaded while the container updater replaces Hyprflip and hy3.
+  is temporarily suppressed during a turn and restored afterward.
 - **Rendering:** popups do not rotate. Unsupported geometry or surface conditions
   fall back to an instant switch. HDR, individual-window capture, other layouts
   and arbitrary plugin combinations need further testing.
@@ -365,8 +352,8 @@ hyprctl hyprflip status
 hyprctl configerrors
 ```
 
-`status` lists native `pairs` and experimental `containers` separately, reports
-`container_provider`, and includes `last_fallback` for instant-switch reasons.
+`status` lists two-window `pairs` and multi-app `containers` separately, reports
+`native_cards` and `container_provider`, and includes `last_fallback` for instant-switch reasons.
 See [installation and recovery](docs/INSTALL.md#troubleshooting) and the
 [recorded validation](TESTING.md). Desktop tests cover real apps, fractional
 scaling, rotated outputs, card editing, saved-card launching and plugin upgrades;
@@ -375,7 +362,7 @@ CI alone does not establish compositor or GPU compatibility.
 ## Documentation
 
 - [Install, update, troubleshoot and remove](docs/INSTALL.md)
-- [Container behavior, direct commands and Lua API](docs/CONTAINERS.md)
+- [Multi-app card behavior, direct commands and Lua API](docs/CONTAINERS.md)
 - [Driving cards from other programs](docs/SCRIPTING.md) — status, a quiet restore, actions by card id, and opening and saving cards unattended
 - [Saved cards, launchers and hold to peek](docs/SAVED_CARDS.md)
 - [Find hidden apps and optional mouse flip](docs/FIND_APPS.md)
@@ -387,6 +374,4 @@ CI alone does not establish compositor or GPU compatibility.
 - [Lessons from WinMux](docs/WINMUX_RESEARCH.md)
 - [Contributing](CONTRIBUTING.md) · [Issues](https://github.com/nocstah/hyprflip/issues)
 
-The core is [MIT licensed](LICENSE). The optional hy3 bridge is
-[GPL-3.0-only](integrations/hy3/LICENSE), built with a separately fetched, pinned
-hy3 source tree. See [integration licensing](integrations/hy3/README.md).
+Hyprflip is [MIT licensed](LICENSE).

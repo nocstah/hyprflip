@@ -60,13 +60,13 @@ its visible pane, floats it in place as one window with
 `hl.plugin.hyprflip.card_place(address, x, y, w, h)`, and converts tile-back
 resizes from the card to that pane. Both faces share the chilled frame, so
 flipping keeps its size; tiling back returns the card to its slot. Chill
-decisions ask `hl.plugin.hyprflip.chill_blocked(id)`, which stays true for hy3
-cards, fullscreen cards, reservations and moves. App handoff still requires
+decisions ask `hl.plugin.hyprflip.chill_blocked(id)`, which stays true for
+fullscreen cards, reservations and moves. App handoff still requires
 `protects_workspace`. A v1 engine keeps every card workspace tiled.
 
 Adapter v3 lets Chill win over a fullscreen card: toggling Chill on its
 workspace leaves fullscreen first, then chills the card. A card that still
-cannot chill (hy3) gets its fullscreen back and Chill explains why.
+cannot chill gets its fullscreen back and Chill explains why.
 
 Omachill 1.5.0 includes this integration (v1–v4; 1.4.0 has v1–v3), so
 updating Omachill keeps it. The adapter is only needed for older engines: it
@@ -86,17 +86,17 @@ The engine queries `hl.plugin.hyprflip.protects_workspace(id)` where it would
 float or reposition apps. It resolves the optional plugin on every call and
 still works when Hyprflip is absent. Cards protect their normal workspaces.
 Creation and imports reserve their involved workspaces for at most 60 seconds;
-completion and cancellation release reservations. The updater uses bounded
-120-second holds while compositor libraries are replaced. Moving a native card onto
+completion and cancellation release reservations. The engine also accepts
+bounded workspace holds through `chillmode.hold_workspace` for a tool that
+replaces compositor libraries; the supplied installer does not set any. Moving a native card onto
 a chilled workspace makes it join Chill like a newly opened app, through
-`chillmode.join` (adapter v4, Omachill 1.5.0). Without `join`, and for hy3
-cards, the move asks you to turn off Chill there first and leaves the card in
-place.
+`chillmode.join` (adapter v4, Omachill 1.5.0). Without `join`, the move asks
+you to turn off Chill there first and leaves the card in place.
 
 Upgrade holds are stored briefly in the compositor's private runtime directory,
 keyed by its instance signature, and read once when the Chill engine loads.
 This covers automatic Lua reloads during plugin loading without polling a file
-on window events. Expired holds are ignored, including after a failed updater.
+on window events. Expired holds are ignored, including after a failed update.
 
 Rendering references: [HyprWindowShade](https://github.com/ManofJELLO/HyprWindowShade/tree/4414596c2fbb64cb5bb4aa7342900051338fed7a)
 for shared progress and shader composition, and [Cybex](https://github.com/DigitalPals/omarchy-cybex/blob/e76c323ed69baf0efae12b2e7afb42635920607a/config/hyprland/looknfeel.conf)

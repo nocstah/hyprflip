@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Exercise multi-app cards, five-pane limits, size rollback and guided creation."""
+"""Exercise multi-app cards, five-pane limits, size rollback and guided creation on dwindle.
+
+Loads only the core plugin (plus optional Hyprglass). Start a fresh nested session without a demo flag.
+"""
 import argparse
 from copy import deepcopy
 import json
@@ -39,7 +42,7 @@ def lua(code): return ipc.call('repl', code)
 def active(): return ipc.data('-j', 'activewindow').get('address')
 def card(): return ipc.status()['containers'][0]
 def passed(name): checks.append(name); print('PASS', name, flush=True)
-def pair(a, b): ipc.focus(a); ipc.action('mark'); ipc.focus(b); ipc.action('pair')
+def card_of(a, b): ipc.focus(a); ipc.action('mark'); ipc.focus(b); ipc.action('card')
 def attach(app, anchor, axis):
     ipc.focus(app); ipc.action('mark'); ipc.focus(anchor); ipc.action('attach ' + axis)
 def edit(anchor, *answers):
@@ -83,13 +86,12 @@ def spawn(name, minimum=None):
 
 try:
     assert not ipc.data('-j', 'plugin', 'list')
-    libraries = [project / 'build/containers/provider/upstream/libhy3.so', project / 'build/containers/core/hyprflip.so']
+    libraries = [project / 'build/hyprflip.so']
     if args.hyprglass: libraries.append(args.hyprglass)
     for source in libraries:
         library = root / ('three-' + source.name)
         shutil.copy2(source, library)
         ipc.call('plugin', 'load', str(library)); loaded.append(library)
-    config.write_text(original.replace('layout="dwindle"', 'layout="hy3"'))
     ipc.call('reload'); assert not ipc.call('configerrors')
     assert ipc.status()['container_max_panes'] == 5
     names = {m['name'] for m in ipc.data('-j', 'monitors')}
@@ -109,7 +111,7 @@ try:
     for transform in (0, 1):
         axis = 'horizontal' if transform == 0 else 'vertical'
         lua(f'hl.monitor({{output="{output}",mode="3840x2160@60",position="2000x0",scale=1.5,transform={transform}}})')
-        pair(a, b); attach(c, b, axis)
+        card_of(a, b); attach(c, b, axis)
         ipc.focus(b)
         ipc.call('dispatch', f'hl.dsp.window.resize({{x={100 if transform == 0 else 0},y={100 if transform else 0},relative=true}})')
         time.sleep(.3)
@@ -120,7 +122,9 @@ try:
         assert card()['faces'] == [[a], [b, c, d]]
         aligned([b, c, d], transform)
         assert abs(ratios([b, c], transform)[0] - before[0]) < .025
-        attach(e, a, axis); edit(a, 'add', f)
+        # On dwindle an attached app takes focus, as a newly opened window does;
+        # return to the anchor before opening its editor.
+        attach(e, a, axis); ipc.focus(a); edit(a, 'add', f)
         assert card()['faces'] == [[a, e, f], [b, c, d]] and active() == f
         aligned([a, e, f], transform)
         passed(f'rotation {transform}: both faces accept three apps and retain their axis and relative sizes')
@@ -203,7 +207,7 @@ try:
     lua(f'hl.monitor({{output="{output}",mode="3840x2160@60",position="2000x0",scale=1.5,transform=0}})')
     ipc.call('dispatch', 'hl.dsp.focus({workspace=33})')
     big, back = spawn('Minimum', (900, 550)), spawn('Minimum back')
-    pair(big, back)
+    card_of(big, back)
     companion = spawn('Minimum companion')
     attach(companion, big, 'horizontal')
     ipc.call('dispatch', 'hl.dsp.focus({workspace=34})')
@@ -221,20 +225,29 @@ try:
     visible(); ipc.action('unpair')
     passed('a real size-limited third-app import rolls back to its workspace and restores the two-app card')
 
-    # Three across normally unfolds into two rows. A tall application's minimum
-    # can require the side-by-side fallback, which still must remain usable.
-    ipc.call('dispatch', 'hl.dsp.focus({workspace=35})')
-    tall, reverse = spawn('Tall minimum', (300, 850)), spawn('Tall reverse')
-    pair(tall, reverse)
-    for name in ('Tall companion', 'Tall third'):
-        extra = spawn(name)
-        attach(extra, tall, 'horizontal')
-    ipc.focus(tall); ipc.action('unfold')
-    assert card()['unfolded']
-    time.sleep(.3)
-    windows = ipc.windows()
-    assert windows[tall]['size'][1] >= 880
-    assert windows[tall]['at'][1] == windows[reverse]['at'][1]
+    # Three across normally unfolds into two rows. The dwindle core keeps rows
+    # while an uneven split still honours a tall application's minimum, and
+    # falls back to side by side only when no row split can (hy3 switched axis
+    # earlier, at an even split). Both layouts must remain usable.
+    def tall_card(workspace, label, minimum):
+        ipc.call('dispatch', f'hl.dsp.focus({{workspace={workspace}}})')
+        tall, reverse = spawn(label + ' minimum', (300, minimum)), spawn(label + ' reverse')
+        card_of(tall, reverse)
+        for name in ('companion', 'third'):
+            attach(spawn(label + ' ' + name), tall, 'horizontal')
+        ipc.focus(tall); ipc.action('unfold')
+        assert card()['unfolded']
+        time.sleep(.3)
+        # Window heights are the fixture's content minimum plus its 30px top margin.
+        return tall, reverse, ipc.windows()
+    tall, reverse, windows = tall_card(35, 'Tall', 850)
+    assert windows[tall]['size'][1] >= 880, windows[tall]
+    assert windows[reverse]['at'][1] >= windows[tall]['at'][1] + windows[tall]['size'][1], (windows[tall], windows[reverse])
+    visible(); ipc.action('unfold'); ipc.action('unpair')
+    # Taller than any row split leaves room for: unfolding must use columns.
+    tall, reverse, windows = tall_card(36, 'Taller', 1350)
+    assert windows[tall]['size'][1] >= 1380, windows[tall]
+    assert windows[tall]['at'][1] == windows[reverse]['at'][1], (windows[tall], windows[reverse])
     assert windows[reverse]['at'][0] > windows[tall]['at'][0]
     visible(); ipc.action('unfold'); ipc.action('unpair')
     passed('three-pane unfolding prefers readable rows/columns and falls back to the other axis when minimum sizes require it')
@@ -249,10 +262,9 @@ finally:
     for proc in processes.values():
         try: proc.wait(timeout=3)
         except subprocess.TimeoutExpired: proc.kill(); proc.wait(timeout=3)
-    # Keep Hyprglass alive until the core and layout are unloaded.
-    if len(loaded) >= 2:
-        for library in (loaded[1], loaded[0], *loaded[2:]):
-            ipc.call('plugin', 'unload', str(library))
+    # Keep Hyprglass alive until the core is unloaded.
+    for library in loaded:
+        ipc.call('plugin', 'unload', str(library))
     config.write_text(original); ipc.call('reload')
     if output: ipc.call('output', 'remove', output)
     assert not ipc.call('configerrors')

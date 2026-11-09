@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Card frame input, gap parity and unload checks in a disposable compositor.
 
-Requires a fresh nested_session.py (without --containers), foot, grim, wtype,
+Runs native cards on dwindle with only the core loaded.
+Requires a fresh nested_session.py, foot, grim, wtype,
 ImageMagick, wayland-scanner and Wayland client development headers.
 Pass --protocol from the matching Hyprland source for real mouse input checks.
 """
@@ -125,17 +126,17 @@ def click(expected_change=True, drag=False, button=272, modified=False):
 
 
 try:
-    assert not ipc.data('-j', 'plugin', 'list'), 'Use a fresh nested session without --containers'
+    assert not ipc.data('-j', 'plugin', 'list'), 'Use a fresh disposable nested session'
     for kind, filename in (('client-header', 'frame-pointer-protocol.h'), ('private-code', 'frame-pointer-protocol.c')):
         subprocess.run(['wayland-scanner', kind, str(args.protocol), str(root / filename)], check=True)
     flags = shlex.split(subprocess.check_output(['pkg-config', '--cflags', '--libs', 'wayland-client'], text=True))
     subprocess.run(['cc', '-o', str(root / 'frame-pointer'), '-I' + str(root),
                     str(project / 'tests/frame_pointer.c'), str(root / 'frame-pointer-protocol.c'), *flags], check=True)
-    for source in (project / 'build/containers/provider/upstream/libhy3.so', project / 'build/containers/core/hyprflip.so'):
+    for source in (project / 'build/hyprflip.so',):
         target = root / ('frame-' + source.name)
         shutil.copy2(source, target)
         ipc.call('plugin', 'load', str(target)); loaded.append(target)
-    base = original.replace('layout="dwindle"', 'layout="hy3"') + '''
+    base = original + '''
 hl.config({animations={enabled=false},general={gaps_in=14,gaps_out=24}})
 if hl.plugin.hyprflip then hl.config({plugin={hyprflip={duration_ms=0,notifications=false}}}) end
 '''
@@ -150,8 +151,10 @@ if hl.plugin.hyprflip then hl.config({plugin={hyprflip={duration_ms=0,notificati
     ipc.call('dispatch', f'hl.dsp.focus({{monitor="{output}"}})')
     ipc.call('dispatch', 'hl.dsp.focus({workspace=61})')
     a, b, c = [spawn(name, color) for name, color in (('Mail', '20323a'), ('Messages', '302c40'), ('Notes', '263830'))]
-    assert gap(b, c) == 28, ipc.windows()
-    ipc.focused((a, 'mark'), (b, 'pair'), (c, 'mark'), (b, 'attach horizontal'))
+    # Dwindle may stack the third app below the second; measure the gap on whichever axis it split.
+    windows = ipc.windows()
+    assert gap(b, c, int(windows[b]['at'][0] == windows[c]['at'][0])) == 28, windows
+    ipc.focused((a, 'mark'), (b, 'card'), (c, 'mark'), (b, 'attach horizontal'))
     assert gap(b, c) == 28
     assert len(ipc.status()['card_frames']) == 1
     capture('tiled-dark')
@@ -169,19 +172,23 @@ if hl.plugin.hyprflip then hl.config({plugin={hyprflip={duration_ms=0,notificati
     for kwargs in ({'drag': True}, {'button': 273}, {'modified': True}): click(False, **kwargs)
     passed('compact frame clicks flip once on release; right-click, modifiers and drag-out do not flip')
     probe = root / 'frame-probe.so'
-    shutil.copy2(project / 'build/containers/core/motion_probe.so', probe)
+    shutil.copy2(project / 'build/motion_probe.so', probe)
     ipc.call('plugin', 'load', str(probe))
     try:
         # Some outputs render continuously while idle (e.g. headless outputs
-        # on a second GPU), so compare polling with an idle baseline.
-        def rendered(poll):
+        # on a second GPU), so compare polling with an idle baseline. The idle
+        # window lasts as long as the polling one: on a continuously rendering
+        # output the polls' own latency would otherwise count as extra frames.
+        def rendered(poll, duration=0):
             time.sleep(.4)
-            ipc.call('hf-motion-probe', 'start')
+            ipc.call('hf-motion-probe', 'start'); started = time.monotonic()
             for _ in range(40):
                 if poll: ipc.status()
                 time.sleep(.025)
-            return len([f for f in ipc.data('hf-motion-probe', 'stop') if f['monitor'] == output])
-        idle, polled = rendered(False), rendered(True)
+            time.sleep(max(0, duration - (time.monotonic() - started)))
+            return len([f for f in ipc.data('hf-motion-probe', 'stop') if f['monitor'] == output]), time.monotonic() - started
+        polled, duration = rendered(True)
+        idle, _ = rendered(False, duration)
         assert polled < idle + 15, (idle, polled)
         passed(f'status polling does not cause idle redraws ({polled} rendered frames during 40 polls, {idle} idle)')
     finally:
@@ -220,7 +227,7 @@ if hl.plugin.hyprflip then hl.config({plugin={hyprflip={duration_ms=0,notificati
 
     ipc.focus(b); ipc.action('unpair')
     assert not ipc.status()['card_frames']
-    config.write_text(base.replace('layout="hy3"', 'layout="dwindle"'))
+    config.write_text(base)  # drop the workspace gap override
     ipc.call('reload')
     ipc.focused((a, 'mark'), (b, 'pair'))
     assert len(ipc.status()['pairs']) == 1 and not ipc.status()['containers']

@@ -65,10 +65,9 @@ def visible():
 
 try:
     assert not ipc.data('-j', 'plugin', 'list')
-    for source in (project / 'build/containers/provider/upstream/libhy3.so', project / 'build/containers/core/hyprflip.so'):
+    for source in (project / 'build/hyprflip.so',):
         target = root / ('layout-' + source.name); shutil.copy2(source, target)
         ipc.call('plugin', 'load', str(target)); loaded.append(target)
-    config.write_text(original.replace('layout="dwindle"', 'layout="hy3"'))
     ipc.call('reload'); assert not ipc.call('configerrors')
     ipc.call('eval', 'hl.config({animations={enabled=false},plugin={hyprflip={duration_ms=0,notifications=false}}})')
     names = {m['name'] for m in ipc.data('-j', 'monitors')}; ipc.call('output', 'create', 'headless')
@@ -76,7 +75,7 @@ try:
     ipc.call('eval', f'hl.monitor({{output="{output}",mode="2560x1440@60",position="2000x0",scale=1}})')
     ipc.call('dispatch', f'hl.dsp.focus({{monitor="{output}"}})'); ipc.call('dispatch', 'hl.dsp.focus({workspace=40})')
     a, b, c, d = [spawn(name) for name in ('front', 'back', 'third', 'fourth')]
-    ipc.focused((a, 'mark'), (b, 'pair')); attach(b, c); attach(b, d)
+    ipc.focused((a, 'mark'), (b, 'card')); attach(b, c); attach(b, d)
     assert ipc.status()['layout_controls']
     helper = setup.Setup(ipc, Menu())
     helper.restore_ratios({'windows': [b, c, d], 'axis': 'horizontal', 'ratios': [.6, .25, .15]})
@@ -93,7 +92,7 @@ try:
 
     # Transfer a pane which was not focused in the menu, then follow it.
     edit(b, 'other_side', d)
-    assert card()['faces'] == [[a, d], [b, c]] and card()['active'] == 0 and active() == d
+    assert card()['faces'] == [[a, d], [b, c]] and card()['active'] == 0 and active() == d, (card(), active(), [a, b, c, d])
     ipc.action('flip'); assert active() == b
     ipc.action('flip'); assert active() == d
     visible()
@@ -137,7 +136,7 @@ try:
     ipc.action('unpair')
     for address in (a,b,c,d,e): ipc.move(address, 41)
     x, y, z = spawn('min-front'), spawn('min-back'), spawn('wide', [1500, 100])
-    ipc.focused((x, 'mark'), (y, 'pair')); attach(y, z, 'vertical')
+    ipc.focused((x, 'mark'), (y, 'card')); attach(y, z, 'vertical')
     ipc.focus(y); before, saved = deepcopy(card()), shape()
     for answers in (('layout', 'layout horizontal'), ('other_side', z)):
         try: edit(y, *answers)
@@ -148,9 +147,9 @@ try:
         visible()
     passed('minimum-size failures restore exact membership, order, axis, proportions, focus and folded state')
     ipc.action('flip'); ipc.action('flip'); visible()
-    # Recreate so the destination is a leaf, not a one-child wrapper left by
-    # the preceding refused transfer. Its outer weight differs when unfolded.
-    ipc.action('unpair'); ipc.focused((x, 'mark'), (y, 'pair')); attach(y, z, 'vertical')
+    # Recreate the card fresh so the refused transfer below starts from a
+    # clean one-app destination. Its outer weight differs when unfolded.
+    ipc.action('unpair'); ipc.focused((x, 'mark'), (y, 'card')); attach(y, z, 'vertical')
     ipc.action('unfold'); ipc.focus(x)
     ipc.call('dispatch', 'hl.dsp.window.resize({x=0,y=150,relative=true})')
     ipc.focus(y)
@@ -163,7 +162,7 @@ try:
     restored_boxes = {a:(ipc.windows()[a]['at'],ipc.windows()[a]['size']) for a in (x,y,z)}
     assert restored_boxes == boxes, (restored_boxes, boxes)
     passed('failed transfer also preserves unequal outer face sizes while unfolded')
-    # Exit with a populated card so teardown also traverses the edited tree.
+    # Exit with a populated card so teardown also releases an edited card.
     completed = True
 finally:
     config.write_text(original); ipc.call('reload')

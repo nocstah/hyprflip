@@ -109,7 +109,7 @@ hl.config({{general={{gaps_in=14,gaps_out=24}},animations={{enabled=false}},
     ipc.call('reload'); assert not ipc.call('configerrors')
     ipc.call('dispatch', f'hl.dsp.focus({{monitor="{output}"}})')
     ipc.call('dispatch', 'hl.dsp.focus({workspace=71})')
-    assert ipc.status()['native_cards'] and not ipc.status()['hy3_provider']
+    assert ipc.status()['native_cards'] and 'hy3_provider' not in ipc.status()
     assert [p['name'] for p in ipc.data('-j', 'plugin', 'list')] == ['hyprflip']
     front, back = [spawn('minimum-' + name) for name in ('front', 'back')]
     ipc.focused((front, 'mark'), (back, 'card'))

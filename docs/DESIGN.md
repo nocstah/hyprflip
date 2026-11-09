@@ -27,12 +27,13 @@ faces, restores original window targets before removal/unload, and shares the
 same implementation between tiled and floating cards. Guided creation uses the
 `card` action; `pair` keeps the existing two-window native behavior on dwindle.
 
-The optional [container experiment](CONTAINERS.md) uses a separately built hy3
-provider instead. Hy3 owns a two-tab group with one to five leaf windows per tab.
-The controller consumes a bounded face snapshot, selects the visible face, and
-attaches the same temporary transformers to its members with a shared pivot.
-There is one animation controller and no second layout tree. Native pairs keep
-their existing backend and recovery behavior.
+The controller reaches that adapter through a small fixed table of functions
+(`ContainerABI.hpp`), internal to the core. It consumes a bounded face snapshot
+of one to five windows per face, selects the visible face, and attaches the same
+temporary transformers to its members with a shared pivot. There is one
+animation controller and no second layout tree: dwindle still owns the card's
+tile. Two-window pairs keep their plain-group backend and recovery behavior.
+See [multi-app cards](CONTAINERS.md) for behavior and commands.
 
 ### Related grouping plugins
 
@@ -61,9 +62,8 @@ both Classic tabs and Card frame appearances. It leaves the desktop's general,
 outer and neighboring tile gaps intact.
 
 Pane geometry accounts for each window's border so floating and tiled cards
-leave the same empty gap. Hy3 splits a custom gap into floor and ceiling halves
-so an odd value still adds up to the requested full gap. Desktop spacing keeps
-the inherited directional values instead.
+leave the same empty gap. Desktop spacing keeps the inherited directional
+values.
 
 Unfolding preserves each face's pane arrangement. For faces with three or more
 apps, horizontal rows prefer faces above and below each other, while vertical
@@ -80,8 +80,8 @@ Settings offers **Classic tabs** and **Card frame (Experimental)**. The choice
 applies to existing cards and persists across reloads and restarts. Appearance
 and spacing are independent choices.
 
-With Card frame enabled, native pairs, floating multi-app cards and compatible
-hy3 containers share one compact frame. Its outline encloses the visible apps;
+With Card frame enabled, native pairs and dwindle and floating multi-app cards
+share one compact frame. Its outline encloses the visible apps;
 a label at the top left shows Front or Back and the app count, and Flip at the
 top right turns the card.
 Unfolded cards show Both sides, the combined count and Fold. Reserve one header
@@ -109,12 +109,10 @@ other cards' rings use 55% opacity so they never compete with the focus border.
 `accent_color` supplies the color; the shell sets it from its theme accent.
 When unset or invalid, the ring uses the first active border color.
 
-Choosing Classic tabs (`card_frame = false`) restores native/hy3 tab bars and
-the floating multi-app card's border-only appearance. An older hy3 provider
-without the optional frame extension keeps its original tabs. A provider with
-only the older frame extension keeps native gaps; the spacing override needs
-the style extension. Unrelated groups retain their native decorations, and
-unload restores usable native windows and tabs.
+Choosing Classic tabs (`card_frame = false`) restores the native group tab bar
+on two-window pairs and the border-only appearance of dwindle and floating
+multi-app cards. Unrelated groups retain their native decorations, and unload
+restores usable native windows and tabs.
 
 ### Drag to add
 
@@ -125,8 +123,8 @@ the extra pane slot along the face's current orientation. The preview does not
 change membership or layout. Only a left-button release over the explicit
 target adds the app; an ordinary release elsewhere keeps normal window dragging.
 
-Both appearances use the same gesture for floating multi-app cards and hy3
-containers. Folded cards expose only the visible face; unfolded cards offer
+Both appearances use the same gesture for dwindle and floating multi-app
+cards. Folded cards expose only the visible face; unfolded cards offer
 separate Front and Back targets. Native pairs with one app per face retain
 native grouping.
 A face at capacity shows **Front: 5 apps already** or **Back: 5 apps already**

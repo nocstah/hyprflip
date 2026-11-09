@@ -177,8 +177,8 @@ Controller::Controller(HANDLE handle, Settings settings)
         if (!m_mutating) m_peek.reset();
         if (!m_mutating && m_turn) {
             auto p = find(m_turn->pairID);
-            // hy3 fullscreen belongs to an application, not the two-tab card.
-            // Keep that application's visible face when fullscreen interrupts.
+            // In a two-window group, fullscreen belongs to an application, not
+            // the pair. Keep that application's visible face when fullscreen interrupts.
             finish(!p || !p->containerID);
         }
     }));
@@ -281,20 +281,9 @@ std::vector<PHLWINDOWREF> Controller::State::windows() const {
     return result;
 }
 const ContainerAPI *Controller::provider(uint64_t epoch) const {
-    if (epoch == FloatingCards::EPOCH) return FloatingCards::api();
-    // Never retain a function pointer across an event or provider unload.
-    for (auto plugin : g_pPluginSystem->getAllPlugins()) {
-        if (plugin->m_name != "hy3")
-            continue;
-        auto entry = reinterpret_cast<ContainerEntry>(dlsym(plugin->m_handle, CONTAINER_SYMBOL));
-        if (!entry)
-            continue;
-        const auto api = entry();
-        if (api && api->version == CONTAINER_ABI_VERSION && api->size == sizeof(ContainerAPI) &&
-            (!epoch || epoch == api->epoch))
-            return api;
-    }
-    return nullptr;
+    // Cards are built by the core itself, on dwindle or floating.
+    // Epoch 0 is a plain two-window pair (a Hyprland group): no card engine.
+    return epoch == FloatingCards::EPOCH ? FloatingCards::api() : nullptr;
 }
 void Controller::discardContainer(const Pair &p) {
     if (p.containerID)
@@ -388,16 +377,6 @@ void Controller::syncFrames() {
             if (header) for (const auto &window : pair.windows) native.push_back(window);
         } else if (pair.providerEpoch == FloatingCards::EPOCH) {
             ready = FloatingCards::setStyle(pair.containerID, header, gap, divider);
-        } else if (provider(pair.providerEpoch)) {
-            for (auto plugin : g_pPluginSystem->getAllPlugins()) {
-                if (plugin->m_name != "hy3") continue;
-                using SetFrame = bool (*)(uint64_t, double);
-                using SetStyle = bool (*)(uint64_t, double, double);
-                const auto style = reinterpret_cast<SetStyle>(dlsym(plugin->m_handle, "hyprflip_hy3_card_style_v1"));
-                const auto set = reinterpret_cast<SetFrame>(dlsym(plugin->m_handle, "hyprflip_hy3_card_frame_v1"));
-                ready = style ? style(pair.containerID, header, gap) : set && set(pair.containerID, header);
-                break;
-            }
         }
         pair.frame = header > 0 && ready;
     }
@@ -763,10 +742,10 @@ Result Controller::pair(bool multiApp) {
     finish();
     m_mutating = true;
     const auto &algorithm = a->m_workspace->m_space->algorithm()->tiledAlgo();
-    // Built-in layouts use their concrete type; layoutName() is optional and
-    // identifies generic plugin adapters such as hy3.
+    // Built-in layouts use their concrete type. A plain two-window pair on a
+    // tiled layout is a Hyprland group, below; cards are the core's own.
     const bool dwindle = dynamic_cast<Layout::Tiled::CDwindleAlgorithm *>(algorithm.get());
-    const auto api = a->m_isFloating || (multiApp && dwindle) ? FloatingCards::api() : provider();
+    const auto api = a->m_isFloating || (multiApp && dwindle) ? FloatingCards::api() : nullptr;
     if (api && api->supports(reinterpret_cast<uintptr_t>(a.get())) &&
                                api->supports(reinterpret_cast<uintptr_t>(b.get()))) {
         const auto id = api->create(reinterpret_cast<uintptr_t>(a.get()), reinterpret_cast<uintptr_t>(b.get()));
@@ -790,14 +769,9 @@ Result Controller::pair(bool multiApp) {
         return {id != 0, id ? "Card created. Flip sides, or mark another window and attach it to a face."
                             : "Could not create the card."};
     }
-    if (!a->m_isFloating && a->m_workspace->m_space->algorithm()->tiledAlgo()->layoutName() == "hy3") {
-        m_mutating = false;
-        return {false,
-                "The hy3 container provider is unavailable or incompatible. Rebuild both experimental libraries."};
-    }
     if (multiApp) {
         m_mutating = false;
-        return {false, "Create cards on a normal dwindle workspace, or use the optional hy3 provider."};
+        return {false, "Cards open on a normal dwindle workspace, or float the first window."};
     }
     auto g = CGroup::create({a});
     if (!b->canBeGroupedInto(g)) {
@@ -1187,19 +1161,16 @@ Result Controller::moveCard(Pair &card, const std::string &destination, bool fol
     auto s = state(card);
     if (!s)
         return {false, "This card changed. Pair its windows again."};
-    // 0 for named and special workspaces, which only native cards reach.
+    // 0 for named and special workspaces.
     uint32_t number = 0;
     std::from_chars(destination.data(), destination.data() + destination.size(), number);
-    const bool native = card.providerEpoch == FloatingCards::EPOCH;
-    if (!number && !native)
-        return {false, "Hy3 cards move to numbered workspaces only."};
     // A native card joins a chilled destination the way a new app does, when
     // Chill (Omachill 1.5+) offers join. Otherwise the move is refused.
     const bool chilled = number && std::ranges::any_of(Desktop::windowState()->windows(), [&](const auto& window) {
         return window->m_isMapped && window->m_isFloating && window->m_workspace && window->m_workspace->m_id == number &&
             window->m_ruleApplicator->m_tagKeeper.isTagged("chillmode");
     });
-    const bool joins = chilled && native &&
+    const bool joins = chilled &&
         HyprlandAPI::invokeHyprctlCommand("repl", "return tostring(chillmode ~= nil and chillmode.join ~= nil)").starts_with("true");
     if (chilled && !joins)
         return {false, "Turn off Chill mode on workspace " + std::to_string(number) +
@@ -1221,7 +1192,7 @@ Result Controller::moveCard(Pair &card, const std::string &destination, bool fol
         if (const auto after = state(*moved))
             HyprlandAPI::invokeHyprctlCommand("eval", "if chillmode and chillmode.join then chillmode.join(" +
                                                           address(after->focused[after->active]) + ") end");
-    return {ok, ok ? "ok" : "The card could not move to that workspace. Hy3 cards require a hy3 destination."};
+    return {ok, ok ? "ok" : "The card could not move to that workspace."};
 }
 Result Controller::show(Pair &p, unsigned side) {
     if (inputBusy())
@@ -1383,7 +1354,7 @@ bool Controller::blocksChill(uint32_t workspace) const {
         if (!card || !card->focused[0] || !card->focused[0]->m_workspace ||
             card->focused[0]->m_workspace->m_id != workspace) continue;
         // Chill floats a native card as one window, both faces sharing its
-        // frame. hy3 cards and fullscreen cards stay out of Chill.
+        // frame. Fullscreen cards stay out of Chill.
         if (pair.providerEpoch != FloatingCards::EPOCH ||
             std::ranges::any_of(card->windows(), [](const auto& w) { return Fullscreen::controller()->isFullscreen(w.lock()); }))
             return true;
@@ -1928,8 +1899,7 @@ std::string Controller::status() {
     return json + "],\"card_frames\":" + (m_frames ? m_frames->status() : "[]") +
            ",\"card_rings\":" + (m_frames ? m_frames->rings() : "[]") +
            ",\"card_dividers\":" + (m_frames ? m_frames->dividers() : "[]") +
-           ",\"native_cards\":true,\"hy3_provider\":" + (provider() ? "true" : "false") +
-           ",\"floating_cards\":true,\"workspace_protection\":true,\"container_provider\":true" +
+           ",\"native_cards\":true,\"floating_cards\":true,\"workspace_protection\":true,\"container_provider\":true" +
            ",\"layout_controls\":true,\"repair_cards\":true,\"card_ungroup\":true,\"pane_replacement\":true" +
            ",\"reveal\":true,\"container_max_panes\":" + std::to_string(CONTAINER_MAX_PANES) + "}";
 }

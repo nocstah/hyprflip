@@ -8,7 +8,7 @@ fallback. `--legacy` explicitly selects those menus. `--front` and explicit
 
 Install with `python3 scripts/install-setup.py`. Native-pair installations can
 use `--backend-only` to install the helper and preference loader without the
-container bindings. This update changes Python and Lua files, not native
+guided card bindings. This update changes Python and Lua files, not native
 compositor libraries. The Lua preference loader accepts only known transition
 names, integer durations from 0 to 2000 milliseconds, known appearance names,
 integer card gaps from -1 to 128 logical pixels, `#RRGGBB` accent and divider
@@ -16,21 +16,22 @@ colors, and integer fullscreen dividers from 0 to 16 pixels.
 
 ## Local JSON protocol 1
 
-The compositor status advertises `native_cards` for the built-in dwindle backend
-and `hy3_provider` for the optional loaded hy3 bridge. `container_provider` means
-that multi-app cards are available through at least one backend; it no longer
-implies that hy3 is loaded. The shared helper checks the workspace layout and
-these capabilities together, and still accepts older hy3-only status replies.
-No panel protocol change is required.
+The compositor status advertises `native_cards` for the core's own dwindle and
+floating cards, and `container_provider` when multi-app cards are available.
+The shared helper checks the workspace layout and these capabilities together:
+it creates and opens cards only on a dwindle workspace of a core reporting
+`native_cards`. Status from older cores also carried `hy3_provider`; the current
+core no longer reports it and the helper does not read it. No panel protocol
+change is required.
 
 ```sh
 python3 ~/.local/lib/hyprflip/control.py snapshot
 python3 ~/.local/lib/hyprflip/control.py run --request '<JSON object>'
 ```
 
-Snapshot is read-only. It normalizes native pairs and provider containers into
+Snapshot is read-only. It normalizes two-window pairs and multi-app cards into
 two faces, includes card/library tokens, original focus/workspace/session,
-provider capabilities, app icons, transition modes and animation settings.
+core capabilities, app icons, transition modes and animation settings.
 There are no persistent window IDs: tokens belong to one Hyprland instance.
 `context.anchor_label` names the app that will become the front of a new card;
 it is display text only and never used to identify or retarget a window.
@@ -129,8 +130,7 @@ first when enabling. `control.py accent-color --color '#RRGGBB'` updates only
 the color, without a panel request, so a shell can follow its theme; unchanged
 colors are not rewritten or dispatched. Both values persist like spacing.
 `fullscreen` toggles whole-card fullscreen for a native (dwindle or floating)
-multi-app card, targeted like `floating`; hy3 cards and two-window groups are
-refused. Apps are not told they are fullscreen, so browsers keep their toolbars.
+multi-app card, targeted like `floating`; two-window groups are refused. Apps are not told they are fullscreen, so browsers keep their toolbars.
 Cards report `fullscreen` and `native` (a dwindle or floating card that can
 fullscreen as a whole); `capabilities.fullscreen` gates the control. While a
 native card is fullscreen, the helper keeps editing it (flip, unfold, layout,

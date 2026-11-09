@@ -5,7 +5,7 @@ Hyprflip: related apps become the front and back of one desktop card. For
 example, Gmail on the front and WhatsApp + Telegram on the back. Flip between
 them, unfold both sides, or save the arrangement and reopen it later.
 
-The new preview works with the core plugin on dwindle—hy3 is optional. It also
+The new preview works with the core plugin alone on dwindle. It also
 fits unfolded faces to their apps' size requirements, which fixes the Comms
 example on my laptop. This preview targets Hyprland 0.56.2.
 

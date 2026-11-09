@@ -133,7 +133,7 @@ try:
     run_script('install.py', '--dry-run')
     assert main.read_bytes() == original_main and not (task_home / '.local/lib/hyprflip').exists()
     run_script('install.py')
-    assert ipc.status()['native_cards'] and not ipc.status()['hy3_provider']
+    assert ipc.status()['native_cards'] and 'hy3_provider' not in ipc.status()
     assert [p['name'] for p in ipc.data('-j', 'plugin', 'list')] == ['hyprflip']
     passed('The published core installer passes dry-run, installs, loads and preserves the stock dwindle layout')
     wait(lambda: shell.poll() is not None or w.omarchy_running(env), 25)
