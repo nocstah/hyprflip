@@ -1090,6 +1090,47 @@ class Setup:
         reason = reply[len('error: '):] if reply.startswith('error: ') else ''
         raise SetupError(clean(reason, 240) if reason else 'The saved card could not be rebuilt. Its apps are still open.')
 
+    def bring_here(self, plan, card, windows, state):
+        """Opens a saved card that is already open: on the workspace you are on, as it was saved.
+
+        Opening a saved card means having it here, so one open on another
+        workspace comes to this one instead of sending you there. One saved
+        floating that has since become a tile, often too narrow for its apps,
+        is rebuilt floating at a size they fit. A card saved for a workspace of
+        its own is handled by the caller and still goes there.
+        """
+        here, name = plan.workspace, plan.name
+        where = windows[card['current']]['workspace']['id']
+        if card.get('fullscreen'):
+            self.ipc.focus(card['current'])
+            return None
+        moved = where != here
+        if moved:
+            reply = self.ipc.batch([f'hyprflip card {card["id"]} workspace {here} silent'])[-1]
+            if not reply.startswith('ok'):
+                raise SetupError(clean(reply.removeprefix('error: '), 240) or 'The card could not be moved here.')
+        floated = bool(plan.recipe.get('floating')) and not card.get('floating') and bool(state.get('card_ungroup'))
+        if floated:
+            arrangement = {'active': card['active'], 'floating': True, 'faces': []}
+            for members, saved, layout in zip(card['faces'], plan.recipe['faces'], card.get('layouts') or [{}, {}]):
+                ratios = next((list(r) for r in (layout.get('ratios'), saved.get('ratios'))
+                               if r and len(r) == len(members)), [1 / len(members)] * len(members))
+                focus = members.index(layout['focused']) if layout.get('focused') in members else 0
+                arrangement['faces'].append({'windows': list(members), 'ratios': ratios,
+                                             'axis': saved.get('axis') or layout.get('axis', 'horizontal'), 'focus': focus})
+            reply = self.ipc.batch([f'hyprflip card {card["id"]} ungroup'])[-1]
+            if not reply.startswith('ok'):
+                raise SetupError(clean(reply.removeprefix('error: '), 240) or 'The card could not be floated again.')
+            self.restore_whole({}, arrangement, here)
+            face = arrangement['faces'][arrangement['active']]
+            self.ipc.focus(face['windows'][face['focus']])
+        else:
+            self.ipc.focus(card['current'])
+        if moved and floated: return f'Brought “{name}” here and floated it again.'
+        if moved: return f'Brought “{name}” here.'
+        if floated: return f'Floated “{name}” again.'
+        return None
+
     def restore_ratios(self, face):
         panes = face['windows']
         if len(panes) == 1: return
@@ -1877,6 +1918,29 @@ class Saved(Setup):
         scale = sum(ratios)
         return [ratio / scale for ratio in ratios]
 
+    def repair_whole(self, plan, selected, targets, additions):
+        """Reopens a card's missing apps by rebuilding the whole card in one step.
+
+        Attaching each app inside the card's present box fails when that box is
+        too small for the apps it should hold: Claude beside ChatGPT needs about
+        1100 px, and a card left in half a 14" screen has 726. The core's restore
+        sizes the card to fit, floating when it was saved floating. If the
+        rebuild is refused, the apps stay open as separate windows and the
+        reason names the app that does not fit.
+        """
+        card = plan.edit.card
+        whole = {'active': card['active'], 'faces': deepcopy(targets),
+                 'floating': bool(plan.recipe.get('floating') or card.get('floating'))}
+        for face in whole['faces']:
+            if not 0 <= face.get('focus', 0) < len(face['windows']): face['focus'] = 0
+        reply = self.ipc.batch([f'hyprflip card {card["id"]} ungroup'])[-1]
+        if not reply.startswith('ok'):
+            raise SetupError(clean(reply.removeprefix('error: '), 240) or 'The card could not be rebuilt.')
+        self.import_windows(additions, plan.workspace, [])
+        self.restore_whole(selected, whole, plan.workspace)
+        face = whole['faces'][whole['active']]
+        self.ipc.focus(face['windows'][face['focus']])
+
     def repair_reserved(self, plan, selected, arrangement):
         windows, state = self.validate_repair(plan)
         original = plan.edit
@@ -1893,6 +1957,8 @@ class Saved(Setup):
             missing = {a: r for a, r in zip(target['windows'], target['ratios']) if a not in members}
             target['ratios'] = self.blend(target['windows'], dict(zip(members, old['ratios'])), missing)
             if len(members) > 1: target['axis'] = old['axis']
+        if state.get('native_cards') and state.get('card_ungroup'):
+            return self.repair_whole(plan, selected, targets, additions)
         expected = deepcopy(original.card['faces'])
         marked, moved, tiled, attempted = state.get('marked'), [], [], []
 
@@ -2003,8 +2069,9 @@ class Saved(Setup):
                 recipe = cards[name]
                 opened = self.open_cards(recipe, windows, state)
                 if opened:
-                    places = sorted({workspace_name(windows[c['current']]) for c in opened})
-                    detail = 'Open · Workspace ' + ', '.join(places)
+                    elsewhere = sorted({workspace_name(windows[c['current']]) for c in opened
+                                        if windows[c['current']]['workspace']['id'] != workspace})
+                    detail = 'Bring here from workspace ' + ', '.join(elsewhere) if elsewhere else 'Open on this workspace'
                 else:
                     matches = self.free_apps(recipe, windows, state)
                     remote = sorted({workspace_name(w) for w in matches if w['workspace']['id'] != workspace})
@@ -2084,7 +2151,7 @@ class Saved(Setup):
         focus = self.ipc.data('-j', 'activewindow').get('address')
         opened = self.open_cards(recipe, self.ipc.windows(), self.ipc.status())
         choices = [Choice('open', 'Open on workspace ' + str(recipe['workspace']) if recipe.get('workspace') else
-                          'Go to open card' if opened else 'Open here', self.describe(recipe))]
+                          'Bring open card here' if opened else 'Open here', self.describe(recipe))]
         if edit:
             choices.insert(0, Choice('update', 'Update saved card', 'Save the current apps, split sizes and visible side'))
         if not opened:
@@ -2434,10 +2501,12 @@ class Saved(Setup):
             if not card or card['faces'] != plan.card['faces'] or any(
                     a not in windows or windows[a]['pid'] != w['pid'] for a, w in plan.windows.items()):
                 raise SetupError('That open card changed. Open Saved cards again.')
-            self.ipc.focus(card['current'])
-            if plan.recipe.get('workspace') and windows[card['current']]['workspace']['id'] != plan.recipe['workspace']:
-                self.ipc.focused((card['current'], 'workspace ' + str(plan.recipe['workspace'])))
-            return
+            if plan.recipe.get('workspace'):
+                self.ipc.focus(card['current'])
+                if windows[card['current']]['workspace']['id'] != plan.recipe['workspace']:
+                    self.ipc.focused((card['current'], 'workspace ' + str(plan.recipe['workspace'])))
+                return
+            return self.bring_here(plan, card, windows, state)
         if plan.action != 'restore': raise SetupError('Choose a saved card action first.')
         self.check_plan(plan)
         plan = self.destination(plan)

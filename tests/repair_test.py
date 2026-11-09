@@ -182,6 +182,28 @@ class RepairTest(unittest.TestCase):
         self.assertEqual(self.ipc.card['id'], before['id'])
         self.assertEqual(self.ipc.card['current'], '0xa')
 
+    def test_a_core_with_card_ungroup_rebuilds_the_whole_card_at_a_size_that_fits(self):
+        # Attaching inside the card's present box fails when it is too small for its apps.
+        self.ipc.remove('0xc'); self.ipc.focus('0xa')
+        self.ipc.snapshot.update(native_cards=True, card_ungroup=True)
+        sent = []
+
+        def batch(commands):
+            sent.append(commands)
+            if commands[0].endswith(' ungroup'): self.ipc.snapshot['containers'] = []
+            if ' restore quiet ' in commands[0]:
+                self.ipc.snapshot['containers'] = [dict(self.ipc.card, faces=[['0xa'], ['0xb', '0x2c', '0xd']])]
+            return ['ok']
+        self.ipc.batch = batch
+        flow = setup.Saved(self.ipc, Menu())
+        plan = flow.prepare_named('Comms', self.recipe, 2, '0xa')
+        self.assertEqual(plan.action, 'repair')
+        self.apply(flow, plan)
+        self.assertEqual(sent[0], [f'hyprflip card {self.ipc.card["id"]} ungroup'])
+        self.assertTrue(sent[1][0].startswith('hyprflip restore quiet tiled 0 0 '), sent)
+        self.assertIn('back vertical 0xb 0xb:0.2 0x2c:0.3 0xd:0.5', sent[1][0])
+        self.assertFalse([m for m in self.ipc.mutations if m[0] == 'action' and m[1].startswith('attach')])
+
     def test_opening_the_saved_card_still_refuses_apps_held_by_other_cards(self):
         self.ipc.remove('0xc', close=False)
         self.ipc.snapshot['containers'].append(dict(id=2, faces=[['0xc'],['0xe']]))

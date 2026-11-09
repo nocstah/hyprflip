@@ -132,7 +132,12 @@ def snapshot(ipc):
         for name in sorted(recipes, key=str.casefold):
             recipe, opened = recipes[name], matches[name]
             if opened:
-                detail = 'Go to · Workspace ' + ', '.join(sorted({w.workspace_name(windows[c['current']]) for c in opened}))
+                elsewhere = sorted({w.workspace_name(windows[c['current']]) for c in opened
+                                    if windows[c['current']]['workspace']['id'] != ctx['workspace']})
+                if recipe.get('workspace'):
+                    detail = 'Go to · Workspace ' + ', '.join(sorted({w.workspace_name(windows[c['current']]) for c in opened}))
+                else:
+                    detail = 'Bring here from workspace ' + ', '.join(elsewhere) if elsewhere else 'Open on this workspace'
             else:
                 existing = w.Saved.free_apps(recipe, windows, state)
                 remote = sorted({w.workspace_name(win) for win in existing if win['workspace']['id'] != ctx['workspace']})

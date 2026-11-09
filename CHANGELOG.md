@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.3.0-rc.13 — 2026-11-09
+
+- Opening a saved card that is already open on another workspace brings it to
+  the workspace you are on, instead of sending you to it. A card saved for a
+  workspace of its own still goes there. Saved-card rows say so: “Bring here
+  from workspace 1”, or “Open on this workspace”.
+- Opening a saved card that was saved floating, and is open as a tile, floats
+  it again at a size that fits its apps. A tile in half a 14" screen is too
+  narrow for ChatGPT beside Claude Desktop.
+- Reopening a card's missing apps rebuilds the whole card in one quiet
+  `restore`, as opening a saved card does since 0.3.0-rc.12, instead of
+  attaching each app inside the card's present box. That failed with “This
+  split is too small for the applications” whenever the box was too small for
+  the apps it should hold. Needs a core with `card_ungroup`; older cores keep
+  the earlier path.
+- Bridge ABI 7 and helper protocol 1 are unchanged.
+
 ## 0.3.0-rc.12 — 2026-11-08
 
 - Saved cards open in one step at a size that fits their apps. Opening one

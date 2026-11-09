@@ -1,5 +1,22 @@
 # Validation
 
+## Open cards brought here, floated and completed whole (2026-11-09)
+
+Release checks for 0.3.0-rc.13, a helper-only change. All 356 Python unit tests
+pass, 4 of them new: an open card on another workspace is moved here with
+`card <id> workspace <here> silent`; one saved floating and open as a tile is
+ungrouped and restored floating; one saved for its own workspace is still gone
+to; and reopening a missing app on a core with `card_ungroup` sends one ungroup
+and one quiet restore, with no attach. Fresh nested sessions passed the
+unattended (12), floating `--dwindle` (10), dwindle (7) and card id (13) suites.
+The repair, opening and saved suites need the hy3 build and were not run.
+
+On the pilot desktop, the AI card was open as a tile in half the screen with
+Claude Desktop closed. Opening it reopened Claude and rebuilt the card floating,
+1151 x 604 px and inside the 1512 px screen, with ChatGPT at 509 px and Claude at
+622 px. Before this change the same open failed with “This split is too small
+for the applications”.
+
 ## Saved cards that must grow to fit (2026-11-08)
 
 Release checks for 0.3.0-rc.12. The tree passes both CTest checks and all 352

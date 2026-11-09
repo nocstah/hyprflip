@@ -208,6 +208,60 @@ class SavedTest(unittest.TestCase):
         flow.apply(plan)
         self.assertTrue(sent[0][0].startswith('hyprflip restore quiet floating 1 0 450 165 600 700 front'), sent)
 
+    def open_elsewhere(self, workspace=3, floating=False):
+        """Comms saved, and open as a card on another workspace; the core answers every batch ok."""
+        self.store.update('Comms', self.recipe, None)
+        card = self.ipc.snapshot['containers'][0]
+        card.update(floating=floating, id=card.get('id', 1))
+        for face in card['faces']:
+            for address in face: self.ipc.clients[address]['workspace'] = {'id': workspace, 'name': str(workspace)}
+        self.ipc.snapshot.update(native_cards=True, card_ungroup=True)
+        sent = []
+
+        def batch(commands):
+            sent.append(commands)
+            for command in commands:
+                if ' workspace ' in command:
+                    for face in card['faces']:
+                        for address in face: self.ipc.clients[address]['workspace'] = {'id': 2, 'name': '2'}
+                if command.endswith(' ungroup'): self.ipc.snapshot['containers'] = []
+                if ' restore quiet ' in command:
+                    self.ipc.snapshot['containers'] = [dict(card, floating=True)]
+            return ['ok']
+        self.ipc.batch = batch
+        return card, sent
+
+    def test_an_open_card_elsewhere_is_brought_here_not_gone_to(self):
+        card, sent = self.open_elsewhere()
+        flow = self.saved('0')
+        plan = flow.prepare_restore()
+        self.assertIn('Bring here from workspace 3', flow.menu.prompts[0][1][0].detail)
+        self.assertEqual(flow.apply(plan), 'Brought “Comms” here.')
+        self.assertEqual(sent, [[f'hyprflip card {card["id"]} workspace 2 silent']])
+        self.assertEqual(self.ipc.mutations[-1], ('focus', card['current']))
+
+    def test_a_card_saved_floating_and_open_as_a_tile_is_floated_again(self):
+        # A tile is often too narrow for the apps that a floating card fits.
+        self.recipe['floating'] = True
+        card, sent = self.open_elsewhere(workspace=2)
+        self.ipc.data = lambda *args, _data=self.ipc.data: (
+            [{'id': 2, 'monitorID': 0, 'tiledLayout': 'dwindle'}] if args == ('-j', 'workspaces') else
+            [{'id': 0, 'x': 0, 'y': 0, 'width': 3000, 'height': 2000, 'scale': 2, 'reserved': [0, 30, 0, 0]}]
+            if args == ('-j', 'monitors') else _data(*args))
+        flow = self.saved('0'); plan = flow.prepare_restore()
+        self.assertIn('Open on this workspace', flow.menu.prompts[0][1][0].detail)
+        self.assertEqual(flow.apply(plan), 'Floated “Comms” again.')
+        self.assertEqual(sent[0], [f'hyprflip card {card["id"]} ungroup'])
+        self.assertTrue(sent[1][0].startswith('hyprflip restore quiet floating '), sent)
+        self.assertIn('front horizontal 0xa 0xa:1 back horizontal', sent[1][0])
+
+    def test_a_card_saved_for_its_own_workspace_is_still_gone_to(self):
+        self.recipe['workspace'] = 3
+        card, sent = self.open_elsewhere()
+        flow = self.saved('0'); flow.apply(flow.prepare_restore())
+        self.assertEqual(sent, [])
+        self.assertIn(('focus', card['current']), self.ipc.mutations)
+
     def test_a_refused_restore_says_which_app_does_not_fit(self):
         self.ungrouped()
         self.whole_core('error: Claude needs at least 600 px, so this card would have to be 1818 px wide, '

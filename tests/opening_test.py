@@ -156,7 +156,7 @@ class OpeningTest(unittest.TestCase):
         launch.assert_not_called()
         self.assertEqual(self.ipc.mutations, [('focus','0xc')])
         self.assertEqual(len(flow.menu.prompts), 1)
-        self.assertIn('Open · Workspace 2', flow.menu.prompts[0][1][0].detail)
+        self.assertIn('Open on this workspace', flow.menu.prompts[0][1][0].detail)
 
     def test_ambiguous_existing_windows_require_selection(self):
         self.ipc.clients['0xe'] = self.ipc.clients['0xa'] | {'address':'0xe', 'pid':22}

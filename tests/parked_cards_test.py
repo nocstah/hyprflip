@@ -69,10 +69,14 @@ class ParkedCardsTest(unittest.TestCase):
                      current=twins['0xb'], active=1, unfolded=False)
         self.ipc.snapshot['containers'].append(shown)
         self.park(self.ipc.card); self.away()
+        sent = []
+        self.ipc.batch = lambda commands: (sent.append(commands), ['ok'])[1]
         flow = setup.Saved(self.ipc, Menu())
         plan = flow.prepare_named('Comms', self.recipe, 2, '0xe')
         self.assertEqual((plan.action, plan.card['id'], flow.menu.prompts), ('goto', 2, []))
-        flow.apply(plan)
+        # Open on workspace 3 while you are on 2: the card comes to you.
+        self.assertEqual(flow.apply(plan), 'Brought “Comms” here.')
+        self.assertEqual(sent, [['hyprflip card 2 workspace 2 silent']])
         self.assertEqual(self.ipc.mutations, [('focus', '0x1b')])
         # Parked after the menu chose it, it is not revealed either.
         self.ipc.active = '0xe'
