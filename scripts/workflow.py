@@ -1957,8 +1957,21 @@ class Saved(Setup):
             missing = {a: r for a, r in zip(target['windows'], target['ratios']) if a not in members}
             target['ratios'] = self.blend(target['windows'], dict(zip(members, old['ratios'])), missing)
             if len(members) > 1: target['axis'] = old['axis']
-        if state.get('native_cards') and state.get('card_ungroup'):
-            return self.repair_whole(plan, selected, targets, additions)
+        try:
+            return self.repair_in_place(plan, selected, original, state, targets, additions, before)
+        except SetupError as error:
+            # Reopened in place, the card keeps its id for programs that know it.
+            # When its box is too small for the apps it should hold, the attempt
+            # rolls back and the card is rebuilt whole at a size they fit.
+            if not (state.get('native_cards') and state.get('card_ungroup') and
+                    re.search(r'too small|more room|needs at least', str(error))):
+                raise
+        live = next((c for c in self.ipc.status().get('containers', []) if c['id'] == original.card['id']), None)
+        if not live or live['faces'] != original.card['faces']:
+            raise SetupError('The card changed while reopening apps. Open the card menu again.')
+        return self.repair_whole(plan, selected, targets, additions)
+
+    def repair_in_place(self, plan, selected, original, state, targets, additions, before):
         expected = deepcopy(original.card['faces'])
         marked, moved, tiled, attempted = state.get('marked'), [], [], []
 

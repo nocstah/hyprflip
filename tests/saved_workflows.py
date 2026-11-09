@@ -65,10 +65,9 @@ def assert_shape(expected):
 
 try:
     assert not ipc.data('-j', 'plugin', 'list')
-    for source in (project / 'build/containers/provider/upstream/libhy3.so', project / 'build/containers/core/hyprflip.so'):
+    for source in (project / 'build/hyprflip.so',):
         target = root / ('saved-' + source.name); shutil.copy2(source, target)
         ipc.call('plugin', 'load', str(target)); loaded.append(target)
-    config.write_text(original.replace('layout="dwindle"', 'layout="hy3"'))
     ipc.call('reload'); assert not ipc.call('configerrors')
     lua('hl.config({plugin={hyprflip={duration_ms=0,notifications=false}}})')
     names = {m['name'] for m in ipc.data('-j', 'monitors')}; ipc.call('output', 'create', 'headless')
@@ -82,7 +81,7 @@ try:
     back = [b, spawn('hyprflip-save-back2'), spawn('hyprflip-save-back3')]
     addresses = front + back
     if args.phase == 'save':
-        ipc.focus(a); ipc.action('mark'); ipc.focus(b); ipc.action('pair')
+        ipc.focus(a); ipc.action('mark'); ipc.focus(b); ipc.action('card')
         for face, axis in ((front, 'horizontal'), (back, 'vertical')):
             for address in face[1:]:
                 ipc.focus(address); ipc.action('mark'); ipc.focus(face[0]); ipc.action('attach ' + axis)
@@ -126,8 +125,10 @@ try:
         assert_shape(before['recipe'])
         assert all(ipc.windows()[a]['workspace']['id'] == 30 for a in addresses)
         passed('after a real compositor restart, fresh app addresses restore both faces, axes, proportions and focus from another workspace')
-        assert drift
-        passed('focus changes between IPC commands cannot redirect saved-card attachments')
+        # The card is rebuilt in one quiet restore: no mark, pair or attach is sent
+        # step by step, so there is nothing a focus change could redirect.
+        assert not drift, drift
+        passed('a saved card is rebuilt in one restore, with no step a focus change could redirect')
 
         ipc.action('unpair')
         for address in front: ipc.move(address, 31)
@@ -143,16 +144,16 @@ try:
         original_windows = deepcopy(ipc.windows())
         flow = setup.Saved(ipc, Menu('0', 'restore', 'restore'))
         plan = flow.prepare_manage()
-        real_focused = ipc.focused
-        def rejected(*operations):
-            if any(action == 'attach vertical' for _, action in operations):
-                raise setup.SetupError('Injected attachment failure')
-            return real_focused(*operations)
-        ipc.focused = rejected
+        real_batch = ipc.batch
+        def rejected(commands):
+            if any(' restore quiet ' in command for command in commands):
+                return ['error: Injected restore failure']
+            return real_batch(commands)
+        ipc.batch = rejected
         try: flow.apply(plan)
-        except setup.SetupError as error: assert 'Injected attachment' in str(error), error
+        except setup.SetupError as error: assert 'Injected restore failure' in str(error), error
         else: raise AssertionError('Expected a failed restore')
-        finally: ipc.focused = real_focused
+        finally: ipc.batch = real_batch
         time.sleep(.25)
         assert not ipc.status()['containers']
         for address in addresses:
@@ -163,7 +164,7 @@ try:
                 assert ('chillmode' in current['tags']) == ('chillmode' in previous['tags'])
         for workspace in (30, 31): assert lua(f'return hl.plugin.hyprflip.protects_workspace({workspace})') == 'false'
         assert ipc.data('-j', 'activewindow')['address'] == b
-        passed('a failed restore after partial grouping rolls back remote workspaces, floating geometry, Chill tags and original focus')
+        passed('a refused restore rolls back remote workspaces, floating geometry, Chill tags and original focus')
         flow = setup.Saved(ipc, Menu('0', 'restore', 'restore'))
         flow.apply(flow.prepare_manage()); time.sleep(.2)
         assert_shape(before['recipe'])

@@ -182,9 +182,16 @@ class RepairTest(unittest.TestCase):
         self.assertEqual(self.ipc.card['id'], before['id'])
         self.assertEqual(self.ipc.card['current'], '0xa')
 
-    def test_a_core_with_card_ungroup_rebuilds_the_whole_card_at_a_size_that_fits(self):
-        # Attaching inside the card's present box fails when it is too small for its apps.
+    def test_a_card_too_small_for_its_apps_is_rebuilt_whole_at_a_size_that_fits(self):
+        # Attaching inside the card's present box fails when it is too small for its apps:
+        # that attempt rolls back, and a core with card ungroup rebuilds the card whole.
         self.ipc.remove('0xc'); self.ipc.focus('0xa')
+        real_action = self.ipc.action
+
+        def action(name):
+            if name.startswith('attach '): raise setup.SetupError('This split is too small for the applications.')
+            return real_action(name)
+        self.ipc.action = action
         self.ipc.snapshot.update(native_cards=True, card_ungroup=True)
         sent = []
 
@@ -202,7 +209,15 @@ class RepairTest(unittest.TestCase):
         self.assertEqual(sent[0], [f'hyprflip card {self.ipc.card["id"]} ungroup'])
         self.assertTrue(sent[1][0].startswith('hyprflip restore quiet tiled 0 0 '), sent)
         self.assertIn('back vertical 0xb 0xb:0.2 0x2c:0.3 0xd:0.5', sent[1][0])
-        self.assertFalse([m for m in self.ipc.mutations if m[0] == 'action' and m[1].startswith('attach')])
+
+    def test_a_card_with_room_is_completed_in_place_and_keeps_its_id(self):
+        self.ipc.remove('0xc'); self.ipc.focus('0xa')
+        self.ipc.snapshot.update(native_cards=True, card_ungroup=True)
+        self.ipc.batch = Mock(side_effect=AssertionError('no rebuild'))
+        identity = self.ipc.card['id']
+        flow = setup.Saved(self.ipc, Menu())
+        self.apply(flow, flow.prepare_named('Comms', self.recipe, 2, '0xa'))
+        self.assertEqual((self.ipc.card['id'], self.ipc.card['faces']), (identity, [['0xa'], ['0xb', '0x2c', '0xd']]))
 
     def test_opening_the_saved_card_still_refuses_apps_held_by_other_cards(self):
         self.ipc.remove('0xc', close=False)

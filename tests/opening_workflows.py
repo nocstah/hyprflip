@@ -60,10 +60,9 @@ def opening():
 
 try:
     assert not ipc.data('-j','plugin','list')
-    for source in (project / 'build/containers/provider/upstream/libhy3.so', project / 'build/containers/core/hyprflip.so'):
+    for source in (project / 'build/hyprflip.so',):
         target = root / ('open-' + source.name); shutil.copy2(source,target)
         ipc.call('plugin','load',str(target)); loaded.append(target)
-    config.write_text(original.replace('layout="dwindle"','layout="hy3"'))
     ipc.call('reload'); assert not ipc.call('configerrors')
     ipc.call('eval','hl.config({animations={enabled=false},plugin={hyprflip={duration_ms=0,notifications=false}}})')
     monitors = {m['name'] for m in ipc.data('-j','monitors')}; ipc.call('output','create','headless')
@@ -75,7 +74,7 @@ try:
     for name in names: catalog.launch(catalog.apps[name + '.desktop']).wait(timeout=5)
     wait(lambda: all(fixture(name) for name in names))
     a,b,c = [fixture(name) for name in names]
-    ipc.focused((a,'mark'),(b,'pair')); ipc.focused((c,'mark'),(b,'attach vertical'))
+    ipc.focused((a,'mark'),(b,'card')); ipc.focused((c,'mark'),(b,'attach vertical'))
     setup.Setup(ipc,Menu()).restore_ratios({'windows':[b,c],'axis':'vertical','ratios':[.65,.35]})
     ipc.focus(c)
     flow = setup.Edit(ipc,Menu('save','Communications','replace')); flow.apply(flow.prepare(c))

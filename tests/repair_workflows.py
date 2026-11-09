@@ -67,10 +67,9 @@ def visible():
 
 try:
     assert not ipc.data('-j', 'plugin', 'list')
-    for source in (project / 'build/containers/provider/upstream/libhy3.so', project / 'build/containers/core/hyprflip.so'):
+    for source in (project / 'build/hyprflip.so',):
         target = root / ('repair-' + source.name); shutil.copy2(source, target)
         ipc.call('plugin', 'load', str(target)); loaded.append(target)
-    config.write_text(original.replace('layout="dwindle"', 'layout="hy3"'))
     ipc.call('reload'); assert not ipc.call('configerrors')
     ipc.call('eval', 'hl.config({animations={enabled=false},plugin={hyprflip={duration_ms=0,notifications=false}}})')
     monitors = {m['name'] for m in ipc.data('-j', 'monitors')}; ipc.call('output', 'create', 'headless')
@@ -82,7 +81,7 @@ try:
     for name in names: catalog.launch(catalog.apps[name + '.desktop']).wait(timeout=5)
     wait(lambda: all(fixture(name) for name in names))
     a, b, c, d, e, f = [fixture(name) for name in names]
-    ipc.focused((a, 'mark'), (d, 'pair'))
+    ipc.focused((a, 'mark'), (d, 'card'))
     for anchor, extras in ((a, [b,c]), (d, [e,f])):
         for extra in extras: ipc.focused((extra, 'mark'), (anchor, 'attach vertical'))
         arrange([anchor, *extras], 'vertical', [.2,.3,.5])
@@ -120,14 +119,19 @@ try:
     invalid = ['horizontal ' + ' '.join(f'{a}:.333333333333' for a in [side[0],side[0],side[2]]),
         'horizontal ' + ' '.join(f'{a}:.333333333333' for a in [side[0],other[0],side[2]]),
         'vertical ' + ' '.join(f'{a}:0' for a in side),
-        'vertical ' + ' '.join(f'{a}:nan' for a in side),
-        'vertical ' + ' '.join(f'{a}:1' for a in side)]
+        'vertical ' + ' '.join(f'{a}:nan' for a in side)]
     for argument in invalid:
         try: ipc.action('arrange ' + argument)
         except setup.SetupError: pass
         else: raise AssertionError('Invalid layout was accepted: ' + argument)
         assert card() == before
-    passed('malformed, duplicate, foreign-face, zero, nonfinite and unnormalized layout requests leave the card untouched')
+    passed('malformed, duplicate, foreign-face, zero and nonfinite layout requests leave the card untouched')
+    # Shares are weights: 1:1:1 is an even split, as the card normalizes them.
+    layout = before['layouts'][before['active']]
+    ipc.action('arrange vertical ' + ' '.join(f'{a}:1' for a in side))
+    assert all(abs(r - 1 / len(side)) < 1e-6 for r in card()['layouts'][before['active']]['ratios']), card()
+    arrange(side, layout['axis'], layout['ratios'])
+    passed('unnormalized shares are weights: 1:1:1 is an even split')
 
     remote = fixture(names[1]); ipc.focused((remote, 'release')); ipc.move(remote, 61)
     ipc.call('dispatch', f'hl.dsp.window.float({{window="address:{remote}",action="enable"}})')
@@ -138,7 +142,7 @@ try:
     assert active() == before['current']; visible()
     passed('an existing floating app on another workspace is reused and tiled without restarting it')
 
-    # Force a failure after real tree attachments to exercise rollback against hy3.
+    # Force a failure after real attachments to exercise rollback.
     remote = fixture(names[1]); ipc.focused((remote, 'release')); ipc.move(remote, 61)
     ipc.call('dispatch', f'hl.dsp.window.float({{window="address:{remote}",action="enable"}})')
     ipc.focus(card()['faces'][1][0]); before = deepcopy(card())
@@ -187,7 +191,7 @@ try:
         env=env | {'GDK_BACKEND':'wayland', 'GSK_RENDERER':'cairo'}, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     processes.append(process); wait(lambda: fixture('hyprflip-repair-minimum'))
     wide = fixture('hyprflip-repair-minimum'); a, b = fixture(names[0]), fixture(names[3])
-    ipc.move(a,60); ipc.move(b,60); ipc.focused((a,'mark'),(b,'pair')); ipc.focused((wide,'mark'),(b,'attach vertical'))
+    ipc.move(a,60); ipc.move(b,60); ipc.focused((a,'mark'),(b,'card')); ipc.focused((wide,'mark'),(b,'attach vertical'))
     ipc.focus(b); before = deepcopy(card())
     try: arrange([b,wide], 'horizontal', [.8,.2])
     except setup.SetupError: pass
