@@ -545,6 +545,17 @@ frames rendered during 40 idle status polls; limit 15) and the hy3 Chill
 injected pair-failure check. Menu and portable workflows were not run: no
 Fuzzel, Rofi or Wofi is installed.
 
+## Keeping nested sessions out of the way
+
+Each nested session is an Aquamarine window on your desktop, and it takes the
+focus and the pointer when it opens. To run suites while you work, load
+`tests/hidden-sessions.lua` from your Hyprland config (copy it to
+`~/.config/hypr/test-sessions.lua` and add `require("hypr.test-sessions")`).
+It sends every `aquamarine` window to the hidden `special:hftests` workspace
+without focus, and keeps it drawing at 60 fps so screenshot and motion checks
+still run. Toggle that special workspace to watch a session. Headless Sway and
+Weston cannot replace the parent for the same reason as on NVIDIA below.
+
 ## Nested sessions on NVIDIA
 
 Most workflow suites add a headless 4K output. On an NVIDIA desktop the nested
