@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.0-rc.16 — 2026-11-09
 
 - Cards with three or more faces slide sideways instead of flipping: the faces
   stand in a row, the next comes in from the right and the one before from

@@ -1,5 +1,23 @@
 # Validation
 
+## Face slide, switcher, swipe and names (2026-11-09)
+
+Release checks for 0.3.0-rc.16. Both CTest checks and all 375 Python unit
+tests pass. Fresh nested sessions on Hyprland 0.56.2 passed every suite of
+0.3.0-rc.15 with the same counts, plus the new `tests/switcher_workflows.py`
+(11): the switcher opening with a preview of each of four faces, stepping,
+picking, going to the last face, cancel and a workspace change putting it
+away, an animated pick with no fallback, swipes fed through `hyprctl hyprflip
+swipe` (a slow short swipe settling back, past halfway, a flick, resistance
+past one face, a cancelled swipe), `face <n>` and Lua `face(n)` with their
+refusal, and face names through the update round trip, including `&`, `%`
+and spaces. Frame captures of the slide on three- and four-face cards show
+the next face entering from the right inside the card.
+
+Simulated keys from `wtype` do not reach bindings in a nested session, so the
+hold-and-release of the flip key and real trackpad swipes were checked by
+hand on omac (Asahi, 120 Hz) rather than in the suites.
+
 ## Cards with up to four faces (2026-11-09)
 
 Release checks for 0.3.0-rc.15. Both CTest checks pass (core_test adds three
