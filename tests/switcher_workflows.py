@@ -79,5 +79,32 @@ try:
     assert st()['last_fallback'] == '', st()['last_fallback']
     wait(lambda: card()['active'] == 1 and st()['progress'] in (0, 1), 'animated pick')
     ok('a pick turns the card, animated, with no fallback')
+
+    # Swipes, fed through hyprctl: the card is 1200 wide and shows face 2.
+    ipc.call('eval', 'hl.config({plugin={hyprflip={duration_ms=420}}})')
+    ipc.call('dispatch', f'hl.dsp.cursor.move({{x={m["x"]+900},y={m["y"]+500}}})')
+    def swipe(*moves, end='end'):
+        assert ipc.action('swipe begin 3').startswith('ok')
+        for dx, ms in moves: assert ipc.action(f'swipe move {dx} {ms}').startswith('ok')
+        assert ipc.action('swipe ' + end).startswith('ok')
+        wait(lambda: not st()['swiping'] and st()['progress'] in (0, 1), 'swipe to settle')
+        time.sleep(.6)
+        return card()['active']
+    try:
+        ipc.action('swipe begin 2'); raise AssertionError('two fingers were taken')
+    except w.SetupError: pass
+    assert ipc.action('swipe begin 3').startswith('ok'); ipc.action('swipe move -300 400')
+    time.sleep(.2); assert st()['swiping'] and card()['active'] == 1, st()
+    shot('drag.png', output); ipc.action('swipe end'); time.sleep(.8)
+    assert card()['active'] == 1, card()
+    ok('a short slow swipe follows the fingers and settles back on the same face')
+    assert swipe(*[(-120, 40)] * 6) == 2
+    ok('a swipe left past halfway settles on the next face')
+    assert swipe((-60, 10), (-60, 10)) == 3
+    ok('a quick flick carries on to the next face')
+    assert swipe(*[(120, 40)] * 16) == 1
+    ok('a long swipe right slides back past a face to the one before it')
+    assert swipe(*[(-120, 40)] * 6, end='cancel') == 1
+    ok('a cancelled swipe returns to its face')
 finally:
     for p in procs: p.terminate()

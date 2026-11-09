@@ -138,7 +138,15 @@ the arrow keys to step, a digit to pick, Escape to put it away, or click a
 preview; letting go of the key and its modifiers turns to the face
 highlighted. The previews are snapshots taken as the strip opens, since a
 hidden face does not draw. `plugin:hyprflip:switcher = false` makes every tap
-turn to the next face. Scripts use `hyprctl hyprflip switcher
+turn to the next face.
+
+On a trackpad, swipe three fingers sideways over the card: its faces slide
+under your fingers, and lifting them settles on the nearest face. A quick
+flick moves one face. `plugin:hyprflip:swipe_fingers` changes the number of
+fingers, and 0 turns the swipe off; elsewhere on the screen the same swipe
+still does whatever Hyprland is set to do.
+
+Scripts use `hyprctl hyprflip switcher
 open|step [back]|pick <n>|commit|cancel|last`.
 
 ## Temporary unfold

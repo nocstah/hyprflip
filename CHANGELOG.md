@@ -14,6 +14,11 @@
   highlighted. `plugin:hyprflip:switcher` (on) and
   `plugin:hyprflip:switcher_delay_ms` (200) control it. Flips from hyprctl,
   scripts and the Flip button still turn to the next face.
+- Swipe three fingers sideways over a card with three or more faces to slide
+  its faces under your fingers; lifting them settles on the nearest face, and
+  a quick flick moves one face. `plugin:hyprflip:swipe_fingers` (3; 0 turns it
+  off) sets the fingers. The swipe is taken only over such a card, so a
+  workspace swipe elsewhere keeps working. `status` reports `swiping`.
 - `hyprctl hyprflip switcher open|step [back]|pick <n>|commit|cancel|last`
   drives the same switcher; `last` goes to the last face. `status` reports
   `switcher` and `switch_pending`.

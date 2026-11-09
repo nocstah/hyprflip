@@ -234,6 +234,23 @@ Controller::Controller(HANDLE handle, Settings settings)
             }
             if (!m_frames->button(event, info)) settleInput();
         }));
+    m_listeners.emplace_back(e.gesture.swipe.begin.listen([this](const IPointer::SSwipeBeginEvent &event, Event::SCallbackInfo &info) {
+        if (swipeBegin(event.fingers)) info.cancelled = true;
+    }));
+    m_listeners.emplace_back(e.gesture.swipe.update.listen([this](const IPointer::SSwipeUpdateEvent &event, Event::SCallbackInfo &info) {
+        if (!m_swipe) return;
+        info.cancelled = true;
+        const double dt = m_swipe->lastTime ? std::max(1u, event.timeMs - m_swipe->lastTime) : 16.0;
+        m_swipe->lastTime = event.timeMs;
+        const double step = -event.delta.x / m_swipe->width;
+        m_swipe->velocity = m_swipe->velocity * .6 + (step / dt * 1000.0) * .4; // widths per second
+        swipeUpdate(event.delta);
+    }));
+    m_listeners.emplace_back(e.gesture.swipe.end.listen([this](const IPointer::SSwipeEndEvent &event, Event::SCallbackInfo &info) {
+        if (!m_swipe) return;
+        info.cancelled = true;
+        swipeEnd(event.cancelled);
+    }));
     m_listeners.emplace_back(
         e.input.mouse.axis.listen([this](const IPointer::SAxisEvent &, Event::SCallbackInfo &) { settleInput(); }));
     m_listeners.emplace_back(
@@ -907,6 +924,76 @@ Result Controller::peek() {
 void Controller::remember(Pair &pair, unsigned shown, unsigned next) {
     if (shown != next) pair.lastFace = shown;
 }
+bool Controller::swipeBegin(uint32_t fingers) {
+    m_swipe.reset();
+    const auto wanted = m_settings.swipeFingers->value();
+    if (!wanted || fingers != uint32_t(wanted) || m_switch || inputBusy()) return false;
+    const auto pointer = g_pInputManager->getMouseCoordsInternal();
+    const auto focused = Desktop::focusState()->window();
+    Pair *best = nullptr;
+    for (auto &pair : m_pairs) {
+        if (!valid(pair) || !pair.containerID) continue;
+        const auto s = state(pair);
+        if (!s || s->count <= 2 || s->unfolded || !s->geometry.containsPoint(pointer)) continue;
+        const auto shown = s->focused[s->active];
+        if (!shown || !shown->m_workspace || !shown->m_workspace->m_visible) continue;
+        if (!best || s->contains(focused)) best = &pair;
+    }
+    if (!best) return false;
+    m_swipe = Swipe{best->id, std::max(1.0, state(*best)->geometry.w)};
+    return true;
+}
+void Controller::swipeUpdate(Vector2D delta) {
+    auto p = find(m_swipe->pairID);
+    auto s = p ? state(*p) : std::nullopt;
+    if (!s) return m_swipe.reset();
+    if (!m_swipe->started) {
+        // Mostly vertical: let the swipe go, untouched.
+        if (std::abs(delta.y) > std::abs(delta.x) * 1.5 && std::abs(m_swipe->moved) < .01) return;
+        m_swipe->started = true;
+        if (m_turn && m_turn->pairID == p->id) finish();
+        m_forceStrip = true;
+        const auto result = flip(std::nullopt, p, s->next());
+        m_forceStrip = false;
+        if (!result.ok || !m_turn || m_turn->pairID != p->id || m_turn->pose->mode != Transition::Strip) {
+            if (m_turn && m_turn->pairID == p->id) finish(false);
+            m_swipe.reset();
+            return;
+        }
+        m_turn->dragging = true;
+        m_turn->pose->from = float(m_turn->source);
+        m_turn->pose->travel = 0;
+        m_turn->pose->progress = 1;
+    }
+    if (!m_turn || m_turn->pairID != p->id || !m_turn->dragging) return m_swipe.reset();
+    m_swipe->moved += -delta.x / m_swipe->width;
+    m_turn->pose->travel = float(m_swipe->moved);
+    m_turn->pose->dirty = true;
+    damage(*p);
+}
+void Controller::swipeEnd(bool cancelled) {
+    const auto swipe = *m_swipe;
+    m_swipe.reset();
+    if (!swipe.started || !m_turn || m_turn->pairID != swipe.pairID || !m_turn->dragging) return;
+    auto p = find(swipe.pairID);
+    auto s = p ? state(*p) : std::nullopt;
+    if (!s) return finish(false);
+    // Settle on the nearest face; a quick flick carries on to the next one.
+    double settle = cancelled ? 0 : std::round(swipe.moved);
+    if (!cancelled && std::abs(swipe.velocity) > 1.2 && std::abs(swipe.moved) < .5)
+        settle = swipe.velocity > 0 ? 1 : -1;
+    const int count = int(s->count);
+    const unsigned face = unsigned(((int(m_turn->source) + int(settle)) % count + count) % count);
+    const double remaining = settle - swipe.moved;
+    m_turn->target = face;
+    m_turn->dragging = false;
+    m_turn->pose->from = float(m_turn->source + swipe.moved);
+    m_turn->pose->travel = float(remaining);
+    m_turn->pose->progress = 0;
+    m_turn->timeline = Timeline(std::clamp(std::abs(remaining) * double(m_settings.duration->value()) * 1.2, 90.0, 600.0));
+    m_turn->last = Clock::now();
+    damage(*p);
+}
 bool Controller::switchHeld() const {
     return m_switch && (m_switch->key || g_pInputManager->getModsFromAllKBs() != 0);
 }
@@ -1096,8 +1183,9 @@ Result Controller::flip(std::optional<Transition> preview, Pair *target, std::op
     const unsigned source = s->active, goal = to.value_or(s->next());
     if (goal >= s->count || goal == source)
         return {false, goal == source ? "This face is already showing." : "This card has no such face."};
-    const auto mode = preview.value_or(
-        forFaces(transition(m_settings.transition->value()).value_or(Transition::Flip), s->count));
+    const auto mode = m_forceStrip ? Transition::Strip
+                                   : preview.value_or(forFaces(
+                                         transition(m_settings.transition->value()).value_or(Transition::Flip), s->count));
     const float travel = Turn::travel(source, goal, s->count);
     if (s->unfolded) {
         if (preview) return {false, "Fold the card with O before previewing a transition."};
@@ -1758,6 +1846,14 @@ void Controller::onFrame(PHLMONITOR monitor) {
         }
     }
     auto now = Clock::now();
+    if (m_turn->dragging) {
+        // The fingers set the position; keep drawing until they lift.
+        m_turn->last = now;
+        m_turn->pose->dirty = true;
+        damage(*p);
+        m_timer->updateTimeout(std::chrono::milliseconds(1500));
+        return;
+    }
     m_turn->timeline.advance(std::chrono::duration<double, std::milli>(now - m_turn->last).count());
     m_turn->last = now;
     m_turn->pose->angle = float(m_turn->timeline.angle()) * m_turn->sign();
@@ -1979,6 +2075,29 @@ Result Controller::dispatch(const std::string &action) {
     }
     if (action == "flip")
         return flipKey();
+    if (action.starts_with("swipe ")) {
+        // For tests: the trackpad swipe, fed by hand. Times are in ms.
+        std::istringstream input(action.substr(6));
+        std::string verb;
+        double value = 0, ms = 16;
+        input >> verb;
+        if (verb == "begin" && input >> value)
+            return swipeBegin(uint32_t(value)) ? Result{true, "ok"} : Result{false, "No card with three or more faces under the pointer."};
+        if (!m_swipe) return {false, "No swipe in progress."};
+        if (verb == "move" && input >> value) {
+            input >> ms;
+            m_swipe->lastTime += uint32_t(ms);
+            const double step = -value / m_swipe->width;
+            m_swipe->velocity = m_swipe->velocity * .6 + (step / std::max(1.0, ms) * 1000.0) * .4;
+            swipeUpdate(Vector2D{value, 0.0});
+            return {true, "ok"};
+        }
+        if (verb == "end" || verb == "cancel") {
+            swipeEnd(verb == "cancel");
+            return {true, "ok"};
+        }
+        return {false, "Use swipe begin <fingers>, move <dx> [ms], end or cancel."};
+    }
     if (action == "switcher" || action.starts_with("switcher "))
         return switcherAction(action.size() > 9 ? action.substr(9) : "");
     if (action.starts_with("preview ")) {
@@ -2099,6 +2218,7 @@ std::string Controller::status() {
                        ",\"animating\":" + (m_turn ? "true" : "false") +
                        ",\"peek_available\":true,\"peeking\":" + (m_peek ? "true" : "false") +
                        ",\"progress\":" + std::format("{}", m_turn ? m_turn->timeline.progress() : 0) +
+                       ",\"swiping\":" + (m_turn && m_turn->dragging ? "true" : "false") +
                        ",\"last_fallback\":" + quote(m_lastFallback) + ",\"pairs\":[";
     bool first = true;
     for (const auto &p : m_pairs) {

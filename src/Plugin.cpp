@@ -118,6 +118,8 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE h) {
         "Hold the flip key on a card with three or more faces to pick a face; a tap goes back to the last face", true));
     settings.switcherDelay = config(makeConfigValue<Int>("plugin:hyprflip:switcher_delay_ms",
         "How long the flip key is held before the face switcher shows", 200, SIntValueOptions{.min = 0, .max = 1000}));
+    settings.swipeFingers = config(makeConfigValue<Int>("plugin:hyprflip:swipe_fingers",
+        "Fingers for the sideways swipe that slides a card's faces; 0 turns it off", 3, SIntValueOptions{.min = 0, .max = 5}));
     settings.notifications =
         config(makeConfigValue<Bool>("plugin:hyprflip:notifications", "Show pairing and error notifications", true));
     settings.desktopNotifications = config(makeConfigValue<Bool>("plugin:hyprflip:desktop_notifications",

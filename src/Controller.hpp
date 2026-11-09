@@ -17,7 +17,7 @@
 
 namespace Hyprflip {
 struct Settings {
-    SP<Config::Values::Int> duration, cardGap, fullscreenDivider, switcherDelay;
+    SP<Config::Values::Int> duration, cardGap, fullscreenDivider, switcherDelay, swipeFingers;
     SP<Config::Values::Bool> switcher, enabled, notifications, cardFrame, dragToAdd, accentRing, desktopNotifications;
     SP<Config::Values::Float> perspective, retreat;
     SP<Config::Values::String> transition, accentColor, dividerColor;
@@ -89,6 +89,8 @@ class Controller {
         std::vector<bool> suppressedGlass;
         std::vector<CBox> windowGeometry;
         bool previewReturn = false;
+        // A swipe holds the faces under the fingers; the timeline waits.
+        bool dragging = false;
         // The face the turn goes to: the next one round.
         unsigned target = 1;
         unsigned face(bool second) const { return second ? target : source; }
@@ -137,6 +139,11 @@ class Controller {
     bool switchHeld() const;
     bool switcherKey(const IKeyboard::SKeyEvent &key);
     void remember(Pair &pair, unsigned shown, unsigned next);
+    // A sideways swipe over a card with three or more faces slides them
+    // under the fingers and settles on the nearest face when they lift.
+    bool swipeBegin(uint32_t fingers);
+    void swipeUpdate(Vector2D delta);
+    void swipeEnd(bool cancelled);
     Result peek();
     Result endPeek();
     bool canReturnPeek() const;
@@ -191,6 +198,14 @@ class Controller {
     SP<CEventLoopTimer> m_switchTimer;
     UP<SEventLoopDoLaterLock> m_switchLater;
     bool m_eatSwitchRelease = false;
+    bool m_forceStrip = false;
+    struct Swipe {
+        uint64_t pairID;
+        double width, moved = 0, velocity = 0; // moved and velocity in card widths
+        uint32_t lastTime = 0;
+        bool started = false;
+    };
+    std::optional<Swipe> m_swipe;
     std::shared_ptr<FlipShader> m_shader;
     std::unique_ptr<CardFrames> m_frames;
     PHLMONITORREF m_renderingMonitor;
