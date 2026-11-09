@@ -113,9 +113,10 @@ def snapshot(ipc):
                 names = sorted([name for name, opened in matches.items()
                                 if kind == 'container' and any(c['id'] == card['id'] for c in opened)], key=str.casefold)
                 face_rows = []
+                layouts = card.get('layouts') or []
                 for index, face in enumerate(faces):
-                    layout = card.get('layouts', [{}, {}])[index]
-                    face_rows.append({'index': index, 'axis': layout.get('axis', 'horizontal'),
+                    layout = (layouts[index] if index < len(layouts) else None) or {}
+                    face_rows.append({'index': index, 'name': w.face_name(index), 'axis': layout.get('axis', 'horizontal'),
                                       'panes': [{'address': a, 'label': w.app_name(windows[a]),
                                                  'title': w.clean(windows[a].get('title', '')), 'icon': icon(windows[a])} for a in face]})
                 cards.append({'id': card['id'], 'kind': kind, 'key': f"{kind}:{card['id']}",
@@ -166,6 +167,8 @@ def snapshot(ipc):
                     animating=bool(state.get('animating')), capabilities={
                         'containers': bool(state.get('container_provider')),
                         'max_panes': state.get('container_max_panes', 1),
+                        # The most faces a card may have: 2 on cores that do not say.
+                        'faces': w.max_faces(state),
                         'layout': bool(state.get('layout_controls')),
                         'replace': bool(state.get('pane_replacement')),
                         'repair': bool(state.get('repair_cards')),
@@ -329,8 +332,16 @@ def edit_prefix(intent, pane, face, card, state):
         raise w.SetupError('Leave card fullscreen, then try again.')
     if intent in ('save', 'manage', 'repair', 'unpair', 'add'):
         return [intent]
+    if intent == 'add_face':
+        if 'container_max_faces' not in state:
+            raise w.SetupError('Update Hyprflip to add faces to a card.')
+        if len(card['faces']) >= w.max_faces(state):
+            raise w.SetupError(f'This card already has {len(card["faces"])} faces, the most it can hold.')
+        if card.get('fullscreen'):
+            raise w.SetupError('Leave card fullscreen, then add the face.')
+        return [intent]
     if intent == 'remove' and pane:
-        if len(members) == 1:
+        if len(members) == 1 and len(card['faces']) <= 2:
             raise w.SetupError('This is the only app on its side. Choose Ungroup card to keep all apps open.')
         return ['release:' + pane]
     if intent == 'replace' and pane:
@@ -377,8 +388,8 @@ def run_operation(ipc, payload, menu):
             raise w.SetupError('Choose an available transition.')
         if action == 'edit':
             face = payload.get('face', card['active'])
-            if type(face) is not int or face not in (0, 1):
-                raise w.SetupError('Choose Front or Back.')
+            if type(face) is not int or not 0 <= face < len(card['faces']):
+                raise w.SetupError('Choose Front or Back.' if len(card['faces']) == 2 else 'Choose a face of this card.')
             menu.prefix.extend(edit_prefix(payload.get('intent'), payload.get('pane'), face, card, state))
 
     menu.channel.handoff()
@@ -391,10 +402,10 @@ def run_operation(ipc, payload, menu):
             anchor = (card['current'] if card['current'] in card['faces'][face] else card['faces'][face][0])
             if face != card['active'] and not card.get('unfolded'):
                 # Hyprland cannot focus a hidden provider pane directly. The
-                # UI explicitly calls this "Show and edit Front/Back".
+                # UI explicitly calls this "Show and edit Front/Back/Face N".
                 with request.exclusive():
                     request.check()
-                    ipc.focused((card['current'], 'flip'))
+                    w.show_face(ipc, card, face, state)
                 deadline = time.monotonic() + 8
                 while True:
                     request.check()
@@ -404,7 +415,8 @@ def run_operation(ipc, payload, menu):
                         raise w.SetupError('The card changed while turning. Open Cards again.')
                     if not latest.get('animating'):
                         if shown['active'] != face:
-                            raise w.SetupError('The other side could not be shown. Open Cards again.')
+                            raise w.SetupError('The other side could not be shown. Open Cards again.' if len(card['faces']) == 2
+                                               else f'{w.face_name(face)} could not be shown. Open Cards again.')
                         break
                     if time.monotonic() > deadline:
                         raise w.SetupError('The turn has not finished. Return to the card.')
@@ -583,7 +595,7 @@ def unattended_request(payload, env):
             raise w.Unfinished('invalid_request')
         # Closed apps to keep, each by its place in the definition it replaces, which there must be.
         if (not isinstance(keep, list) or len(keep) > 10 or
-                not all(isinstance(k, dict) and set(k) == {'face', 'index'} and number(k['face'], 0, 1) and
+                not all(isinstance(k, dict) and set(k) == {'face', 'index'} and number(k['face'], 0, 3) and
                         number(k['index'], 0, 4) for k in keep) or
                 len({(k['face'], k['index']) for k in keep}) != len(keep) or keep and previous is None and 'base' not in payload):
             raise w.Unfinished('invalid_request')

@@ -28,7 +28,9 @@ def describe(card):
     x, y, width, height = card["box"]
     line = [("floating" if card.get("floating") else "tiled"), str(card["active"]), str(int(bool(card.get("unfolded")))),
             f"{x:.12g}", f"{y:.12g}", f"{width:.12g}", f"{height:.12g}"]
-    for name, face, layout in zip(("front", "back"), card["faces"], card["layouts"]):
+    # Faces after the back are written as face, in order.
+    words = ["front", "back"] + ["face"] * (len(card["faces"]) - 2)
+    for name, face, layout in zip(words, card["faces"], card["layouts"]):
         line += [name, layout["axis"], layout["focused"]] + [f"{w}:{r:.12g}" for w, r in zip(face, layout["ratios"])]
     return " ".join(line)
 

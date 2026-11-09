@@ -280,4 +280,102 @@ class SavedTest(unittest.TestCase):
         self.assertIn(('action', 'mark'), self.ipc.mutations)
 
 
+class MultiFaceSavedTest(unittest.TestCase):
+    """Cards with three or four faces, saved and opened again; two-face cards as they always were."""
+    setUp, saved = SavedTest.setUp, SavedTest.saved
+
+    def three_faces(self):
+        """The card gains Face 3, 0xd alone, and shows it."""
+        card = self.ipc.snapshot['containers'][0]
+        card['faces'].append(['0xd'])
+        card.update(active=2, current='0xd')
+        self.ipc.snapshot['container_max_faces'] = 4
+        self.ipc.active = '0xd'
+        return card
+
+    def test_restore_line_writes_faces_after_the_back(self):
+        arrangement = {'active': 2, 'faces': [
+            {'windows': ['0xa'], 'axis': 'horizontal', 'ratios': [1], 'focus': 0},
+            {'windows': ['0xb', '0xc'], 'axis': 'vertical', 'ratios': [.6, .4], 'focus': 1},
+            {'windows': ['0xd'], 'axis': 'horizontal', 'ratios': [1], 'focus': 0}]}
+        self.assertEqual(setup.Setup.restore_line(arrangement, [0, 0, 1200, 700], False),
+                         'restore quiet tiled 2 0 0 0 1200 700 front horizontal 0xa 0xa:1 '
+                         'back vertical 0xc 0xb:0.6 0xc:0.4 face horizontal 0xd 0xd:1')
+        arrangement['faces'].append({'windows': ['0xe'], 'axis': 'horizontal', 'ratios': [1], 'focus': 0})
+        self.assertTrue(setup.Setup.restore_line(arrangement, [0, 0, 1, 1], True).endswith(
+            'face horizontal 0xd 0xd:1 face horizontal 0xe 0xe:1'))
+        for broken in ({'active': 4}, {'faces': arrangement['faces'][:1], 'active': 0},
+                       {'faces': arrangement['faces'] * 2, 'active': 0}):
+            with self.subTest(broken=broken), self.assertRaises(setup.SetupError):
+                setup.Setup.restore_line(arrangement | broken, [0, 0, 1, 1], False)
+
+    def test_a_three_face_card_saves_and_reads_back_as_it_was(self):
+        card = self.three_faces()
+        card['layouts'] = [dict(axis='horizontal', focused='0xa', ratios=[1.]),
+                           dict(axis='vertical', focused='0xc', ratios=[.6, .4]),
+                           dict(axis='horizontal', focused='0xd', ratios=[1.])]
+        recipe = setup.Saved.capture(card, self.ipc.windows())
+        self.assertEqual((len(recipe['faces']), recipe['active']), (3, 2))
+        self.assertEqual(recipe['faces'][1] | {'apps': []}, {'apps': [], 'axis': 'vertical', 'ratios': [.6, .4], 'focus': 1})
+        self.assertEqual([a['label'] for a in recipe['faces'][2]['apps']], [setup.app_name(self.ipc.clients['0xd'])])
+        self.store.update('Three', recipe, None)
+        self.assertEqual(self.store.read(), {'Three': recipe})
+        # The card it was saved from is that card, and no two-face card is.
+        windows, state = self.ipc.windows(), self.ipc.status()
+        self.assertEqual([c['id'] for c in setup.Saved.open_cards(recipe, windows, state)], [1])
+        self.assertEqual(setup.Saved.open_cards(self.recipe, windows, state), [])
+        self.assertIsNone(setup.Saved.surviving_slots(self.recipe, card, windows))
+        self.assertIn('↔', setup.Saved.describe(recipe))
+
+    def test_a_three_face_card_opens_again_in_one_restore(self):
+        card = deepcopy(self.three_faces())
+        recipe = setup.Saved.capture(card, self.ipc.windows())
+        self.store.update('Three', recipe, None)
+        self.ipc.snapshot['containers'] = []
+        self.ipc.snapshot.update(native_cards=True, card_ungroup=True)
+        sent = []
+
+        def batch(commands):
+            sent.append(commands)
+            self.ipc.snapshot['containers'] = [card]
+            return ['ok: ok']
+        self.ipc.batch = batch
+        flow = self.saved('0', 'restore', 'restore')
+        plan = flow.prepare_manage()
+        self.assertEqual([c.label.split(' · ')[0] for c in flow.menu.prompts[-1][1][1:-1]], ['Front', 'Back', 'Back', 'Face 3'])
+        self.assertEqual(flow.apply(plan), 'Restored “Three”.')
+        self.assertEqual(len(sent), 1)
+        self.assertTrue(sent[0][0].startswith('hyprflip restore quiet tiled 2 0 '), sent)
+        self.assertTrue(sent[0][0].endswith(' face horizontal 0xd 0xd:1'), sent)
+        self.assertEqual(self.ipc.mutations[-1], ('focus', '0xd'))
+
+    def test_a_core_without_numbered_faces_refuses_a_three_face_card_before_any_change(self):
+        recipe = setup.Saved.capture(self.three_faces(), self.ipc.windows())
+        self.store.update('Three', recipe, None)
+        self.ipc.snapshot['containers'] = []
+        del self.ipc.snapshot['container_max_faces']
+        with self.assertRaisesRegex(setup.SetupError, 'it has 3 faces'):
+            self.saved('0', 'restore').prepare_manage()
+        self.assertEqual(self.ipc.mutations, [])
+
+    def test_two_face_cards_saved_by_older_versions_still_read(self):
+        older = {'version': 1, 'cards': {'Comms': {
+            'faces': [{'apps': [{'class': 'foot', 'initial_class': 'foot', 'title': 'Terminal', 'label': 'Foot'}],
+                       'axis': 'horizontal', 'ratios': [1.0], 'focus': 0},
+                      {'apps': [{'class': 'a', 'initial_class': 'a', 'title': '', 'label': 'A'},
+                                {'class': 'b', 'initial_class': 'b', 'title': '', 'label': 'B'}],
+                       'axis': 'vertical', 'ratios': [0.5, 0.5], 'focus': 1}],
+            'active': 1, 'floating': True}}}
+        self.store.root.mkdir(parents=True, exist_ok=True)
+        self.store.path.write_text(json.dumps(older))
+        self.assertEqual(self.store.read(), older['cards'])
+
+    def test_face_counts_and_active_faces_out_of_range_are_rejected(self):
+        face = self.recipe['faces'][0]
+        for faces, active in (([face], 0), ([face] * 5, 0), ([face] * 3, 3), ([face] * 2, 2), ([face] * 4, -1)):
+            with self.subTest(faces=len(faces), active=active):
+                with self.assertRaises(ValueError): setup.RecipeStore.validate({'faces': faces, 'active': active})
+        for count in (2, 3, 4):
+            setup.RecipeStore.validate({'faces': [face] * count, 'active': count - 1})
+
 if __name__ == '__main__': unittest.main()

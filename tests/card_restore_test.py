@@ -1007,5 +1007,25 @@ class SettleTest(unittest.TestCase):
         self.assertEqual(desktop.calls, [])
 
 
+
+class DescribeTest(unittest.TestCase):
+    def card(self, count, active=0):
+        faces = [[f"0x{c:x}"] for c in range(0xc, 0xc + count)]
+        return {"box": [1000, 0, 1000, 1000], "active": active, "unfolded": False, "faces": faces,
+                "layouts": [{"axis": "horizontal", "focused": face[0], "ratios": [1.0]} for face in faces]}
+
+    def test_a_two_face_card_is_described_as_it_always_was(self):
+        self.assertEqual(card_restore.describe(self.card(2)), LINE)
+
+    def test_faces_after_the_back_are_described_as_faces_in_order(self):
+        card = self.card(3, active=2)
+        card["faces"][1].append("0x20")
+        card["layouts"][1].update(axis="vertical", focused="0x20", ratios=[0.25, 0.75])
+        self.assertEqual(card_restore.describe(card),
+                         "tiled 2 0 1000 0 1000 1000 front horizontal 0xc 0xc:1 back vertical 0x20 0xd:0.25 0x20:0.75 "
+                         "face horizontal 0xe 0xe:1")
+        self.assertTrue(card_restore.describe(self.card(4, active=3)).endswith(
+            "face horizontal 0xe 0xe:1 face horizontal 0xf 0xf:1"))
+
 if __name__ == "__main__":
     unittest.main()

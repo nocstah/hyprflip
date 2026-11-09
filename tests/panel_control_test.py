@@ -139,6 +139,54 @@ class PanelControlTest(unittest.TestCase):
             prepare.assert_called_once_with('0xa')
             self.assertEqual(self.ipc.active, '0xa')
 
+    def three_faces(self):
+        """The card gains Face 3 on a core that holds four, and the panel's target follows it."""
+        card = self.ipc.snapshot['containers'][0]
+        card['faces'].append(['0xd'])
+        self.ipc.snapshot['container_max_faces'] = 4
+        self.target['token'] = control.card_token(card, 'container', self.ipc.windows(), self.ctx['instance'])
+        return card
+
+    def test_snapshot_names_each_face_and_reports_the_most_faces(self):
+        result = control.snapshot(self.ipc)
+        self.assertEqual([f['name'] for f in result['cards'][0]['faces']], ['Front', 'Back'])
+        self.assertEqual(result['capabilities']['faces'], 2)
+        self.three_faces()
+        result = control.snapshot(self.ipc)
+        self.assertEqual([(f['index'], f['name']) for f in result['cards'][0]['faces']],
+                         [(0, 'Front'), (1, 'Back'), (2, 'Face 3')])
+        self.assertEqual(result['capabilities']['faces'], 4)
+
+    def test_edit_takes_any_face_the_card_has(self):
+        for face in (-1, 2, True, '1'):
+            with self.subTest(face=face), self.assertRaisesRegex(setup.SetupError, 'Choose Front or Back'):
+                self.run_action(self.payload('edit', face=face))
+        self.three_faces()
+        for face in (-1, 3):
+            with self.subTest(face=face), self.assertRaisesRegex(setup.SetupError, 'Choose a face of this card'):
+                self.run_action(self.payload('edit', face=face))
+        self.assertEqual(self.ipc.mutations, [])
+
+    def test_a_hidden_third_face_is_shown_by_number(self):
+        self.three_faces()
+        def show(action):
+            self.assertEqual(action, 'card 1 show 3')
+            card = self.ipc.snapshot['containers'][0]
+            card['active'], card['current'] = 2, '0xd'
+        with patch.object(self.ipc, 'action', side_effect=show), \
+             patch.object(setup.Edit, 'prepare', side_effect=setup.Cancelled) as prepare:
+            with self.assertRaises(setup.Cancelled): self.run_action(self.payload('edit', face=2))
+            prepare.assert_called_once_with('0xd')
+
+    def test_add_face_routes_to_the_editor_only_with_room_for_a_face(self):
+        card = self.ipc.snapshot['containers'][0]
+        with self.assertRaisesRegex(setup.SetupError, 'Update Hyprflip'):
+            control.edit_prefix('add_face', None, 1, card, {})
+        self.assertEqual(control.edit_prefix('add_face', None, 1, card, {'container_max_faces': 4}), ['add_face'])
+        card['faces'] += [['0xd'], ['0xe']]
+        with self.assertRaisesRegex(setup.SetupError, 'already has 4 faces'):
+            control.edit_prefix('add_face', None, 1, card, {'container_max_faces': 4})
+
     def test_named_open_has_no_extra_confirmation(self):
         recipe = {'example': 'definition'}
         plan = setup.SavedPlan('goto', 'Mail', recipe, None)

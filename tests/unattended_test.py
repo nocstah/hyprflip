@@ -1495,6 +1495,25 @@ class UnattendedTest(unittest.TestCase):
         self.assertEqual([[s['address'] for s in face] for face in reply['slots']], [['0xb'], ['0xc', None]])
         self.assertEqual((self.stored(), Path(self.store).stat().st_mtime_ns), ({'acme': self.captured()}, written))
 
+    def test_save_keeps_closed_apps_on_a_third_face(self):
+        clients = self.ipc.clients
+        clients['0xe'] = window('0xe', at=[1830, 0], size=[600, 700])
+        for address, name in (('0xb', 'omarelay-acme'), ('0xc', 'omarelay.terminal.acme'), ('0xd', 'obsidian'), ('0xe', 'foot')):
+            clients[address].update({'class': name, 'initialClass': name, 'title': ''})
+        self.ipc.add_card([['0xb'], ['0xc'], ['0xd', '0xe']])
+        members = ['0xb', '0xc', '0xd', '0xe']
+        first = self.send('save', **self.saving(members=members))
+        self.assertEqual((first['result'], len(self.stored()['acme']['faces'])), ('saved', 3))
+        self.close('0xe')
+        reply = self.send('save', **self.saving(members=members[:3], previous=first['token'], keep=[{'face': 2, 'index': 1}]))
+        self.assertEqual((reply['result'], reply['dropped']), ('unchanged', []))
+        self.assertEqual([[s['address'] for s in face] for face in reply['slots']], [['0xb'], ['0xc'], ['0xd', None]])
+        # Faces run from 0 to 3; a face the saved card lacks is a mistake.
+        for keep in ([{'face': 4, 'index': 0}], [{'face': 3, 'index': 0}]):
+            with self.subTest(keep=keep):
+                self.assertEqual(self.send('save', **self.saving(members=members[:3], previous=first['token'], keep=keep))['code'],
+                                 'invalid_request')
+
     def test_save_kept_shares_summing_to_one_leave_live_apps_a_floor(self):
         self.carded()
         notes, diary = (self.app('obsidian', 'obsidian') | {'desktop_id': 'obsidian.desktop'}, self.app('diary', 'Diary'))

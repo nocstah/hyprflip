@@ -38,6 +38,26 @@ class IPC(BaseIPC):
             card['current'] = card['back'] if card['current'] == card['front'] else card['front']
 
 
+class FacesIPC(IPC):
+    """A three-face card on a core that turns straight to a numbered face."""
+    def __init__(self):
+        super().__init__()
+        self.clients['0xd'] = window('0xd', hidden=True)
+        card = self.snapshot['containers'][0]
+        card['faces'].append(['0xd'])
+        self.snapshot['container_max_faces'] = 4
+    def action(self, action):
+        card = self.snapshot['containers'][0]
+        if action.startswith('card '):
+            self.mutations.append(('action', action))
+            _, ident, verb, face = action.split()
+            assert (ident, verb) == (str(card['id']), 'show'), action
+            card['active'] = int(face) - 1
+            card['current'] = card['faces'][card['active']][0]
+            return 'ok'
+        super().action(action)
+
+
 class FindTest(unittest.TestCase):
     def test_hidden_second_pane_is_selected_after_one_flip(self):
         ipc, picker = IPC(), Picker('0xc')
@@ -130,5 +150,22 @@ class FindTest(unittest.TestCase):
                 leave = [] if native else [('leave fullscreen', '0xa')]
                 self.assertEqual(ipc.mutations, leave + [('focus', '0xa'), ('action', 'flip'), ('focus', '0xc')])
 
+
+    def test_a_third_face_is_shown_by_number_not_flipped_to(self):
+        ipc = FacesIPC()
+        flow = w.Find(ipc, Picker('0xd'))
+        plan = flow.prepare()
+        choices = {c.value: c for c in flow.menu.prompts[0][1]}
+        self.assertIn('Workspace 2 · Face 3 · Hidden', choices['0xd'].detail)
+        flow.apply(plan)
+        self.assertEqual(ipc.mutations, [('action', 'card 1 show 3'), ('focus', '0xd')])
+        self.assertEqual(ipc.snapshot['containers'][0]['active'], 2)
+        self.assertEqual(ipc.active, '0xd')
+
+    def test_the_back_of_a_card_on_a_numbered_core_is_shown_too(self):
+        ipc = FacesIPC()
+        flow = w.Find(ipc, Picker('0xc'))
+        flow.apply(flow.prepare())
+        self.assertEqual(ipc.mutations, [('action', 'card 1 show 2'), ('focus', '0xc')])
 
 if __name__ == '__main__': unittest.main()

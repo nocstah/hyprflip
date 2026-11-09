@@ -208,6 +208,86 @@ class EditTest(unittest.TestCase):
         self.assertEqual(ipc.mutations, [])
 
 
+class MultiFaceEditTest(unittest.TestCase):
+    def three_faces(self, max_faces=4):
+        """A card with three faces, Back showing two apps; 0xe is free to add."""
+        ipc = CardIPC(full=True)
+        ipc.clients['0xe'] = window('0xe')
+        for index, w in enumerate(ipc.clients.values()): w['at'] = [index * 600, 0]
+        ipc.snapshot['containers'][0]['faces'].append(['0xd'])
+        ipc.snapshot['layout_controls'] = True
+        if max_faces: ipc.snapshot['container_max_faces'] = max_faces
+        return ipc
+
+    def test_face_names_follow_the_core(self):
+        self.assertEqual([setup.face_name(i) for i in range(4)], ['Front', 'Back', 'Face 3', 'Face 4'])
+
+    def test_moving_an_app_goes_to_the_next_face(self):
+        ipc = self.three_faces()
+        picker = Picker('other_side', '0xc')
+        flow = setup.Edit(ipc, picker)
+        plan = flow.prepare('0xb')
+        move = next(c for c in picker.prompts[0][1] if c.value == 'other_side')
+        self.assertEqual(move.label, 'Move an app to Face 3…')
+        self.assertIn('Join ', move.detail)
+        self.assertEqual(picker.prompts[1][0], 'Move to Face 3')
+        flow.apply(plan)
+        self.assertEqual(ipc.mutations, [('focus', '0xb'), ('action', 'other_side 0xc')])
+
+    def test_two_face_cards_keep_the_other_side_wording(self):
+        ipc = CardIPC(full=True)
+        for index, w in enumerate(ipc.clients.values()): w['at'] = [index * 600, 0]
+        ipc.snapshot.update(layout_controls=True, container_max_faces=4)
+        picker = Picker('other_side', None)
+        with self.assertRaises(setup.Cancelled): setup.Edit(ipc, picker).prepare('0xb')
+        self.assertIn('Move an app to the other side…', [c.label for c in picker.prompts[0][1]])
+        self.assertEqual(picker.prompts[1][0], 'Move to the other side')
+
+    def test_an_app_is_added_as_a_new_face(self):
+        ipc = self.three_faces()
+        picker = Picker('add_face', '0xe')
+        flow = setup.Edit(ipc, picker)
+        plan = flow.prepare('0xb')
+        add = next(c for c in picker.prompts[0][1] if c.value == 'add_face')
+        self.assertEqual(add.label, 'Add an app as a new face')
+        self.assertIn('Face 4', add.detail)
+        self.assertEqual(picker.prompts[1][0], 'Add an app as a new face')
+        self.assertEqual(ipc.mutations, [])
+        self.assertEqual(flow.apply(plan), 'Added as Face 4.')
+        self.assertEqual(ipc.mutations[-5:], [('focus', '0xe'), ('action', 'mark'),
+                                              ('focus', '0xb'), ('action', 'attach face'), ('focus', '0xe')])
+        self.assertEqual(ipc.active, '0xe')
+
+    def test_the_only_app_of_a_face_can_leave_with_its_face(self):
+        ipc = self.three_faces()
+        ipc.snapshot['containers'][0].update(active=2, current='0xd')
+        ipc.active = '0xd'
+        picker = Picker('release:0xd')
+        flow = setup.Edit(ipc, picker)
+        plan = flow.prepare('0xd')
+        remove = next(c for c in picker.prompts[0][1] if c.value == 'release:0xd')
+        self.assertEqual(remove.detail, 'Removes this face · Keep open')
+        flow.apply(plan)
+        self.assertEqual(ipc.mutations, [('focus', '0xd'), ('action', 'release')])
+        # A two-face card still only ungroups.
+        picker = Picker(None)
+        with self.assertRaises(setup.Cancelled): setup.Edit(CardIPC(), picker).prepare('0xb')
+        self.assertNotIn('release:0xb', [c.value for c in picker.prompts[0][1]])
+
+    def test_a_new_face_is_offered_only_by_cores_with_room_for_one(self):
+        for max_faces, offered in ((None, False), (3, False), (4, True)):
+            with self.subTest(max_faces=max_faces):
+                ipc, picker = self.three_faces(max_faces), Picker(None)
+                with self.assertRaises(setup.Cancelled): setup.Edit(ipc, picker).prepare('0xb')
+                self.assertEqual('add_face' in [c.value for c in picker.prompts[0][1]], offered)
+        # A two-face card on a core that holds more faces may grow.
+        ipc, picker = CardIPC(), Picker(None)
+        ipc.snapshot['container_max_faces'] = 4
+        with self.assertRaises(setup.Cancelled): setup.Edit(ipc, picker).prepare('0xb')
+        add = next(c for c in picker.prompts[0][1] if c.value == 'add_face')
+        self.assertIn('Face 3', add.detail)
+
+
 class FullscreenEditTest(unittest.TestCase):
     def fullscreen(self, native=True, full=False):
         ipc = CardIPC(full=full)

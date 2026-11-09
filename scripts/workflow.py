@@ -62,6 +62,30 @@ def mark_address(ipc, address):
     ipc.action('mark ' + address)
 
 
+def face_name(index):
+    """A card face as the core names it: Front, Back, Face 3, Face 4."""
+    return ('Front', 'Back')[index] if index in (0, 1) else f'Face {index + 1}'
+
+
+def restore_words(count):
+    """The words that open each face of the core's restore line: front, back, then face for the rest."""
+    return ['front', 'back'][:count] + ['face'] * max(0, count - 2)
+
+
+def max_faces(state):
+    """The faces a card may have. A core that does not say holds two."""
+    value = state.get('container_max_faces')
+    return value if type(value) is int and value >= 2 else 2
+
+
+def show_face(ipc, card, index, state):
+    """Turns a card straight to one face; a core without numbered faces turns it once."""
+    if 'container_max_faces' in state:
+        ipc.action(f'card {int(card["id"])} show {int(index) + 1}')
+    else:
+        ipc.focused((card['current'], 'flip'))
+
+
 def card_layout_available(state, layout):
     """Cards live on Omarchy's default dwindle layout, built by the core itself."""
     return bool(state.get('container_provider') and state.get('native_cards')) and layout == 'dwindle'
@@ -726,7 +750,7 @@ class Find:
             _, card, _, side = targets[choice.value]
             visible = card.get('unfolded') or card['active'] == side
             choices.append(replace(choice, detail=joined(f'Workspace {workspace_name(windows[choice.value])}',
-                                                         'Front' if side == 0 else 'Back',
+                                                         face_name(side),
                                                          'Visible' if visible else 'Hidden', choice.detail)))
         address = self.menu.choose('Find an app in your cards', choices)
         if address not in targets:
@@ -781,7 +805,8 @@ class Find:
                     if windows.get(address, {}).get('fullscreen'):
                         self.ipc.leave_fullscreen(address)
             if not card.get('unfolded') and card['active'] != side:
-                self.ipc.focused((card['current'], 'flip'))
+                if plan.kind == 'containers': show_face(self.ipc, card, side, state)
+                else: self.ipc.focused((card['current'], 'flip'))
         card = self.settled(plan)
         with exclusive():
             card, state = self.check(plan)
@@ -993,8 +1018,13 @@ class Setup:
                     self.ipc.call('eval', f'hl.dispatch(hl.dsp.window.resize({{window="address:{front}",x={width},y={height}}})); '
                                   f'hl.dispatch(hl.dsp.window.move({{window="address:{front}",x={x},y={y}}}))')
             if arrangement:
-                for face in arrangement['faces']:
+                for side, face in enumerate(arrangement['faces']):
                     first = face['windows'][0]
+                    if side >= 2:
+                        # A third or fourth face joins the card as a face of its own,
+                        # attached from the face just built, which is the one shown.
+                        shown = arrangement['faces'][side - 1]
+                        self.ipc.focused((first, 'mark'), (shown['windows'][shown['focus']], 'attach face'))
                     for companion in face['windows'][1:]:
                         self.ipc.focused((companion, 'mark'), (first, 'attach ' + face['axis']))
                     self.restore_ratios(face)
@@ -1040,7 +1070,9 @@ class Setup:
             raise SetupError('The card action is unavailable.')
         line = (f'restore quiet {"floating" if floating else "tiled"} {arrangement["active"]} 0 ' +
                 ' '.join(f'{v:.12g}' for v in box))
-        for side, face in zip(('front', 'back'), arrangement['faces']):
+        if not 2 <= len(arrangement['faces']) <= 4 or not 0 <= arrangement['active'] < len(arrangement['faces']):
+            raise SetupError('The card action is unavailable.')
+        for side, face in zip(restore_words(len(arrangement['faces'])), arrangement['faces']):
             if not all(re.fullmatch(r'0x[0-9a-fA-F]{1,16}', a) for a in face['windows']):
                 raise SetupError('The card action is unavailable.')
             line += (f' {side} {face["axis"]} {face["windows"][face["focus"]]}' +
@@ -1108,7 +1140,8 @@ class Setup:
         floated = bool(plan.recipe.get('floating')) and not card.get('floating') and bool(state.get('card_ungroup'))
         if floated:
             arrangement = {'active': card['active'], 'floating': True, 'faces': []}
-            for members, saved, layout in zip(card['faces'], plan.recipe['faces'], card.get('layouts') or [{}, {}]):
+            layouts = card.get('layouts') or [{}] * len(card['faces'])
+            for members, saved, layout in zip(card['faces'], plan.recipe['faces'], layouts):
                 ratios = next((list(r) for r in (layout.get('ratios'), saved.get('ratios'))
                                if r and len(r) == len(members)), [1 / len(members)] * len(members))
                 focus = members.index(layout['focused']) if layout.get('focused') in members else 0
@@ -1252,17 +1285,28 @@ class Edit(Setup):
             raise SetupError('An app closed. Focus the card and open Edit card again.')
         plan = EditPlan(anchor, deepcopy(card), deepcopy(members))
         self.validate(plan)
-        face = next(f for f in card['faces'] if anchor in f)
+        side = next(i for i, f in enumerate(card['faces']) if anchor in f)
+        face = card['faces'][side]
+        count = len(card['faces'])
+        # A pane moves on to the next face; on a two-face card that is the other side.
+        following = (side + 1) % count
         name = app_name(windows[anchor])
         limit = state.get('container_max_panes', 2)
         # A fullscreen card keeps its apps; ungrouping or reopening waits until it leaves.
         whole = bool(card.get('fullscreen'))
         choices = ([Choice('add', 'Add an app to this side', 'Choose an open app from any workspace')]
                    if len(face) < limit else [])
+        if 'container_max_faces' in state and count < max_faces(state) and not whole:
+            choices.append(Choice('add_face', 'Add an app as a new face',
+                                  f'Becomes {face_name(count)} · Choose an open app from any workspace'))
         if state.get('pane_replacement'):
             choices.append(Choice('replace', f'Replace {name}…' if len(face) == 1 else 'Replace an app…',
                                   'Keep its position · Previous app stays open'))
         if len(face) == 1:
+            if count > 2:
+                # The only app of a third or fourth face leaves with its face.
+                choices.append(Choice('release:' + anchor, f'Remove {name} from card',
+                                      'Removes this face · Keep open'))
             if not whole:
                 choices.append(Choice('unpair', 'Ungroup card', 'All apps stay open as separate windows'))
             prompt = f'Edit card: {name}'
@@ -1270,9 +1314,10 @@ class Edit(Setup):
             if state.get('layout_controls'):
                 choices.append(Choice('layout', 'Layout of this side…', 'Beside · Stacked · Equal sizes' +
                                       (' · App order' if state.get('repair_cards') and card.get('layouts') else '')))
-                other = next(f for f in card['faces'] if anchor not in f)
+                other = card['faces'][following]
                 if len(other) < limit:
-                    choices.append(Choice('other_side', 'Move an app to the other side…',
+                    choices.append(Choice('other_side', 'Move an app to the other side…' if count == 2 else
+                                          f'Move an app to {face_name(following)}…',
                                           clean('Join ' + ', '.join(app_name(windows[a]) for a in other), 100)))
             choices += [Choice('release:' + c.value, f'Remove {c.label} from card',
                               joined('Focused app' if c.value == anchor else '', 'Keep open', c.detail), c.title)
@@ -1326,7 +1371,7 @@ class Edit(Setup):
                     order[index], order[destination] = order[destination], order[index]
                 order = tuple(order)
         if action == 'other_side':
-            removal = self.menu.choose('Move to the other side',
+            removal = self.menu.choose('Move to the other side' if count == 2 else f'Move to {face_name(following)}',
                 [replace(c, detail=joined('Focused app' if c.value == anchor else '', c.detail))
                  for c in window_choices([windows[anchor]] + [windows[a] for a in face if a != anchor])])
             if removal not in face: raise SetupError('That app is no longer on this side. Open the card menu again.')
@@ -1341,7 +1386,7 @@ class Edit(Setup):
         if action == 'transition':
             mode = self.choose_transition(plan)
             return EditPlan(anchor, plan.card, deepcopy(members), action, transition=mode)
-        if action in ('add', 'replace'):
+        if action in ('add', 'add_face', 'replace'):
             windows, state = self.validate(plan)
             workspace = members[anchor]['workspace']['id']
             if action == 'replace':
@@ -1352,8 +1397,10 @@ class Edit(Setup):
             candidates = list(self.eligible(windows, state).values())
             if not candidates:
                 if action == 'replace': raise SetupError('Open an ungrouped app to use as the replacement, then open Edit card again.')
-                raise SetupError('Open another app that is not already in a card or group, then choose Add an app to this side.')
-            prompt = 'Replace ' + app_name(windows[removal]) + ' with' if action == 'replace' else 'Add an app to this side'
+                raise SetupError('Open another app that is not already in a card or group, then choose ' +
+                                 ('Add an app as a new face.' if action == 'add_face' else 'Add an app to this side.'))
+            prompt = ('Replace ' + app_name(windows[removal]) + ' with' if action == 'replace' else
+                      'Add an app as a new face' if action == 'add_face' else 'Add an app to this side')
             candidate = self.choose_window(prompt, candidates, workspace)
             if candidate not in {w['address'] for w in candidates}:
                 raise SetupError('That app is no longer available. Open Edit card again.')
@@ -1363,11 +1410,11 @@ class Edit(Setup):
     def apply(self, plan):
         if isinstance(plan, SavedPlan): return Saved(self.ipc, self.menu).apply(plan)
         with self.reserve(plan.windows, self.ipc.status()):
-            self.apply_reserved(plan)
+            return self.apply_reserved(plan)
 
     def apply_reserved(self, plan):
         windows, state = self.validate(plan)
-        if plan.action not in ('add', 'replace', 'reorder', 'release', 'unpair', 'transition', 'other_side',
+        if plan.action not in ('add', 'add_face', 'replace', 'reorder', 'release', 'unpair', 'transition', 'other_side',
                                'layout horizontal', 'layout vertical', 'layout balance'):
             raise SetupError('Choose an action in Edit card first.')
         if plan.action == 'replace':
@@ -1388,7 +1435,14 @@ class Edit(Setup):
         if plan.action == 'transition':
             self.ipc.save_transition(plan.transition)
             return
-        if plan.action != 'add':
+        if plan.action == 'add_face':
+            if 'container_max_faces' not in state:
+                raise SetupError('Update Hyprflip to add faces to a card.')
+            if len(plan.card['faces']) >= max_faces(state):
+                raise SetupError(f'This card already has {len(plan.card["faces"])} faces, the most it can hold.')
+            if plan.card.get('fullscreen'):
+                raise SetupError('Leave card fullscreen, then add the face.')
+        if plan.action not in ('add', 'add_face'):
             try:
                 if plan.action == 'other_side':
                     self.ipc.focused((plan.anchor, 'other_side ' + plan.removal))
@@ -1413,7 +1467,7 @@ class Edit(Setup):
             self.import_windows({plan.candidate: plan.windows[plan.candidate]}, workspace, moved)
             self.ipc.focus(plan.anchor)
             width, height = self.ipc.windows()[plan.anchor]['size']
-            attach = 'attach ' + ('horizontal' if width >= height else 'vertical')
+            attach = 'attach ' + ('face' if plan.action == 'add_face' else 'horizontal' if width >= height else 'vertical')
             if whole:
                 mark_address(self.ipc, plan.candidate)
                 self.ipc.focused((plan.anchor, attach))
@@ -1449,6 +1503,7 @@ class Edit(Setup):
                 raise recovery_error
             raise
         self.ipc.focus(plan.candidate)
+        if plan.action == 'add_face': return f'Added as {face_name(len(plan.card["faces"]))}.'
 
     def replace_reserved(self, plan):
         side = plan.card['active']
@@ -1673,10 +1728,12 @@ class RecipeStore:
 
     @staticmethod
     def validate(recipe):
-        if not isinstance(recipe, dict) or type(recipe.get('active')) is not int or recipe['active'] not in (0, 1): raise ValueError()
+        if not isinstance(recipe, dict) or type(recipe.get('active')) is not int: raise ValueError()
         if 'workspace' in recipe and (type(recipe['workspace']) is not int or not 1 <= recipe['workspace'] <= 2147483647): raise ValueError()
         if 'floating' in recipe and type(recipe['floating']) is not bool: raise ValueError()
-        if not isinstance(recipe['faces'], list) or len(recipe['faces']) != 2: raise ValueError()
+        # Two faces, front and back, or up to four with cores that hold more.
+        if not isinstance(recipe['faces'], list) or not 2 <= len(recipe['faces']) <= 4: raise ValueError()
+        if not 0 <= recipe['active'] < len(recipe['faces']): raise ValueError()
         for face in recipe['faces']:
             apps, ratios = face['apps'], face['ratios']
             if not isinstance(apps, list) or not isinstance(ratios, list) or not 1 <= len(apps) <= 5 or len(ratios) != len(apps): raise ValueError()
@@ -1779,7 +1836,8 @@ class Saved(Setup):
                              if windows[a].get('focusHistoryID', -1) >= 0 else float('inf'))
             faces.append({'apps': apps, 'axis': 'vertical' if axis else 'horizontal',
                           'ratios': [windows[a]['size'][axis] / total for a in members], 'focus': members.index(remembered)})
-            if layout := card.get('layouts', [None, None])[side]:
+            layouts = card.get('layouts') or []
+            if layout := (layouts[side] if side < len(layouts) else None):
                 faces[-1].update(axis=layout['axis'], ratios=list(layout['ratios']), focus=members.index(layout['focused']))
         recipe = {'faces': faces, 'active': card['active']}
         if card.get('floating'): recipe['floating'] = True
@@ -1835,6 +1893,7 @@ class Saved(Setup):
         result = []
         for card in state.get('containers', []):
             if Saved.parked(card): continue
+            if len(card['faces']) != len(recipe['faces']): continue
             matched = []
             for face, members in zip(recipe['faces'], card['faces']):
                 if len(face['apps']) != len(members): break
@@ -1845,12 +1904,14 @@ class Saved(Setup):
                     chosen.append(match)
                 if len(chosen) != len(members): break
                 matched.append(chosen)
-            if len(matched) == 2: result.append(card)
+            if len(matched) == len(recipe['faces']): result.append(card)
         return result
 
     @staticmethod
     def surviving_slots(recipe, card, windows):
         """An unambiguous, order-preserving subset on each of the same faces."""
+        # A card that lost a face, or gained one, is not this setup.
+        if len(card['faces']) != len(recipe['faces']): return None
         chosen = []
         for face, members in zip(recipe['faces'], card['faces']):
             apps = face['apps']
@@ -2057,6 +2118,8 @@ class Saved(Setup):
             raise SetupError('Cards open on a normal dwindle workspace. Switch this workspace back to dwindle, then try again.')
         if any(len(face['apps']) > state.get('container_max_panes', 2) for face in recipe['faces']):
             raise SetupError('Update the container plugins before opening this card; it needs more apps per side.')
+        if len(recipe['faces']) > max_faces(state):
+            raise SetupError(f'Update Hyprflip before opening this card; it has {len(recipe["faces"])} faces.')
 
     def prepare_restore(self):
         workspace = self.ipc.data('-j', 'activeworkspace')['id']
@@ -2213,14 +2276,14 @@ class Saved(Setup):
             match = self.matches(app, candidates)
             if match is None:
                 if not candidates: raise SetupError(f'Open an ungrouped app for {app["label"]}, then restore “{name}” again.')
-                match = self.choose_window(f'{"Front" if side == 0 else "Back"}: choose {app["label"]}', candidates, workspace)
+                match = self.choose_window(f'{face_name(side)}: choose {app["label"]}', candidates, workspace)
             if match not in eligible or match in chosen: raise SetupError('That window selection changed. Restore the card again.')
             chosen.append(match)
         while True:
             choices = [Choice('restore', 'Restore card here', f'Workspace {workspace} · {len(chosen)} apps')]
             for index, ((side, _, _), address) in enumerate(zip(slots, chosen)):
                 w = windows[address]
-                choices.append(Choice(str(index), f'{"Front" if side == 0 else "Back"} · {app_name(w)}',
+                choices.append(Choice(str(index), f'{face_name(side)} · {app_name(w)}',
                                       f'Workspace {workspace_name(w)}', clean(w.get('title', ''), 85)))
             choices.append(Choice('cancel', 'Cancel', 'Keep the current arrangement'))
             answer = self.menu.choose(f'Restore “{name}”: review apps', choices)
@@ -2240,8 +2303,9 @@ class Saved(Setup):
         for face in arrangement['faces']:
             count = len(face.pop('apps'))
             face['windows'] = chosen[offset:offset + count]; offset += count
-        first, second = (face['windows'][0] for face in arrangement['faces'])
-        order = [first, second] + [a for a in chosen if a not in (first, second)]
+        # The front and back apps lead, as Setup creates the card from them.
+        leading = [arrangement['faces'][0]['windows'][0], arrangement['faces'][1]['windows'][0]]
+        order = leading + [a for a in chosen if a not in leading]
         selected = deepcopy({a: windows[a] for a in order})
         return selected, arrangement
 
@@ -2274,11 +2338,12 @@ class Saved(Setup):
                     raise SetupError(app['label'] + ' is already open but unavailable. Leave fullscreen or release it from its card, then try again.')
                 launchers[index] = catalog.infer(app) or self.choose_launcher(app, catalog)
             chosen[index] = match
+        sides = [side for side, face in enumerate(recipe['faces']) for _ in face['apps']]
         while review:
             detail = f'Workspace {workspace} · {len(chosen) - len(launchers)} open · {len(launchers)} to launch'
             choices = [Choice('open', 'Open card here', detail)]
             for index, app in enumerate(apps):
-                side = 'Front' if index < len(recipe['faces'][0]['apps']) else 'Back'
+                side = face_name(sides[index])
                 detail = ('Launch ' + launchers[index].name if index in launchers else
                           'Already open · Workspace ' + workspace_name(windows[chosen[index]]))
                 choices.append(Choice(str(index), side + ' · ' + app['label'], detail))
@@ -3031,6 +3096,9 @@ class Unattended(Saved):
                                      'axis': old['axis'] if len(members) == 1 else face['axis'],
                                      'ratios': ratios, 'focus': order.index(face['focus'])}
             addresses.append([members[k] if type(k) is int else None for k in order])
+        # A face the card no longer has keeps none of its apps.
+        dropped += sorted(({'face': k['face'], 'index': k['index']} for k in keep if k['face'] >= len(recipe['faces'])),
+                          key=lambda k: (k['face'], k['index']))
         return addresses, dropped
 
     def save(self, request, cancelled):
@@ -3063,7 +3131,8 @@ class Unattended(Saved):
             else:
                 reference = RecipeStore.untitled(stored)
             keep = request.get('keep', [])
-            if any(k['index'] >= len(reference['faces'][k['face']]['apps']) for k in keep): raise Unfinished('invalid_request')
+            if any(k['face'] >= len(reference['faces']) or k['index'] >= len(reference['faces'][k['face']]['apps'])
+                   for k in keep): raise Unfinished('invalid_request')
             if reference and 'workspace' in reference: recipe['workspace'] = reference['workspace']
             addresses, dropped = self.merge(recipe, card, reference, keep, state.get('container_max_panes', 5))
             # 4. Launchers come from the definition or the app's class, never its
