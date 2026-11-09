@@ -85,6 +85,16 @@ try:
     assert c['faces'] == [[a], [b, c3], [d]] and c['active'] == 0 and len(c['layouts']) == 3, c
     passed('a card restores with three faces, the second holding two apps')
 
+    # An update takes cards apart and restores them from card_restore.describe.
+    import card_restore
+    line = card_restore.describe(c)
+    assert ipc.action(f'card {c["id"]} ungroup').startswith('ok'); wait(lambda: not cards(), 'ungroup')
+    reply = ipc.batch(['hyprflip restore quiet ' + line])[-1]
+    assert reply.startswith('ok'), (reply, line)
+    c = card()
+    assert c['faces'] == [[a], [b, c3], [d]], c
+    passed('a three-face card survives the description an update restores it from')
+
     order = []
     for _ in range(3):
         c = flip(c); order.append(c['active'])
