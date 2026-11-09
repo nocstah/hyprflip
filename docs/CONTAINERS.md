@@ -1,6 +1,6 @@
 # Multi-app cards
 
-A multi-app card holds one to five apps on each of its two faces. The Hyprflip
+A multi-app card holds one to five apps on each of its faces: two, or up to four. The Hyprflip
 core builds it on Omarchy's default **dwindle** layout, or as a floating card;
 no other layout plugin is involved. For installation, follow the
 [dwindle installation guide](INSTALL.md#dwindle-multi-app-cards), including the
@@ -12,7 +12,7 @@ acceptance checks.
 Flip one desktop tile between two views of a task. For example, Gmail on the
 front and up to five messaging applications sharing its reverse side.
 
-Two sides, at most five panes per side, one split per face. The card's workspace
+Two to four faces, at most five panes per face, one split per face. The card's workspace
 command moves its applications together. A flip restores the last focused application on
 the destination face. Closing an application never closes the other applications.
 Releasing a pane and disabling the effect must leave ordinary usable windows.
@@ -114,6 +114,19 @@ These keys previously moved or swapped the selected window. Ordinary windows
 retain workspace movement and the standard swap command. A failed card move
 leaves all panes in place. A directional card move at an outer edge does
 nothing. Scratchpad and drag bindings are not replaced by this module.
+
+## More than two faces
+
+A card starts with a front and a back. Mark an app and run `attach face`
+(`hl.plugin.hyprflip.attach("face")`, or **Add an app as a new face** in the
+card menu and OmaCards) to add it as Face 3, then Face 4; the card turns to the
+new face. Each flip turns to the next face, and the last comes round to the
+front; `card <id> show <n>` turns straight to face `n`. Moving an app to the
+other side moves it to the next face. Taking the only app off a face removes
+that face while the card keeps at least two; on a two-face card it takes the
+card apart as before. Unfolding lays every face out side by side, each with at
+least the room its apps need. Saved cards, updates and `restore` keep every
+face; `restore` writes faces after the back as `face …`.
 
 ## Temporary unfold
 

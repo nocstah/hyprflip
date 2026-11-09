@@ -319,7 +319,7 @@ to turn off these targets.
 
 - **Version pin:** Hyprland 0.56.2 only. Rebuild after compositor or ABI changes;
   other versions need adaptation and testing.
-- **Cards:** one workspace, two faces, at most five apps in a row or
+- **Cards:** one workspace, two to four faces, at most five apps in a row or
   column per face, tiled or floating. Nested flip cards and arbitrary pane trees
   are not implemented. Native dwindle and floating cards give unfolded faces
   unequal space when their apps need it, while preserving each face's pane

@@ -26,7 +26,8 @@ the ids again.
 
 ```sh
 hyprctl hyprflip restore [quiet] <tiled|floating> <active> <unfolded> <x> <y> <w> <h> \
-  front <axis> <focused> <address:ratio>... back <axis> <focused> <address:ratio>...
+  front <axis> <focused> <address:ratio>... back <axis> <focused> <address:ratio>... \
+  [face <axis> <focused> <address:ratio>...]...
 ```
 
 `restore` turns open windows on one workspace into a native card. `active` is
@@ -57,7 +58,7 @@ hyprctl hyprflip restore quiet tiled 0 0 0 0 1200 900 \
 
 | Action | Behavior |
 | --- | --- |
-| `card <id> show front` / `show back` | Show that side; an unfolded card folds onto it |
+| `card <id> show front` / `show back` / `show <n>` | Show that face (`n` from 1: front is 1, back is 2); an unfolded card folds onto it |
 | `card <id> flip` | Turn the card with the configured transition; instantly when its workspace is not on screen |
 | `card <id> workspace <workspace>` | Move a multi-app card and follow it |
 | `card <id> workspace <workspace> silent` | Move it and stay where you are |
@@ -420,9 +421,9 @@ it by these rules:
             "ratios": [0.7, 0.3], "axis": "vertical", "focus": 0}]}
 ```
 
-- `active` is the face shown, 0 or 1. `floating` (true or false) and `workspace`
+- `active` is the face shown, from 0. `floating` (true or false) and `workspace`
   (1 to 2147483647) are optional.
-- `faces` holds exactly two faces, front first. Each has `apps` (1 to 5),
+- `faces` holds two to four faces, front first. Each has `apps` (1 to 5),
   `ratios`, `axis` (`horizontal` or `vertical`) and `focus`, the index of the
   app that has the face's focus.
 - `ratios` has one number per app, each above 0 and at most 1, and together
