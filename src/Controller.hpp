@@ -90,7 +90,10 @@ class Controller {
         std::vector<CBox> windowGeometry;
         bool previewReturn = false;
         // A swipe holds the faces under the fingers; the timeline waits.
-        bool dragging = false;
+        // `shown` glides towards `goal` each frame; after the fingers lift a
+        // spring carries `speed` on to `goal`, the face it settles on.
+        bool dragging = false, settling = false;
+        double goal = 0, shown = 0, speed = 0;
         // The face the turn goes to: the next one round.
         unsigned target = 1;
         unsigned face(bool second) const { return second ? target : source; }
@@ -198,7 +201,7 @@ class Controller {
     SP<CEventLoopTimer> m_switchTimer;
     UP<SEventLoopDoLaterLock> m_switchLater;
     bool m_eatSwitchRelease = false;
-    bool m_forceStrip = false;
+    bool m_forceStrip = false, m_swipeCapture = false;
     struct Swipe {
         uint64_t pairID;
         double width, moved = 0, velocity = 0; // moved and velocity in card widths

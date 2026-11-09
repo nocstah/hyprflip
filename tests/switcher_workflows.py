@@ -102,9 +102,9 @@ try:
     ok('a swipe left past halfway settles on the next face')
     assert swipe((-60, 10), (-60, 10)) == 3
     ok('a quick flick carries on to the next face')
-    assert swipe(*[(120, 40)] * 16) == 1
-    ok('a long swipe right slides back past a face to the one before it')
-    assert swipe(*[(-120, 40)] * 6, end='cancel') == 1
+    assert swipe(*[(120, 40)] * 16) == 2
+    ok('a long swipe right resists past one face and settles on the face before')
+    before = card()['active']; assert swipe(*[(-120, 40)] * 6, end='cancel') == before
     ok('a cancelled swipe returns to its face')
 finally:
     for p in procs: p.terminate()

@@ -13,6 +13,8 @@ const ContainerAPI *api();
 // focus the card leaves the focus where it is.
 uint64_t create(const ContainerSnapshot &snapshot, bool floating = true, bool focus = true);
 bool canCreate(const ContainerSnapshot &snapshot);
+// Names a face; an empty name gives it back its default.
+bool name(uint64_t id, unsigned side, const std::string &value);
 // Why the card a snapshot describes cannot be made, in words for the person:
 // which app needs more room than the card or the screen has.
 std::string fitProblem(const ContainerSnapshot &snapshot, bool floating);

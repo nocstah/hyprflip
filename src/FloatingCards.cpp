@@ -1,6 +1,7 @@
 #include "FloatingCards.hpp"
 #include "SplitLayout.hpp"
 #include <algorithm>
+#include <cstring>
 #include <array>
 #include <cmath>
 #include <hyprland/src/config/values/types/CssGapValue.hpp>
@@ -108,6 +109,7 @@ struct Card {
     std::array<bool, CONTAINER_MAX_FACES> vertical{};
     std::array<std::vector<double>, CONTAINER_MAX_FACES> ratios;
     unsigned count = 2;
+    std::array<std::string, CONTAINER_MAX_FACES> names;
     std::map<uintptr_t, SP<PaneTarget>> targets;
     SP<CGroup> group;
     unsigned active = 0;
@@ -365,8 +367,10 @@ struct Card {
             focused[f] = focused[f + 1];
             vertical[f] = vertical[f + 1];
             ratios[f] = std::move(ratios[f + 1]);
+            names[f] = std::move(names[f + 1]);
         }
         --count;
+        names[count].clear();
         faces[count].clear();
         ratios[count].clear();
         focused[count] = {};
@@ -544,6 +548,7 @@ bool inspect(uint64_t id, ContainerSnapshot *out) {
         out->count[s] = c->faces[s].size();
         out->focused[s] = addr(c->focused[s].lock());
         out->vertical[s] = c->vertical[s];
+        c->names[s].copy(out->names[s], CONTAINER_NAME_SIZE - 1);
         for (unsigned i = 0; i < c->faces[s].size(); ++i) {
             out->windows[s][i] = addr(c->faces[s][i].lock());
             out->ratios[s][i] = c->ratios[s][i];
@@ -551,6 +556,14 @@ bool inspect(uint64_t id, ContainerSnapshot *out) {
     }
     return true;
 }
+} // namespace
+bool name(uint64_t id, unsigned side, const std::string &value) {
+    auto c = get(id);
+    if (!c || !c->valid() || side >= c->count) return false;
+    c->names[side] = value.substr(0, CONTAINER_NAME_SIZE - 1);
+    return true;
+}
+namespace {
 bool select(uint64_t id, uint32_t side, bool focus) {
     auto c = get(id);
     if (!c || !c->valid() || side >= c->count)
@@ -580,6 +593,7 @@ bool attach(uint64_t id, uintptr_t address, uint32_t side, bool vertical) {
     // One past the last face starts a new face holding just this app.
     const bool added = side == c->count;
     if (added) {
+        c->names[side].clear();
         c->faces[side].clear();
         c->ratios[side].clear();
         c->vertical[side] = false;
@@ -1059,6 +1073,7 @@ uint64_t create(const ContainerSnapshot &snapshot, bool floating, bool focus) {
         if (!snapshot.count[s] || snapshot.count[s] > CONTAINER_MAX_PANES)
             return 0;
         c->vertical[s] = snapshot.vertical[s];
+        c->names[s] = std::string(snapshot.names[s], strnlen(snapshot.names[s], CONTAINER_NAME_SIZE));
         for (unsigned i = 0; i < snapshot.count[s]; ++i) {
             if (!supports(snapshot.windows[s][i]))
                 return 0;

@@ -5,7 +5,9 @@
 // The boundary between the controller and the card engine (FloatingCards). No
 // Hyprland types, STL containers or owning pointers cross it. Window addresses are identifiers, resolved against live windows.
 namespace Hyprflip {
-inline constexpr uint32_t CONTAINER_ABI_VERSION = 8;
+inline constexpr uint32_t CONTAINER_ABI_VERSION = 9;
+// A face name, NUL-terminated; empty uses Front, Back, Face 3, Face 4.
+inline constexpr uint32_t CONTAINER_NAME_SIZE = 48;
 inline constexpr uint32_t CONTAINER_MAX_PANES = 5;
 // A card has two faces, or up to this many; flipping turns to the next one.
 inline constexpr uint32_t CONTAINER_MAX_FACES = 4;
@@ -21,6 +23,7 @@ struct ContainerSnapshot {
     uint32_t vertical[CONTAINER_MAX_FACES]{};
     double ratios[CONTAINER_MAX_FACES][CONTAINER_MAX_PANES]{};
     double x = 0, y = 0, width = 0, height = 0;
+    char names[CONTAINER_MAX_FACES][CONTAINER_NAME_SIZE]{};
 };
 struct ContainerAPI {
     uint32_t version, size;

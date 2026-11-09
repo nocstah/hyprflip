@@ -36,6 +36,7 @@ uniform sampler2D fourthSource;
 uniform int faceCount;
 uniform float spinFrom;
 uniform float travel;
+uniform int present;
 uniform sampler2D backdrop;
 uniform int useBackdrop;
 uniform vec4 pane; // this window's own rectangle in card coordinates: min, max
@@ -76,6 +77,7 @@ vec4 strip(float e) {
     vec4 result = vec4(0.0);
     for (int i = 0; i < 4; ++i) {
         if (i >= faceCount) break;
+        if ((present & (1 << i)) == 0) continue;
         float offset = mod(float(i) - position + n * 0.5, n) - n * 0.5;
         vec2 p = local - vec2(offset * (2.0 + gap), 0.0);
         if (abs(p.x) <= 1.0) result += faceAt(i, p);
@@ -326,6 +328,7 @@ bool FlipShader::initialize(std::string &error) {
     faceCount = glGetUniformLocation(p, "faceCount");
     from = glGetUniformLocation(p, "spinFrom");
     travel = glGetUniformLocation(p, "travel");
+    present = glGetUniformLocation(p, "present");
     mode = glGetUniformLocation(p, "mode");
     progress = glGetUniformLocation(p, "progress");
     direction = glGetUniformLocation(p, "direction");
@@ -517,7 +520,15 @@ SP<Render::IFramebuffer> FlipTransformer::transform(SP<Render::IFramebuffer> in)
     glUseProgram(m_shader->program);
     glBindVertexArray(m_shader->vao);
     glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, (snapshot ? m_pose->faces[0] : in)->getTexture()->m_texID);
+    // A slide along three or more faces captures only the faces it shows.
+    SP<Render::IFramebuffer> any;
+    for (const auto &face : m_pose->faces)
+        if (face && !any) any = face;
+    if (snapshot && !any) {
+        m_pose->failed = true;
+        return in;
+    }
+    glBindTexture(GL_TEXTURE_2D, (snapshot ? (m_pose->faces[0] ? m_pose->faces[0] : any) : in)->getTexture()->m_texID);
     glBindSampler(0, 0);
     glUniform1i(m_shader->texture, 0);
     if (snapshot) {
@@ -525,7 +536,7 @@ SP<Render::IFramebuffer> FlipTransformer::transform(SP<Render::IFramebuffer> in)
         const std::array<std::pair<GLint, unsigned>, 3> more{
             std::pair{m_shader->secondTexture, 1U}, {m_shader->thirdTexture, 3U}, {m_shader->fourthTexture, 4U}};
         for (unsigned i = 0; i < more.size(); ++i) {
-            const auto &face = m_pose->faces[i + 1] ? m_pose->faces[i + 1] : m_pose->faces[0];
+            const auto &face = m_pose->faces[i + 1] ? m_pose->faces[i + 1] : any;
             glActiveTexture(GL_TEXTURE0 + more[i].second);
             glBindTexture(GL_TEXTURE_2D, face->getTexture()->m_texID);
             glBindSampler(more[i].second, 0);
@@ -535,6 +546,7 @@ SP<Render::IFramebuffer> FlipTransformer::transform(SP<Render::IFramebuffer> in)
     glUniform1i(m_shader->faceCount, m_pose->count);
     glUniform1f(m_shader->from, m_pose->from);
     glUniform1f(m_shader->travel, m_pose->travel);
+    glUniform1i(m_shader->present, int(m_pose->present));
     const auto &blur = monitor->resources()->m_blurFB;
     const bool backdrop = m_glass && !snapshot && blur && blur->getTexture();
     if (backdrop) {

@@ -3,6 +3,7 @@
 #include "FloatingCards.hpp"
 #include "Reveal.hpp"
 #include <algorithm>
+#include <bit>
 #include <charconv>
 #include <dlfcn.h>
 #include <filesystem>
@@ -952,9 +953,9 @@ void Controller::swipeUpdate(Vector2D delta) {
         if (std::abs(delta.y) > std::abs(delta.x) * 1.5 && std::abs(m_swipe->moved) < .01) return;
         m_swipe->started = true;
         if (m_turn && m_turn->pairID == p->id) finish();
-        m_forceStrip = true;
+        m_forceStrip = m_swipeCapture = true;
         const auto result = flip(std::nullopt, p, s->next());
-        m_forceStrip = false;
+        m_forceStrip = m_swipeCapture = false;
         if (!result.ok || !m_turn || m_turn->pairID != p->id || m_turn->pose->mode != Transition::Strip) {
             if (m_turn && m_turn->pairID == p->id) finish(false);
             m_swipe.reset();
@@ -967,31 +968,30 @@ void Controller::swipeUpdate(Vector2D delta) {
     }
     if (!m_turn || m_turn->pairID != p->id || !m_turn->dragging) return m_swipe.reset();
     m_swipe->moved += -delta.x / m_swipe->width;
-    m_turn->pose->travel = float(m_swipe->moved);
-    m_turn->pose->dirty = true;
+    // Only the neighbours were captured: past one face the card resists.
+    const double over = std::max(0.0, std::abs(m_swipe->moved) - 1.0);
+    m_turn->goal = std::copysign(std::min(std::abs(m_swipe->moved), 1.0) + over * .25 / (1.0 + over), m_swipe->moved);
     damage(*p);
 }
 void Controller::swipeEnd(bool cancelled) {
     const auto swipe = *m_swipe;
     m_swipe.reset();
-    if (!swipe.started || !m_turn || m_turn->pairID != swipe.pairID || !m_turn->dragging) return;
+    if (!swipe.started || !m_turn || m_turn->pairID != swipe.pairID || !m_turn->dragging || m_turn->settling) return;
     auto p = find(swipe.pairID);
     auto s = p ? state(*p) : std::nullopt;
     if (!s) return finish(false);
     // Settle on the nearest face; a quick flick carries on to the next one.
-    double settle = cancelled ? 0 : std::round(swipe.moved);
-    if (!cancelled && std::abs(swipe.velocity) > 1.2 && std::abs(swipe.moved) < .5)
+    const double at = m_turn->shown;
+    double settle = cancelled ? 0 : std::clamp(std::round(at), -1.0, 1.0);
+    if (!cancelled && std::abs(swipe.velocity) > 1.2 && std::abs(at) < .5)
         settle = swipe.velocity > 0 ? 1 : -1;
     const int count = int(s->count);
     const unsigned face = unsigned(((int(m_turn->source) + int(settle)) % count + count) % count);
-    const double remaining = settle - swipe.moved;
     m_turn->target = face;
-    m_turn->dragging = false;
-    m_turn->pose->from = float(m_turn->source + swipe.moved);
-    m_turn->pose->travel = float(remaining);
-    m_turn->pose->progress = 0;
-    m_turn->timeline = Timeline(std::clamp(std::abs(remaining) * double(m_settings.duration->value()) * 1.2, 90.0, 600.0));
-    m_turn->last = Clock::now();
+    m_turn->goal = settle;
+    m_turn->settling = true;
+    // Carry the fingers' speed into the settle, never more than a flick's.
+    if (!cancelled) m_turn->speed = std::clamp(swipe.velocity, -6.0, 6.0);
     damage(*p);
 }
 bool Controller::switchHeld() const {
@@ -1289,23 +1289,36 @@ Result Controller::flip(std::optional<Transition> preview, Pair *target, std::op
         // The peak capture budget is one native-sized RGBA buffer per face,
         // one temporary pane and one reusable transition output.
         const bool ring = mode == Transition::Strip;
-        const unsigned captures = ring ? s->count : 2;
+        // A slide shows the faces it passes; a swipe the face and its neighbours.
+        std::vector<unsigned> needed;
+        if (ring) {
+            const int n = int(s->count), from = int(source);
+            const int steps = m_swipeCapture ? 1 : int(std::abs(travel));
+            const int sign = travel < 0 ? -1 : 1;
+            for (int k = m_swipeCapture ? -1 : 0; k <= steps; ++k) {
+                const unsigned face = unsigned(((from + (m_swipeCapture ? k : sign * k)) % n + n) % n);
+                if (std::ranges::find(needed, face) == needed.end()) needed.push_back(face);
+            }
+        }
+        const unsigned captures = ring ? needed.size() : 2;
         if (!monitor || !g_pHyprRenderer->glBackend() ||
             monitor->m_pixelSize.x * monitor->m_pixelSize.y * 4 * (captures + 2) > 256 * 1024 * 1024) {
             pose->error = "Snapshot transition exceeds the 256 MiB buffer budget";
         } else {
             m_mutating = true;
             for (unsigned slot = 0; slot < captures; ++slot) {
-                const auto face = ring ? slot : m_turn->face(slot);
+                const auto face = ring ? needed[slot] : m_turn->face(slot);
+                const auto index = ring ? face : slot;
                 select(*p, face, false);
-                pose->faces[slot] = m_shader->captureFace(s->faces[face], monitor, pose->error);
-                if (!pose->faces[slot]) break;
+                pose->faces[index] = m_shader->captureFace(s->faces[face], monitor, pose->error);
+                if (!pose->faces[index]) break;
+                pose->present |= 1U << index;
             }
             select(*p, source);
             m_mutating = false;
         }
         m_captureMs = std::chrono::duration<double, std::milli>(Clock::now() - started).count();
-        if (std::any_of(pose->faces.begin(), pose->faces.begin() + captures, [](const auto &f) { return !f; })) {
+        if (std::popcount(pose->present) != int(captures)) {
             m_lastFallback = "Instant switch: " + pose->error;
             finish(!preview);
             return {true, "ok"};
@@ -1847,10 +1860,32 @@ void Controller::onFrame(PHLMONITOR monitor) {
     }
     auto now = Clock::now();
     if (m_turn->dragging) {
-        // The fingers set the position; keep drawing until they lift.
+        // Integrate in small steps, so the motion does not depend on the
+        // frame rate or on how evenly the trackpad reports.
+        double left = std::min(50.0, std::chrono::duration<double, std::milli>(now - m_turn->last).count()) / 1000.0;
         m_turn->last = now;
+        while (left > 0) {
+            const double dt = std::min(left, .004);
+            left -= dt;
+            if (m_turn->settling) {
+                // A critically damped spring: no overshoot, no stop and restart.
+                constexpr double omega = 22.0;
+                const double accel = -omega * omega * (m_turn->shown - m_turn->goal) - 2 * omega * m_turn->speed;
+                m_turn->speed += accel * dt;
+                m_turn->shown += m_turn->speed * dt;
+            } else {
+                const double before = m_turn->shown;
+                m_turn->shown += (m_turn->goal - m_turn->shown) * (1.0 - std::exp(-dt / .028));
+                m_turn->speed = (m_turn->shown - before) / dt;
+            }
+        }
+        m_turn->pose->travel = float(m_turn->shown);
         m_turn->pose->dirty = true;
         damage(*p);
+        if (m_turn->settling && std::abs(m_turn->shown - m_turn->goal) < .002 && std::abs(m_turn->speed) < .05) {
+            finish();
+            return;
+        }
         m_timer->updateTimeout(std::chrono::milliseconds(1500));
         return;
     }

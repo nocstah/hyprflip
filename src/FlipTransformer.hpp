@@ -15,6 +15,7 @@ struct Pose {
     std::array<SP<Render::IFramebuffer>, 4> faces;
     unsigned count = 2;
     float from = 0, travel = 1;
+    unsigned present = 0; // faces captured, as bits; others are never drawn
     SP<Render::IFramebuffer> composite;
     // Hyprland asks each transformed window for its colour, then for a blur
     // matte. contentDrawn tells the two apart; preWindowRender clears it
@@ -43,7 +44,7 @@ class FlipShader {
           previewRadius = -1;
     GLuint program = 0, vao = 0;
     GLint matrix = -1, composite = -1, rotation = -1, perspective = -1, texture = -1;
-    GLint thirdTexture = -1, fourthTexture = -1, faceCount = -1, from = -1, travel = -1;
+    GLint thirdTexture = -1, fourthTexture = -1, faceCount = -1, from = -1, travel = -1, present = -1;
     GLint secondTexture = -1, mode = -1, progress = -1, direction = -1, aspect = -1, backdrop = -1, useBackdrop = -1, pane = -1;
 };
 
