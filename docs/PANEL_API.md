@@ -33,6 +33,10 @@ Snapshot is read-only. It normalizes two-window pairs and multi-app cards into
 two faces, includes card/library tokens, original focus/workspace/session,
 core capabilities, app icons, transition modes and animation settings.
 There are no persistent window IDs: tokens belong to one Hyprland instance.
+`installed_commit` and `installed_release` describe what `scripts/bootstrap.py`
+last installed, or are null. The release (such as `0.3.0-rc.16`) is the newest
+release tag that commit contains, so a panel can require a minimum release and
+accept later ones instead of matching one exact commit.
 `context.anchor_label` names the app that will become the front of a new card;
 it is display text only and never used to identify or retarget a window.
 

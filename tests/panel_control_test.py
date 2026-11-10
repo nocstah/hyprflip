@@ -73,6 +73,15 @@ class PanelControlTest(unittest.TestCase):
         recorded.write_text('not a commit\n')
         self.assertIsNone(control.snapshot(self.ipc)['installed_commit'])
 
+    def test_snapshot_reports_the_installed_release(self):
+        self.assertIsNone(control.snapshot(self.ipc)['installed_release'])
+        recorded = Path(self.directory.name) / 'hyprflip/installed-release'
+        recorded.parent.mkdir(parents=True, exist_ok=True)
+        for text, expected in (('0.3.0-rc.16\n', '0.3.0-rc.16'), ('0.3.0\n', '0.3.0'), ('v0.3.0\n', None), ('0.3.0-beta\n', None)):
+            with self.subTest(text=text):
+                recorded.write_text(text)
+                self.assertEqual(control.snapshot(self.ipc)['installed_release'], expected)
+
     def test_context_rejects_navigation_restart_and_reused_address(self):
         for mutation in ('workspace', 'focus', 'restart', 'pid'):
             with self.subTest(mutation=mutation):

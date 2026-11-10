@@ -87,6 +87,13 @@ def snapshot(ipc):
         base['installed_commit'] = commit if re.fullmatch(r'[0-9a-f]{40}', commit) else None
     except OSError:
         base['installed_commit'] = None
+    # The newest release that install contains, such as 0.3.0-rc.16; panels
+    # can accept it, or anything later, instead of one exact commit.
+    try:
+        release = recorded.with_name('installed-release').read_text().strip()
+        base['installed_release'] = release if re.fullmatch(r'\d+\.\d+\.\d+(?:-rc\.\d+)?', release) else None
+    except OSError:
+        base['installed_release'] = None
     try:
         windows, state = ipc.windows(), ipc.status()
         ctx = context(ipc, windows)

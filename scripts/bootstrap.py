@@ -63,6 +63,9 @@ class Reporter:
         return detail
 
 
+RELEASE = re.compile(r'\d+\.\d+\.\d+(?:-rc\.\d+)?')
+
+
 def run(*command, timeout=900):
     result = subprocess.run(command, cwd=project, capture_output=True, text=True, timeout=timeout)
     output = (result.stdout + result.stderr).strip()
@@ -154,16 +157,31 @@ def install_helper():
     return 'Card menus, shortcuts and the OmaCards helper are installed'
 
 
+def record(state, name, value):
+    path = state / name
+    if not value:
+        path.unlink(missing_ok=True)
+        return
+    temporary = state / (name + '.new')
+    temporary.write_text(value + '\n')
+    temporary.replace(path)
+
+
 def record_commit():
-    """Remember which source commit is installed, so panels can offer updates."""
+    """Remember which source commit and release are installed, so panels can offer updates.
+
+    The release is the newest release tag the commit contains, so a build from
+    a later development commit still counts as at least that release.
+    """
     code, commit = run('git', 'rev-parse', 'HEAD')
     if code or not re.fullmatch(r'[0-9a-f]{40}', commit.strip()):
         return ''
+    code, tag = run('git', 'describe', '--tags', '--abbrev=0', '--match', 'v[0-9]*')
+    release = tag.strip()[1:] if not code and RELEASE.fullmatch(tag.strip()[1:]) else ''
     state = Path(os.environ.get('XDG_STATE_HOME', Path.home() / '.local/state')) / 'hyprflip'
     state.mkdir(parents=True, exist_ok=True)
-    temporary = state / 'installed-commit.new'
-    temporary.write_text(commit.strip() + '\n')
-    temporary.replace(state / 'installed-commit')
+    record(state, 'installed-release', release)
+    record(state, 'installed-commit', commit.strip())
     return commit.strip()
 
 

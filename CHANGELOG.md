@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- `scripts/bootstrap.py` records the release it installed, the newest release
+  tag its commit contains, next to the commit in
+  `$XDG_STATE_HOME/hyprflip/installed-release`. The helper's snapshot reports
+  it as `installed_release`, so a panel can accept a minimum release or any
+  later one instead of one exact commit, and never offers an older Hyprflip
+  as an update. Helper protocol 1 is unchanged.
 - `card <id or address> reveal [speed] [up|down]`: with a direction, what
   arrives slides into its tile from below (`up`) or above (`down`) at the
   window move animation, with no fade, and the held picture of what it

@@ -74,6 +74,29 @@ class BootstrapTest(unittest.TestCase):
         self.running = {"tag": "v0.56.2", "commit": "a" * 40}
         self.assertIn("not one this source was tested against", self.failure()["detail"])
 
+    def record(self, describe):
+        import os, tempfile
+        spec = importlib.util.spec_from_file_location("hyprflip_bootstrap", PROJECT / "scripts/bootstrap.py")
+        bootstrap = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(bootstrap)
+        state = tempfile.TemporaryDirectory()
+        self.addCleanup(state.cleanup)
+        answers = {"rev-parse": (0, "b" * 40 + "\n"), "describe": describe}
+        with patch.object(bootstrap, "run", lambda *command, **_: answers[command[1]]), \
+                patch.dict(os.environ, {"XDG_STATE_HOME": state.name}):
+            (Path(state.name) / "hyprflip").mkdir()
+            (Path(state.name) / "hyprflip/installed-release").write_text("0.1.0\n")
+            self.assertEqual(bootstrap.record_commit(), "b" * 40)
+        directory = Path(state.name) / "hyprflip"
+        release = directory / "installed-release"
+        return (directory / "installed-commit").read_text(), release.read_text() if release.exists() else None
+
+    def test_install_records_the_release_it_contains(self):
+        self.assertEqual(self.record((0, "v0.3.0-rc.16\n")), ("b" * 40 + "\n", "0.3.0-rc.16\n"))
+        # A checkout without release tags leaves no stale release behind.
+        self.assertEqual(self.record((128, "fatal: No names found")), ("b" * 40 + "\n", None))
+        self.assertEqual(self.record((0, "vnext\n")), ("b" * 40 + "\n", None))
+
     def core_step(self, output):
         spec = importlib.util.spec_from_file_location("hyprflip_bootstrap", PROJECT / "scripts/bootstrap.py")
         bootstrap = importlib.util.module_from_spec(spec)
