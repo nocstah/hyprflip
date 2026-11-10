@@ -944,6 +944,31 @@ class UnattendedTest(unittest.TestCase):
         self.assertEqual((reply['code'], reply['labels'], reply['launched']), ('incomplete', ['Workspace browser'], []))
         self.assertEqual((self.launched, self.ipc.now, self.ipc.mutations), ([], 0, []))
 
+    def test_open_gives_a_bound_window_to_the_face_it_alone_can_fill(self):
+        # The user's terminal is named twice, beside the workspace browser and alone behind it. One
+        # terminal is bound, and another is open elsewhere, so the second place gets no new one.
+        self.park()
+        self.ipc.clients['0xe'] = window('0xe', at=[0, 0], size=[600, 700], workspace={'id': 3, 'name': '3'})
+        terminal = self.app('foot', 'Terminal')
+        recipe = {'faces': [{'apps': [self.app('omarelay-acme', 'Workspace browser'), terminal],
+                             'axis': 'horizontal', 'ratios': [.5, .5], 'focus': 1},
+                            {'apps': [terminal], 'axis': 'horizontal', 'ratios': [1.], 'focus': 0}], 'active': 0}
+        reply = self.send('open', recipe=recipe, workspace=2, bind=['0xb', '0xd'], owned=['omarelay-acme'])
+        self.assertEqual(reply['result'], 'opened')
+        self.assertEqual([[(s['address'], s.get('missing')) for s in face] for face in reply['slots']],
+                         [[('0xb', None), (None, 'open_elsewhere')], [('0xd', None)]])
+        self.assertEqual(self.ipc.snapshot['containers'][0]['faces'], [['0xb'], ['0xd']])
+        self.assertEqual((self.launched, reply['unused']), ([], []))
+        # A face is never left empty to fill another: with nothing beside it, the terminal stays in front.
+        self.ipc = QuietIPC(); self.ipc.env = self.env; self.park()
+        self.ipc.clients['0xe'] = window('0xe', at=[0, 0], size=[600, 700], workspace={'id': 3, 'name': '3'})
+        recipe['faces'][0] = {'apps': [terminal], 'axis': 'horizontal', 'ratios': [1.], 'focus': 0}
+        reply = self.send('open', recipe=recipe, workspace=2, bind=['0xd'])
+        self.assertEqual((reply['code'], reply['labels']), ('incomplete', ['Terminal']))
+        self.assertEqual([[(s['address'], s.get('missing')) for s in face] for face in reply['slots']],
+                         [[('0xd', None)], [(None, 'open_elsewhere')]])
+        self.assertEqual(self.ipc.mutations, [])
+
     def rollback_world(self):
         """The browser floats on special:park, the terminal is on workspace 3 and the notes float on workspace 2."""
         self.park(); self.keep('acme', self.acme())

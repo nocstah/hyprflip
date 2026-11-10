@@ -274,8 +274,11 @@ reply is `conflict`. Neither of them asks Hyprland anything.
   [a definition](#a-definition) in the request instead, with every `title`
   empty. It is never stored, and the reply's `token` is null.
 - `bind` names up to 10 windows the card may take. Each fills the first open
-  slot of its app, front face first. No other window is ever taken. A bound
-  window that no slot wants stays where it is and is listed in `unused`.
+  slot of its app, front face first, unless that leaves a face with no app: a
+  definition can name an app on two faces while one window of it is bound, and
+  that window then goes to the face it alone can fill, when its first face keeps
+  another app. No other window is ever taken. A bound window that no slot wants
+  stays where it is and is listed in `unused`.
 - `owned` lists up to 8 app classes the caller opens itself. A slot whose class
   or initial class is listed is never launched.
 - `focus` is the window the keyboard goes back to. It defaults to the window

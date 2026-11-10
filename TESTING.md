@@ -1,5 +1,19 @@
 # Validation
 
+## A bound window fills the face only it can fill (2026-11-10)
+
+All 387 Python unit tests pass, one new: an unattended `open` whose definition
+names the user's terminal beside the workspace browser and alone on the back
+face, with one terminal bound and another open elsewhere, puts the bound one on
+the back face and opens the card. With nothing beside it in front, the front
+keeps it and the open is `incomplete`, with nothing moved. Without the change
+the new test fails: that open was `incomplete`. OmaRelay's nested card suite
+(`python3 scripts/ovis.py cards-nested`, 14 checks) passed in a fresh nested
+session (Hyprland 0.56.2, Aquamarine 0.15.1 with the render-node patch) against
+this helper and core. Found on the pilot desktop: a card saved with a terminal
+on two faces could no longer be built after Hyprflip reloaded, so every visit
+to it fell back to an instant cut.
+
 ## Slides keep the gap beside a card (2026-11-10)
 
 Both CTest checks and all 380 Python unit tests pass. A tiled card's slot

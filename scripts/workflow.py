@@ -2950,8 +2950,8 @@ class Unattended(Saved):
                 places = self.places(recipe)
                 apps = [app for face in recipe['faces'] for app in face['apps']]
                 chosen = [None] * len(apps)
-                # 2. Each bound window takes the first open slot of its app, front face first.
-                # No other window is ever taken.
+                # 2. Each bound window takes the first open slot of its app, front face first,
+                # unless that leaves a face with no app (3). No other window is ever taken.
                 members = {a for card in state.get('containers', []) for face in card['faces'] for a in face}
                 members.update(a for pair in state.get('pairs', []) for a in (pair['front'], pair['back']))
                 available, unused = self.bindable(windows, state), []
@@ -2967,14 +2967,28 @@ class Unattended(Saved):
                 selected = {a: deepcopy(windows[a]) for a in chosen if a}
                 # 3. Every other slot is launched, or says why it is not.
                 catalog = DesktopApps(self.env)
-                for index, app in enumerate(apps):
-                    if chosen[index]: continue
+                def unfilled(index):
+                    app = apps[index]
                     if {app['class'], app['initial_class']} & owned: missing[index] = 'owned'
                     elif any(self.same_app(app, w) for a, w in windows.items() if a not in bind):
                         missing[index] = 'open_elsewhere'
                     elif not request.get('launch', True): missing[index] = 'not_launched'
                     elif entry := catalog.infer(app, by_label=False): launchers[index] = entry
                     else: missing[index] = 'no_launcher'
+                for index in range(len(apps)):
+                    if not chosen[index]: unfilled(index)
+                # A face left with no app takes a bound window of one of its apps from a face that keeps
+                # another app. A definition can name an app twice, on two faces, while one window of it
+                # is bound: front face first, that window would leave the other face empty.
+                while empty := next((face for face in places if all(i in missing for i in face)), None):
+                    spare = next(((i, j) for i in empty for j, address in enumerate(chosen)
+                                  if address and self.same_app(apps[i], windows[address])
+                                  and any(k != j and k not in missing for k in next(f for f in places if j in f))), None)
+                    if spare is None: break
+                    i, j = spare
+                    chosen[i], chosen[j] = chosen[j], None
+                    del missing[i]
+                    unfilled(j)
                 # Nothing starts for a card that cannot be made.
                 if empty := next((face for face in places if all(i in missing for i in face)), None):
                     raise Unfinished('incomplete', [apps[i]['label'] for i in empty], slots=self.slots(recipe, chosen, missing))

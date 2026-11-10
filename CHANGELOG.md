@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- An unattended `open` gives a bound window to a face it alone can fill. A
+  definition that names an app on two faces, with one window of it bound and
+  another open elsewhere, put that window on the first face and left the other
+  empty, so the card was `incomplete` and could never be opened again, even
+  though one window was enough for every face to have an app.
 - A tiled card's faces slide inside the card. Its place in the layout also
   holds the gap towards the window beside it, and a slide (a card with three or
   more faces, or the slide transition) was drawn across that whole place, so
