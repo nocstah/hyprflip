@@ -169,6 +169,56 @@ class PanelControlTest(unittest.TestCase):
     def test_snapshot_says_ungroup_works_from_any_face(self):
         self.assertIs(control.snapshot(self.ipc)['capabilities']['ungroup_any_face'], True)
 
+    def test_snapshot_offers_the_face_action(self):
+        self.assertIs(control.snapshot(self.ipc)['capabilities']['show_face'], True)
+
+    def test_face_shows_a_hidden_third_face_without_the_edit_chooser(self):
+        card = self.three_faces()
+        def show(action):
+            self.assertEqual(action, 'card 1 show 3')
+            card['active'], card['current'] = 2, '0xd'
+        with patch.object(self.ipc, 'action', side_effect=show) as shown, \
+             patch.object(setup.Edit, 'prepare', side_effect=AssertionError('no edit chooser')):
+            self.assertEqual(self.run_action(self.payload('face', face=2, pane='0xd')), '')
+        shown.assert_called_once()
+        self.assertEqual(self.ipc.active, '0xd')
+
+    def test_face_focuses_the_app_the_panel_chose(self):
+        self.retarget(active=0, current='0xa')
+        card = self.ipc.snapshot['containers'][0]
+        self.ipc.snapshot['container_max_faces'] = 4
+        def show(action):
+            self.assertEqual(action, 'card 1 show 2')
+            card['active'], card['current'] = 1, '0xb'
+        with patch.object(self.ipc, 'action', side_effect=show):
+            self.run_action(self.payload('face', face=1, pane='0xc'))
+        self.assertEqual(self.ipc.active, '0xc')
+
+    def test_face_on_a_core_without_numbered_faces_turns_once(self):
+        self.retarget(active=0, current='0xa')
+        card = self.ipc.snapshot['containers'][0]
+        def flip(*steps):
+            self.assertEqual(steps, (('0xa', 'flip'),))
+            card['active'], card['current'] = 1, '0xb'
+        with patch.object(self.ipc, 'focused', side_effect=flip) as turned:
+            self.run_action(self.payload('face', face=1))
+        turned.assert_called_once()
+        self.assertEqual(self.ipc.active, '0xb')
+
+    def test_face_already_shown_only_focuses_the_app(self):
+        with patch.object(self.ipc, 'action', side_effect=AssertionError('no turn')), \
+             patch.object(self.ipc, 'focused', side_effect=AssertionError('no turn')):
+            self.run_action(self.payload('face', face=1, pane='0xc'))
+        self.assertEqual(self.ipc.mutations, [('focus', '0xc')])
+
+    def test_face_refuses_a_missing_face_or_an_app_elsewhere(self):
+        for extra, message in (({'face': 2}, 'Choose Front or Back'), ({'face': '1'}, 'Choose Front or Back'),
+                               ({'face': 0, 'pane': '0xc'}, 'no longer on this side'),
+                               ({'face': 1, 'pane': 7}, 'no longer on this side')):
+            with self.subTest(extra=extra), self.assertRaisesRegex(setup.SetupError, message):
+                self.run_action(self.payload('face', **extra))
+        self.assertEqual(self.ipc.mutations, [])
+
     def test_edit_takes_any_face_the_card_has(self):
         for face in (-1, 2, True, '1'):
             with self.subTest(face=face), self.assertRaisesRegex(setup.SetupError, 'Choose Front or Back'):

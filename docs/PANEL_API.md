@@ -60,6 +60,7 @@ card. Saved-card operations include `name` and `recipe_token` from its row.
 | `flip`, `unfold`, `floating`, `fullscreen` | `target` |
 | `preview` | `target`, `mode` |
 | `edit` | `target`, `face` (0/1), optional `pane` address and `intent` |
+| `face` | `target`, `face` index from 0, optional `pane` address on that face |
 | `create` | Uses the original focused app |
 | `open`, `manage` | `name`, `recipe_token` |
 | `transition` | `mode` from the advertised list |
@@ -75,6 +76,11 @@ horizontal, vertical, balance, save, manage, repair, unpair. An empty intent
 opens the shared action chooser. Editing a hidden face explicitly shows it first.
 `unpair` works from any face when `capabilities.ungroup_any_face` is true;
 older helpers offer it only from a face that holds a single app.
+
+`face` shows one face of a card without the action chooser, when
+`capabilities.show_face` is true. It turns straight to that face (an unfolded
+card folds onto it; a core without numbered faces turns once), waits for the
+turn to end, and focuses `pane`, or else the face's own app.
 
 `run` emits newline-delimited JSON on stdout and reads responses on stdin:
 

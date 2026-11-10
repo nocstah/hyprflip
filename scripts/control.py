@@ -183,7 +183,9 @@ def snapshot(ipc):
                         'peek': bool(state.get('peek_available')),
                         # The unpair intent is offered from every face, not
                         # only from a face that holds a single app.
-                        'ungroup_any_face': True})
+                        'ungroup_any_face': True,
+                        # The face action shows any face of a card directly.
+                        'show_face': True})
         base['capabilities']['floating'] = bool(state.get('floating_cards'))
         base['capabilities']['appearance'] = type(state.get('card_frame')) is bool
         base['appearance'] = ('frame' if state['card_frame'] else 'classic') if base['capabilities']['appearance'] else None
@@ -374,22 +376,44 @@ def edit_prefix(intent, pane, face, card, state):
     raise w.SetupError('Choose an available card action.')
 
 
+def turn_to(ipc, request, card, face, state):
+    """Turn a card straight to one face and wait until the turn is over."""
+    with request.exclusive():
+        request.check()
+        w.show_face(ipc, card, face, state)
+    deadline = time.monotonic() + 8
+    while True:
+        request.check()
+        latest = ipc.status()
+        shown = next((c for c in latest.get('containers', []) if c['id'] == card['id']), None)
+        if not shown or shown['faces'] != card['faces']:
+            raise w.SetupError('The card changed while turning. Open Cards again.')
+        if not latest.get('animating'):
+            if shown['active'] != face:
+                raise w.SetupError('The other side could not be shown. Open Cards again.' if len(card['faces']) == 2
+                                   else f'{w.face_name(face)} could not be shown. Open Cards again.')
+            return
+        if time.monotonic() > deadline:
+            raise w.SetupError('The turn has not finished. Return to the card.')
+        time.sleep(.04)
+
+
 def run_operation(ipc, payload, menu):
     if not isinstance(payload, dict) or type(payload.get('protocol')) is not int or payload['protocol'] != PROTOCOL:
         raise w.SetupError('OmaCards and the Hyprflip helper need matching protocol versions.')
     action, ctx = payload.get('action'), payload.get('context')
-    if action not in ('flip', 'unfold', 'floating', 'edit', 'create', 'open', 'manage', 'transition', 'preview', 'duration', 'shortcut', 'appearance', 'spacing', 'accent', 'nearby', 'divider', 'fullscreen'):
+    if action not in ('flip', 'face', 'unfold', 'floating', 'edit', 'create', 'open', 'manage', 'transition', 'preview', 'duration', 'shortcut', 'appearance', 'spacing', 'accent', 'nearby', 'divider', 'fullscreen'):
         raise w.SetupError('Choose an available card action.')
     validate_context(ipc, ctx)
     request = menu.request
     card = None
-    if action in ('flip', 'unfold', 'floating', 'fullscreen', 'edit', 'preview'):
+    if action in ('flip', 'face', 'unfold', 'floating', 'fullscreen', 'edit', 'preview'):
         card, windows, state = resolve_card(ipc, payload.get('target'), ctx)
         if windows[card['current']]['workspace']['id'] != ctx['workspace']:
             raise w.SetupError('Go to this card’s workspace before editing it.')
         if state.get('animating'):
             raise w.SetupError('Wait for the turn to finish, then try again.')
-        if action in ('unfold', 'edit', 'fullscreen') and payload['target']['kind'] != 'container':
+        if action in ('face', 'unfold', 'edit', 'fullscreen') and payload['target']['kind'] != 'container':
             raise w.SetupError('Create a multi-app card with O to use these controls.')
         if action == 'fullscreen':
             if type(state.get('fullscreen_divider')) is not int:
@@ -399,16 +423,33 @@ def run_operation(ipc, payload, menu):
         if action == 'preview' and (payload.get('mode') not in w.TRANSITIONS or
                                    payload['mode'] not in state.get('transition_modes', [])):
             raise w.SetupError('Choose an available transition.')
-        if action == 'edit':
+        if action in ('edit', 'face'):
             face = payload.get('face', card['active'])
             if type(face) is not int or not 0 <= face < len(card['faces']):
                 raise w.SetupError('Choose Front or Back.' if len(card['faces']) == 2 else 'Choose a face of this card.')
+        if action == 'edit':
             menu.prefix.extend(edit_prefix(payload.get('intent'), payload.get('pane'), face, card, state))
+        if action == 'face':
+            pane = payload.get('pane')
+            if pane is not None and pane not in card['faces'][face]:
+                raise w.SetupError('That app is no longer on this side.')
 
     menu.channel.handoff()
     validate_context(ipc, ctx)
     if card:
         card, windows, state = resolve_card(ipc, payload['target'], ctx)
+    if action == 'face':
+        # Show one face and focus an app on it, without the edit chooser:
+        # the chosen app when the panel names one, else the face's own.
+        if face != card['active'] or card.get('unfolded'):
+            turn_to(ipc, request, card, face, state)
+        members = card['faces'][face]
+        current = next((c for c in ipc.status().get('containers', []) if c['id'] == card['id']), card)
+        focus = pane if pane in members else current['current'] if current['current'] in members else members[0]
+        with request.exclusive():
+            request.check()
+            ipc.focus(focus)
+        return ''
     if action in ('flip', 'unfold', 'floating', 'fullscreen', 'preview', 'edit', 'create'):
         anchor = card['current'] if card else ctx.get('anchor')
         if action == 'edit':
@@ -416,24 +457,7 @@ def run_operation(ipc, payload, menu):
             if face != card['active'] and not card.get('unfolded'):
                 # Hyprland cannot focus a hidden provider pane directly. The
                 # UI explicitly calls this "Show and edit Front/Back/Face N".
-                with request.exclusive():
-                    request.check()
-                    w.show_face(ipc, card, face, state)
-                deadline = time.monotonic() + 8
-                while True:
-                    request.check()
-                    latest = ipc.status()
-                    shown = next((c for c in latest.get('containers', []) if c['id'] == card['id']), None)
-                    if not shown or shown['faces'] != card['faces']:
-                        raise w.SetupError('The card changed while turning. Open Cards again.')
-                    if not latest.get('animating'):
-                        if shown['active'] != face:
-                            raise w.SetupError('The other side could not be shown. Open Cards again.' if len(card['faces']) == 2
-                                               else f'{w.face_name(face)} could not be shown. Open Cards again.')
-                        break
-                    if time.monotonic() > deadline:
-                        raise w.SetupError('The turn has not finished. Return to the card.')
-                    time.sleep(.04)
+                turn_to(ipc, request, card, face, state)
         if not anchor:
             raise w.SetupError('Focus the app you want on the front, then choose Create card.')
         ipc.focus(anchor)

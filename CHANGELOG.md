@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- The panel helper has a `face` action that shows any face of a card and
+  focuses a chosen app on it, without opening Edit card's action chooser.
+  Snapshots report `capabilities.show_face`. Panels can now select an app on
+  a hidden third or fourth face directly; before, they could only flip a
+  two-face card or open the chooser.
+
 ## 0.3.0-rc.18 — 2026-11-10
 
 - Edit card offers **Ungroup card** on a side with several apps too, not only
