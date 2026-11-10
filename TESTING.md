@@ -1,5 +1,17 @@
 # Validation
 
+## Installed release for panels (2026-11-10)
+
+Release checks for 0.3.0-rc.17. Both CTest checks and all 377 Python unit
+tests pass, including two new ones: `bootstrap.py` records the newest release
+tag the installed commit contains and removes a stale record when the
+checkout has no release tag, and the snapshot reports `installed_release`
+only for well-formed releases. `scripts/bootstrap.py` then ran end to end on
+the live desktop (Hyprland 0.56.2) from the `v0.3.0-rc.17` checkout, kept the
+open cards, and recorded `0.3.0-rc.17`, which `control.py snapshot` reported.
+The reveal slide in this release was checked by `tests/reveal_workflows.py`
+(18), as described below; no other nested suite was rerun for this release.
+
 ## Reveal slides up and down (2026-11-10)
 
 Both CTest checks pass. In a fresh nested session (Hyprland 0.56.2, Aquamarine

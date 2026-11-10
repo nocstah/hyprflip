@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.0-rc.17 — 2026-11-10
 
 - `scripts/bootstrap.py` records the release it installed, the newest release
   tag its commit contains, next to the commit in
