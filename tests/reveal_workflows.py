@@ -422,6 +422,12 @@ hl.workspace_rule({{workspace="{PLACE}",monitor="{output}"}})
             target = boxes[a]
             path = [win for _, win in of(frames, a) if win['goal'] == target]
             assert path, (a, way)
+            # unseen in its tile until the app has drawn at the tile's size, then the slide
+            waiting = [win for win in path if win['fade'] < .001]
+            trace = [(round(ms), round(win['fade'], 3), win['box'], win['goal']) for ms, win in of(frames, a)]
+            assert len(waiting) <= 15 and all(same(win['box'], target, .5) for win in waiting), (way, len(waiting), trace[:20])
+            path = [win for win in path if win['fade'] >= .001]
+            assert path, (a, way, 'never slid', len(frames), trace[:25])
             ys = [win['box'][1] for win in path]
             card_height = max(b[1] + b[3] for b in boxes.values()) - min(b[1] for b in boxes.values())
             start = ys[0] - target[1]

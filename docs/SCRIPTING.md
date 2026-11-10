@@ -106,7 +106,7 @@ single window's address with its `0x`.
 | `card <id or address> hold` | Keep a still picture of what shows now, under every window, until what is revealed next has faded in over it |
 | `card <id or address> reveal` | Give it the user's open animation, as it stands in its tile, at the user's speed |
 | `card <id or address> reveal <speed>` | The same with the duration multiplied by `<speed>`, from 0.05 to 4: `0.7` takes 70% as long |
-| `card <id or address> reveal [speed] up` / `down` | Slide it into its tile from below (`up`) or from above (`down`) at the window move animation, with no fade, while the held picture slides out the same way beside it, the card's height and a small gap away. Cores that have it report `"reveal_slide": true` |
+| `card <id or address> reveal [speed] up` / `down` | Slide it into its tile from below (`up`) or from above (`down`) at the window move animation, with no fade, while the held picture slides out the same way beside it, the card's height and a small gap away. It starts once each app has drawn at its tile's size, waiting at most 200 ms with the picture in place. Cores that have it report `"reveal_slide": true` |
 | `card <id or address> leave` | Play the user's close animation from a picture of it, over what comes next |
 
 Send them in one `hyprctl --batch`, so that no frame falls between the requests.

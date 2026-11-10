@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <hyprland/src/animation/AnimationManager.hpp>
+#include <hyprland/src/managers/eventLoop/EventLoopManager.hpp>
 #include <hyprland/src/config/shared/animation/AnimationTree.hpp>
 #include <hyprland/src/desktop/Workspace.hpp>
 #include <hyprland/src/desktop/state/FadingOutState.hpp>
@@ -15,6 +16,7 @@
 #include <hyprland/src/render/OpenGL.hpp>
 #include <hyprland/src/render/Renderer.hpp>
 #include <hyprland/src/render/Texture.hpp>
+#include <chrono>
 #include <optional>
 
 namespace Hyprflip::Reveal {
@@ -28,8 +30,26 @@ struct Active {
     bool steady = false;      // came in over a picture of a card's header: its card's frame need not move or fade
     bool tookBlur = false;    // no_blur is ours until the fade ends
     std::optional<bool> blur; // the set_prop value it had before ours, which goes back
+    // A slide waits, the window unseen over the picture, until the app has drawn at its tile's size: one parked at
+    // another size otherwise shows its old layout for a few frames, then reflows on the way in.
+    std::optional<double> slideBy;
+    std::chrono::steady_clock::time_point until{};
 };
 std::vector<Active> active;
+constexpr auto SLIDE_WAIT = std::chrono::milliseconds(200);
+
+bool waitingToSlide(const PHLWINDOW &w) {
+    return std::ranges::any_of(active, [&](const Active &a) { return a.slideBy && a.window.lock() == w; });
+}
+
+// The app's last buffer matches the size it now has, give or take a pixel and the border.
+bool drawnAtSize(const PHLWINDOW &w) {
+    const auto surface = w->wlSurface() ? w->wlSurface()->resource() : nullptr;
+    if (!surface)
+        return true;
+    const auto drawn = surface->m_current.size, size = w->sizeAnimation()->goal();
+    return std::abs(drawn.x - size.x) <= 2 && std::abs(drawn.y - size.y) <= 2;
+}
 
 SP<AnimConfig> tree(const char *leaf) { return Config::animationTree()->getAnimationPropertyConfig(leaf); }
 
@@ -122,7 +142,7 @@ class Picture final : public Desktop::IFadeout {
             return {};
         // Moves with what arrives, a fixed distance ahead of it: they go along together, and it is out when that is in.
         double offset = 0;
-        if (const auto over = m_over.lock(); m_sign && over) {
+        if (const auto over = m_over.lock(); m_sign && over && !waitingToSlide(over)) {
             const auto &position = over->positionAnimation();
             offset = position->value().y - position->goal().y - m_sign * m_distance;
         }
@@ -134,7 +154,7 @@ class Picture final : public Desktop::IFadeout {
         const auto over = m_over.lock();
         if (m_sign)
             return over && over->m_workspace && over->m_workspace->isVisible() &&
-                           over->positionAnimation()->isBeingAnimated()
+                           (over->positionAnimation()->isBeingAnimated() || waitingToSlide(over))
                        ? 1.F
                        : 0.F;
         if (!over || !over->m_workspace || !over->m_workspace->isVisible() ||
@@ -221,16 +241,15 @@ bool slideIn(const std::vector<PHLWINDOW> &shown, float speed, Card card, Slide 
         if (rules.noAnim().valueOr(false))
             continue;
         w->alpha(WINDOW_ALPHA_MOVE_FROM_WORKSPACE)->setValueAndWarp(1.F);
-        w->alpha(WINDOW_ALPHA_FADE)->setValueAndWarp(1.F);
+        // unseen until it slides: see Active::slideBy
+        w->alpha(WINDOW_ALPHA_FADE)->setValueAndWarp(0.F);
         const auto config = move ? move : tree("windowsMove");
         w->positionAnimation()->setConfig(config);
         w->sizeAnimation()->setConfig(config);
         w->m_animatingIn = false;
-        const auto goal = w->positionAnimation()->goal();
-        w->positionAnimation()->setValueAndWarp(goal + Vector2D{0., sign * distance});
-        *w->positionAnimation() = goal;
         const auto previous = std::ranges::find_if(active, [&](const Active &a) { return a.window.lock() == w; });
-        Active entry{.window = w, .in = move, .fade = nullptr, .steady = false, .tookBlur = false, .blur = {}};
+        Active entry{.window = w, .in = move, .fade = nullptr, .steady = false, .tookBlur = false, .blur = {},
+                     .slideBy = sign * distance, .until = std::chrono::steady_clock::now() + SLIDE_WAIT};
         if (previous != active.end()) {
             entry.tookBlur = previous->tookBlur;
             entry.blur = previous->blur;
@@ -388,12 +407,45 @@ bool steady(const PHLWINDOW &w) {
     return std::ranges::any_of(active, [&](const Active &a) { return a.steady && a.window.lock() == w; });
 }
 
+// Starts the slides that waited: all of one request together, once each app has drawn at its size or the wait is over.
+void startSlides() {
+    const auto now = std::chrono::steady_clock::now();
+    const bool ready = std::ranges::all_of(active, [&](const Active &a) {
+        const auto w = a.window.lock();
+        return !a.slideBy || !w || now >= a.until || drawnAtSize(w);
+    });
+    if (!ready) {
+        // Nothing moves while it waits, so nothing would draw the next frame that looks again: ask for one, after this
+        // frame, where it lands on the next.
+        g_pEventLoopManager->doLater([] {
+            for (const auto &a : active)
+                if (const auto w = a.window.lock(); a.slideBy && w) {
+                    g_pHyprRenderer->damageWindow(w);
+                    if (const auto monitor = w->m_monitor.lock())
+                        monitor->scheduleFrame();
+                }
+        });
+        return;
+    }
+    for (auto &a : active) {
+        const auto w = a.window.lock();
+        if (!a.slideBy || !w)
+            continue;
+        const auto goal = w->positionAnimation()->goal();
+        w->alpha(WINDOW_ALPHA_FADE)->setValueAndWarp(1.F);
+        w->positionAnimation()->setValueAndWarp(goal + Vector2D{0., *a.slideBy});
+        *w->positionAnimation() = goal;
+        a.slideBy.reset();
+    }
+}
+
 void frame() {
+    startSlides();
     std::erase_if(active, [](const Active &a) {
         const auto w = a.window.lock();
         if (!w)
             return true;
-        if (animating(w))
+        if (animating(w) || a.slideBy)
             return false;
         handBack(a, w);
         return true;

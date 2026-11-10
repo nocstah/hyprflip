@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- A reveal that slides waits, up to 200 ms and with the held picture still in
+  place, until each app has drawn at the size of its tile. A card parked at
+  another size no longer shows its old layout for a few frames and then
+  reflows on its way in.
 - Card keys work from beside a card. With `plugin:hyprflip:nearby_card`
   (on by default), flip, the face keys and switcher, peek, unfold and card
   fullscreen act on the one card shown on the focused window's workspace when
