@@ -1,5 +1,23 @@
 # Validation
 
+## Show any face from the panel; release checks for 0.3.0-rc.19 (2026-11-10)
+
+Both CTest checks and all 386 Python unit tests pass, six of them new: the
+`face` action turns a hidden third face by number and a two-face card on a core
+without numbered faces with one flip, never opens the edit chooser, focuses the
+app the panel chose (or else the face's own), only focuses when the face is
+already shown, and refuses a missing face or an app from another face; the
+snapshot reports `capabilities.show_face`. Removing the chosen-app focus fails
+two of them.
+
+OmaCards' `tests/run-native.py` (9 checks) passed four times in a fresh nested
+session (Hyprland 0.56.2, Aquamarine 0.15.1 with the render-node patch) against
+this helper, choosing an app on a hidden face with the `face` action, and once
+against the 0.3.0-rc.18 helper, which flips instead. That suite cannot tell
+whether the action turns the card itself: on a native card, focusing an app on
+a hidden face also turns it, so the run passed with the turn removed. The unit
+tests cover the turn. No other nested suite was rerun for this release.
+
 ## Ungroup from any side; release checks for 0.3.0-rc.18 (2026-11-10)
 
 Both CTest checks and all 380 Python unit tests pass, three of them new or

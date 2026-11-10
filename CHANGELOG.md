@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.0-rc.19 — 2026-11-10
 
 - The panel helper has a `face` action that shows any face of a card and
   focuses a chosen app on it, without opening Edit card's action chooser.
