@@ -86,7 +86,7 @@ class EditTest(unittest.TestCase):
         setup.Edit(ipc, picker).prepare('0xb')
         prompt, choices = picker.prompts[0]
         self.assertIn('2 apps on this side', prompt)
-        self.assertEqual([c.value for c in choices], ['add', 'release:0xb', 'release:0xc', 'save', 'manage', 'saved'])
+        self.assertEqual([c.value for c in choices], ['add', 'release:0xb', 'release:0xc', 'unpair', 'save', 'manage', 'saved'])
         self.assertIn('Keep open', choices[1].detail)
 
     def test_full_side_offers_all_three_removals_and_no_add(self):
@@ -96,7 +96,7 @@ class EditTest(unittest.TestCase):
         plan = flow.prepare('0xb')
         prompt, choices = picker.prompts[0]
         self.assertIn('full (3 apps)', prompt)
-        self.assertEqual([c.value for c in choices], ['release:0xb', 'release:0xc', 'release:0xd', 'save', 'manage', 'saved'])
+        self.assertEqual([c.value for c in choices], ['release:0xb', 'release:0xc', 'release:0xd', 'unpair', 'save', 'manage', 'saved'])
         flow.apply(plan)
         self.assertEqual(ipc.active, '0xb')
 
@@ -116,6 +116,17 @@ class EditTest(unittest.TestCase):
         self.assertIn('All apps stay open', ungroup.detail)
         flow.apply(plan)
         self.assertIn(('action', 'unpair'), ipc.mutations)
+
+    def test_side_with_several_apps_also_offers_ungroup(self):
+        ipc, picker = CardIPC(full=True), Picker('unpair')
+        flow = setup.Edit(ipc, picker)
+        plan = flow.prepare('0xb')
+        ungroup = next(c for c in picker.prompts[0][1] if c.value == 'unpair')
+        self.assertEqual(ungroup.label, 'Ungroup card')
+        self.assertIn('All apps stay open', ungroup.detail)
+        flow.apply(plan)
+        self.assertIn(('action', 'unpair'), ipc.mutations)
+        self.assertIn('0xc', ipc.clients)
 
     def test_no_candidates_explains_how_to_add_one_without_mutation(self):
         ipc = CardIPC()
@@ -336,6 +347,9 @@ class FullscreenEditTest(unittest.TestCase):
         values = [c.value for c in picker.prompts[0][1]]
         self.assertNotIn('unpair', values)
         self.assertNotIn('repair', values)
+        picker = Picker(None)
+        with self.assertRaises(setup.Cancelled): setup.Edit(self.fullscreen(full=True), picker).prepare('0xb')
+        self.assertNotIn('unpair', [c.value for c in picker.prompts[0][1]])
         plan = setup.EditPlan('0xb', deepcopy(ipc.snapshot['containers'][0]),
                               {a: ipc.clients[a] for a in ('0xa', '0xb')}, 'unpair')
         with self.assertRaisesRegex(setup.SetupError, 'Leave card fullscreen'): setup.Edit(ipc, Picker()).apply(plan)

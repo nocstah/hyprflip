@@ -1345,6 +1345,9 @@ class Edit(Setup):
             choices += [Choice('release:' + c.value, f'Remove {c.label} from card',
                               joined('Focused app' if c.value == anchor else '', 'Keep open', c.detail), c.title)
                        for c in window_choices([windows[anchor]] + [windows[a] for a in face if a != anchor])]
+            # Ungrouping works from any side, as the direct shortcut does.
+            if not whole:
+                choices.append(Choice('unpair', 'Ungroup card', 'All apps stay open as separate windows'))
             prompt = (f'Edit card: this side is full ({limit} apps)' if len(face) >= limit
                       else f'Edit card: {len(face)} apps on this side')
         if 'names' in card:

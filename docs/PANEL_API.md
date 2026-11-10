@@ -73,6 +73,8 @@ card. Saved-card operations include `name` and `recipe_token` from its row.
 Editor intents are stable IDs: add, replace, remove, other_side, previous, next,
 horizontal, vertical, balance, save, manage, repair, unpair. An empty intent
 opens the shared action chooser. Editing a hidden face explicitly shows it first.
+`unpair` works from any face when `capabilities.ungroup_any_face` is true;
+older helpers offer it only from a face that holds a single app.
 
 `run` emits newline-delimited JSON on stdout and reads responses on stdin:
 

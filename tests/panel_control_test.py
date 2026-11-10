@@ -166,6 +166,9 @@ class PanelControlTest(unittest.TestCase):
                          [(0, 'Front'), (1, 'Back'), (2, 'Face 3')])
         self.assertEqual(result['capabilities']['faces'], 4)
 
+    def test_snapshot_says_ungroup_works_from_any_face(self):
+        self.assertIs(control.snapshot(self.ipc)['capabilities']['ungroup_any_face'], True)
+
     def test_edit_takes_any_face_the_card_has(self):
         for face in (-1, 2, True, '1'):
             with self.subTest(face=face), self.assertRaisesRegex(setup.SetupError, 'Choose Front or Back'):

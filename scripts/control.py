@@ -180,7 +180,10 @@ def snapshot(ipc):
                         'layout': bool(state.get('layout_controls')),
                         'replace': bool(state.get('pane_replacement')),
                         'repair': bool(state.get('repair_cards')),
-                        'peek': bool(state.get('peek_available'))})
+                        'peek': bool(state.get('peek_available')),
+                        # The unpair intent is offered from every face, not
+                        # only from a face that holds a single app.
+                        'ungroup_any_face': True})
         base['capabilities']['floating'] = bool(state.get('floating_cards'))
         base['capabilities']['appearance'] = type(state.get('card_frame')) is bool
         base['appearance'] = ('frame' if state['card_frame'] else 'classic') if base['capabilities']['appearance'] else None
@@ -329,7 +332,7 @@ def resolve_card(ipc, target, ctx):
     kind = target['kind']
     card = next((c for c in state.get('containers' if kind == 'container' else 'pairs', []) if c['id'] == target['id']), None)
     if not card or card_token(card, kind, windows, ctx['instance']) != target.get('token'):
-        raise w.SetupError('The card changed. Refresh Cards before editing it.')
+        raise w.SetupError('The card changed. Try again.')
     return card, windows, state
 
 

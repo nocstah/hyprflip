@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Edit card offers **Ungroup card** on a side with several apps too, not only
+  on a side with one app, matching the direct Ungroup shortcut. Panels can use
+  it from any face: snapshots report `capabilities.ungroup_any_face`.
+- A panel request for a card that changed since its snapshot says “The card
+  changed. Try again.” instead of pointing to a Refresh Cards button that
+  OmaCards no longer has.
 - A parked card keeps its apps at the size they had on screen instead of
   taking its special workspace's layout unseen. Brought back to the tile it
   left, it is already drawn at its size, so a sliding reveal starts at once
