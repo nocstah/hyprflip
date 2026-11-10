@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.0-rc.18 — 2026-11-10
 
 - Edit card offers **Ungroup card** on a side with several apps too, not only
   on a side with one app, matching the direct Ungroup shortcut. Panels can use

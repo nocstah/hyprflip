@@ -1,5 +1,18 @@
 # Validation
 
+## Ungroup from any side; release checks for 0.3.0-rc.18 (2026-11-10)
+
+Both CTest checks and all 380 Python unit tests pass, three of them new or
+changed: Edit card offers Ungroup card on a side with several apps (and still
+not on a fullscreen card), and the panel snapshot reports
+`capabilities.ungroup_any_face`. OmaCards' `tests/run-native.py` (9 checks)
+passed three times in a fresh nested session (Hyprland 0.56.2, Aquamarine
+0.15.1 with the render-node patch) against this helper, ungrouping a card
+through its shown side holding two apps; the three apps stayed open. With only
+the menu change reverted it failed with “That action is no longer available”.
+The parked-card and card-keys changes in this release were checked as described
+below; no other nested suite was rerun for it.
+
 ## Parked cards keep their size (2026-11-10)
 
 Both CTest checks and all 378 Python unit tests pass. Measured in a fresh nested
