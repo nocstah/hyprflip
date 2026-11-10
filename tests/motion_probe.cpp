@@ -6,6 +6,9 @@
 #include <hyprland/src/desktop/state/FadingOutState.hpp>
 #include <hyprland/src/desktop/state/WindowState.hpp>
 #include <hyprland/src/desktop/view/Window.hpp>
+#include <hyprland/src/desktop/view/WLSurface.hpp>
+#include <hyprland/src/desktop/Workspace.hpp>
+#include <hyprland/src/protocols/core/Compositor.hpp>
 #include <hyprland/src/event/EventBus.hpp>
 #include <hyprland/src/output/Monitor.hpp>
 #include <hyprland/src/plugins/PluginAPI.hpp>
@@ -26,7 +29,8 @@ PHLMONITORREF frameMonitor;
 std::vector<std::string> samples;
 bool recording = false, recordWindows = false;
 
-// Every mapped window's animated and goal boxes and fade, and how many fadeouts Hyprland holds.
+// Every mapped window's animated and goal boxes and fade, the size its app last drew at, whether Hyprland hides it
+// and whether its workspace shows, and how many fadeouts Hyprland holds.
 std::string windows() {
     using namespace Desktop::View;
     std::string json;
@@ -35,9 +39,13 @@ std::string windows() {
             continue;
         const auto at = w->positionAnimation()->value(), size = w->sizeAnimation()->value();
         const auto toAt = w->positionAnimation()->goal(), toSize = w->sizeAnimation()->goal();
-        json += std::format("{}{{\"address\":\"0x{:x}\",\"box\":[{},{},{},{}],\"goal\":[{},{},{},{}],\"fade\":{}}}",
+        const auto surface = w->wlSurface() ? w->wlSurface()->resource() : nullptr;
+        const auto drawn = surface ? surface->m_current.size : Vector2D{};
+        json += std::format("{}{{\"address\":\"0x{:x}\",\"box\":[{},{},{},{}],\"goal\":[{},{},{},{}],\"fade\":{},"
+                            "\"drawn\":[{},{}],\"hidden\":{},\"shown\":{}}}",
                             json.empty() ? "" : ",", reinterpret_cast<uintptr_t>(w.get()), at.x, at.y, size.x, size.y,
-                            toAt.x, toAt.y, toSize.x, toSize.y, w->alphaValue(WINDOW_ALPHA_FADE));
+                            toAt.x, toAt.y, toSize.x, toSize.y, w->alphaValue(WINDOW_ALPHA_FADE), drawn.x, drawn.y,
+                            w->isHidden(), w->m_workspace && w->m_workspace->isVisible());
     }
     return std::format(",\"fadeouts\":{},\"windows\":[{}]", Desktop::fadingOutState()->fadeouts().size(), json);
 }
@@ -85,6 +93,9 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
                      }
                      if (request.ends_with(" fadeouts"))
                          return std::to_string(Desktop::fadingOutState()->fadeouts().size());
+                     // the windows as they are now, between frames
+                     if (request.ends_with(" now"))
+                         return "{" + windows().substr(1) + "}";
                      if (request.ends_with(" start") || request.ends_with(" start windows")) {
                          samples.clear();
                          pending.clear();

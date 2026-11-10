@@ -1,5 +1,24 @@
 # Validation
 
+## Apps waiting unseen may draw (2026-11-10)
+
+Both CTest checks and all 387 Python unit tests pass. The new
+`tests/unseen_draw_workflows.py` (3) records, frame by frame, a GTK 4 window
+drawing every frame (the fixture's new `spin`) and a foot terminal on one side
+of a card, given another size out of sight; the motion probe now reports the
+size each app last drew at, per frame and between frames (`now`). In a fresh
+nested session (Hyprland 0.56.2, Aquamarine 0.15.1 with the render-node patch)
+it passes: a side resized while hidden is turned to with both drawn at their
+new size; a parked card brought back to a bigger tile slides in after 16 ms
+with no frame at the old size; a card built in view shows each app at its size
+from its second frame. Against the core before this change (0.3.0-rc.19 with
+the slide-gap fix) the slide waited 215 ms and the GTK window's first frame in
+view was at its old size. A fresh nested session also passed
+`tests/reveal_workflows.py` (19). Found on the pilot desktop: an app in a card
+that OmaRelay built again on a visit showed half its height for a few seconds.
+The suite does not reproduce seconds: a GTK window takes one frame at most,
+so that app's own redraw is the likelier delay.
+
 ## A bound window fills the face only it can fill (2026-11-10)
 
 All 387 Python unit tests pass, one new: an unattended `open` whose definition

@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- A slide lets the apps it waits for draw while they wait unseen. An app given
+  another size out of sight draws only when Hyprland says it may, and Hyprland
+  says so as it draws the app, which it does not while the slide waits. An app
+  that drew every frame when it went out of sight (a spinner, a blinking caret)
+  waited for that word: the slide waited its full 200 ms and the app still came
+  in at its old size, the background showing where its picture no longer
+  reached. The word now comes each frame of the wait, and the slide begins once
+  the app has drawn, within a frame or two.
 - An unattended `open` gives a bound window to a face it alone can fill. A
   definition that names an app on two faces, with one window of it bound and
   another open elsewhere, put that window on the first face and left the other

@@ -52,6 +52,14 @@ bool drawnAtSize(const PHLWINDOW &w) {
     return std::abs(drawn.x - size.x) <= 2 && std::abs(drawn.y - size.y) <= 2;
 }
 
+// Hyprland tells an app it may draw (its frame callbacks) as it draws that app, and a window waiting unseen is not
+// drawn. An app that asked before it went out of sight, as one drawing every frame does, waits for that word before
+// it draws at its new size: the word comes from here, each frame, while it waits.
+void letDraw(const PHLWINDOW &w, std::chrono::steady_clock::time_point now) {
+    if (const auto surface = w->wlSurface() ? w->wlSurface()->resource() : nullptr)
+        surface->breadthfirst([now](SP<CWLSurfaceResource> s, const Vector2D &, void *) { s->frame(now); }, nullptr);
+}
+
 SP<AnimConfig> tree(const char *leaf) { return Config::animationTree()->getAnimationPropertyConfig(leaf); }
 
 // The user's animation at another speed. Their curve and style, their config untouched.
@@ -416,6 +424,9 @@ void startSlides() {
         return !a.slideBy || !w || now >= a.until || drawnAtSize(w);
     });
     if (!ready) {
+        for (const auto &a : active)
+            if (const auto w = a.window.lock(); a.slideBy && w && !drawnAtSize(w))
+                letDraw(w, now);
         // Nothing moves while it waits, so nothing would draw the next frame that looks again: ask for one, after this
         // frame, where it lands on the next.
         g_pEventLoopManager->doLater([] {

@@ -39,6 +39,11 @@ def poll():
         dialog.set_child(Gtk.Label(label="A real modal child"))
         dialog.set_default_size(300, 140); dialog.present()
     elif command == "close": window.close()
+    elif command == "spin":
+        # Draws every frame, so each picture it gives waits on Hyprland's word to draw the next
+        spinner = Gtk.Spinner(spinning=True)
+        spinner.set_size_request(48, 48)
+        box.append(spinner)
     elif command.startswith("minimum "):
         width, height = map(int, command.split()[1:])
         # Constrain content before presenting the toplevel in minimum-size
