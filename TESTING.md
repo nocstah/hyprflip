@@ -1,5 +1,20 @@
 # Validation
 
+## Reveal slides up and down (2026-11-10)
+
+Both CTest checks pass. In a fresh nested session (Hyprland 0.56.2, Aquamarine
+0.15.1 with the render-node patch, on the AMD GPU), `tests/reveal_workflows.py`
+passes 18 checks, the earlier 17 unchanged plus one: a direction that is not
+`up` or `down`, or one before the speed, is refused; a card slides up from
+more than 60% of its height below its tile and down from as far above,
+moving only in y and only towards its tile, never fading, ending exactly in
+its tile; a picture is up during the slide and none after; and the
+neighbour, focus and pointer stay. A frame grabbed halfway through a slow
+slide shows the new card and its header coming up from below and the old
+card's picture going out at the top. The slide does not clip: on a card that
+does not reach the screen edge, the two cards pass over what is above or
+below them for the length of the slide.
+
 ## Face slide, switcher, swipe and names (2026-11-09)
 
 Release checks for 0.3.0-rc.16. Both CTest checks and all 375 Python unit

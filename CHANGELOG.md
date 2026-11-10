@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- `card <id or address> reveal [speed] [up|down]`: with a direction, what
+  arrives slides into its tile from below (`up`) or above (`down`) at the
+  window move animation, with no fade, and the held picture of what it
+  replaces slides out alongside it. Without one it opens as before. `status`
+  reports `"reveal_slide": true`. OmaRelay uses it to move workspace cards in
+  the direction you switch workspaces.
+
 ## 0.3.0-rc.16 — 2026-11-09
 
 - Cards with three or more faces slide sideways instead of flipping: the faces

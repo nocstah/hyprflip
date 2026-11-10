@@ -409,6 +409,46 @@ hl.workspace_rule({{workspace="{PLACE}",monitor="{output}"}})
     passed('a card over a card: its panes open as one, its frame stays still, two pictures come and go, '
            'and the neighbour, the focus and the pointer stay')
 
+    # A reveal with a direction slides: in from below (up) or above (down), with no fade, while the picture of what
+    # leaves goes the same way out of it.
+    for bad in ('0.7 sideways', 'up 0.7', 'up down', 'sideways'):
+        reply = subprocess.run(['hyprctl', 'hyprflip', f'card {one} reveal {bad}'], env=env, capture_output=True, text=True, timeout=8).stdout
+        assert reply.startswith('error:') and ('[up|down]' in reply or 'speed' in reply), (bad, reply)
+    assert ipc.status().get('reveal_slide') is True
+    for out, into, shown, boxes, way in ((one, two, two_shown, two_boxes, 'up'), (two, one, one_shown, one_boxes, 'down')):
+        before = rest(tile)
+        frames = record(card_swap(out, into, f'0.7 {way}'))
+        for a in shown:
+            target = boxes[a]
+            path = [win for _, win in of(frames, a) if win['goal'] == target]
+            assert path, (a, way)
+            ys = [win['box'][1] for win in path]
+            card_height = max(b[1] + b[3] for b in boxes.values()) - min(b[1] for b in boxes.values())
+            start = ys[0] - target[1]
+            assert (start > card_height * .6) if way == 'up' else (start < -card_height * .6), (way, start, card_height)
+            steps = list(zip(ys, ys[1:]))
+            assert all((b <= a + .5) if way == 'up' else (b >= a - .5) for a, b in steps), (way, ys)
+            assert all(abs(win['box'][0] - target[0]) < .5 and same(win['box'][2:], target[2:], .5) for win in path), 'Only y moves'
+            assert all(win['fade'] > .999 for win in path), 'A slide does not fade'
+            assert same(path[-1]['box'], target, .5), path[-1]
+        assert max(f['fadeouts'] for f in frames) >= 1 and fadeouts() == 0
+        assert {a: box(a) for a in shown} == boxes
+        assert active() == tile and pointer() == before and box(tile) == tile_box
+        assert all(prop(a, 'no_anim') is False for a in shown)
+    # A frame to look at: halfway through a slow slide up
+    ipc.call('hf-motion-probe', 'start windows')
+    batch(*card_swap(one, two, '4 up'))
+    time.sleep(.55)
+    output_box = next(m for m in ipc.data('-j', 'monitors') if m['name'] == output)
+    subprocess.run(['grim', '-g', f"{output_box['x']},{output_box['y']} {output_box['width']}x{output_box['height']}", str(root / 'slide-mid.png')], env=env, timeout=6)
+    time.sleep(2)
+    ipc.call('hf-motion-probe', 'stop')
+    assert {a: box(a) for a in two_shown} == two_boxes and fadeouts() == 0
+    batch(*card_swap(two, one))
+    time.sleep(.8)
+    passed('reveal up and down slide a card in from below and from above with no fade, its picture goes out alongside, '
+           'a bad direction is refused, and the neighbour, the focus and the pointer stay')
+
     before = rest(tile)
     notices = notify_log.read_text()
     frames = record([*[set_prop(a, 'no_anim', 'true') for a in card_of(panes[1])['faces'][0] + card_of(panes[1])['faces'][1]],

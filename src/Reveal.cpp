@@ -115,14 +115,28 @@ class Picture final : public Desktop::IFadeout {
     PHLMONITORREF monitor() const override { return m_monitor; }
     Desktop::eFadeoutPlane plane() const override { return Desktop::FADEOUT_PLANE_LAYER_BOTTOM; }
     int zIndex() const override { return 0; }
-    CBox renderBox() const override {
+    CBox renderBox() const override { return renderBoxSlid(); }
+    CBox renderBoxSlid() const {
         const auto monitor = m_monitor.lock();
-        return monitor ? CBox{{}, monitor->m_transformedSize} : CBox{};
+        if (!monitor)
+            return {};
+        // Moves with what arrives, a fixed distance ahead of it: they go along together, and it is out when that is in.
+        double offset = 0;
+        if (const auto over = m_over.lock(); m_sign && over) {
+            const auto &position = over->positionAnimation();
+            offset = position->value().y - position->goal().y - m_sign * m_distance;
+        }
+        return CBox{Vector2D{0., offset * monitor->m_scale}, monitor->m_transformedSize};
     }
     float alpha() const override {
         if (m_gone || m_monitor.expired())
             return 0.F;
         const auto over = m_over.lock();
+        if (m_sign)
+            return over && over->m_workspace && over->m_workspace->isVisible() &&
+                           over->positionAnimation()->isBeingAnimated()
+                       ? 1.F
+                       : 0.F;
         if (!over || !over->m_workspace || !over->m_workspace->isVisible() ||
             !over->alpha(WINDOW_ALPHA_FADE)->isBeingAnimated())
             return 0.F;
@@ -131,13 +145,23 @@ class Picture final : public Desktop::IFadeout {
     }
     bool done() const override { return alpha() == 0.F; }
     void over(PHLWINDOW window) { m_over = window; }
+    // Up: it leaves upwards as what arrives comes up from below; Down the other way. distance is the arriving card's
+    // height and the gap above it.
+    void slide(Slide slide, double distance) {
+        m_sign = slide == Slide::Up ? 1 : slide == Slide::Down ? -1 : 0;
+        m_distance = distance;
+    }
     bool waiting() const { return !m_over && !m_gone; }
     bool alive() const { return !m_gone; }
     bool framed() const { return m_framed; }
     int generation() const { return m_generation; }
     void gone() { m_gone = true; }
     void damage() const {
-        g_pHyprRenderer->damageBox(m_box);
+        auto box = m_box;
+        // A sliding picture is somewhere along its way out
+        box.y -= m_distance;
+        box.h += 2 * m_distance;
+        g_pHyprRenderer->damageBox(box);
         if (const auto monitor = m_monitor.lock())
             monitor->scheduleFrame();
     }
@@ -148,7 +172,8 @@ class Picture final : public Desktop::IFadeout {
     PHLWINDOWREF m_over;
     CBox m_box;
     bool m_gone = false, m_framed = false;
-    int m_generation = 0;
+    int m_generation = 0, m_sign = 0;
+    double m_distance = 0;
 };
 std::vector<SP<Picture>> pictures;
 int generation = 0;
@@ -177,13 +202,63 @@ bool drawable(const PHLWINDOW &w) {
 }
 } // namespace
 
-bool reveal(const std::vector<PHLWINDOW> &windows, float speed, Card card) {
+// What arrives slides into its tile from beside it, with no fade: at the user's window move animation and speed, the way
+// a card's faces slide.
+bool slideIn(const std::vector<PHLWINDOW> &shown, float speed, Card card, Slide slide) {
+    CBox all = shown[0]->geometricBox(IGeometric::GEOMETRIC_GOAL);
+    for (const auto &w : shown) {
+        const auto box = w->geometricBox(IGeometric::GEOMETRIC_GOAL);
+        const double x = std::min(all.x, box.x), y = std::min(all.y, box.y);
+        all = {x, y, std::max(all.x + all.w, box.x + box.w) - x, std::max(all.y + all.h, box.y + box.h) - y};
+    }
+    static constexpr double GAP = 8;
+    const double distance = all.h + card.extraTop + GAP, sign = slide == Slide::Up ? 1 : -1;
+    const auto move = scaled("windowsMove", speed);
+    PHLWINDOW lead;
+    for (const auto &w : shown) {
+        auto &rules = *w->m_ruleApplicator;
+        rules.noAnim().unset(Desktop::Types::PRIORITY_SET_PROP);
+        if (rules.noAnim().valueOr(false))
+            continue;
+        w->alpha(WINDOW_ALPHA_MOVE_FROM_WORKSPACE)->setValueAndWarp(1.F);
+        w->alpha(WINDOW_ALPHA_FADE)->setValueAndWarp(1.F);
+        const auto config = move ? move : tree("windowsMove");
+        w->positionAnimation()->setConfig(config);
+        w->sizeAnimation()->setConfig(config);
+        w->m_animatingIn = false;
+        const auto goal = w->positionAnimation()->goal();
+        w->positionAnimation()->setValueAndWarp(goal + Vector2D{0., sign * distance});
+        *w->positionAnimation() = goal;
+        const auto previous = std::ranges::find_if(active, [&](const Active &a) { return a.window.lock() == w; });
+        Active entry{.window = w, .in = move, .fade = nullptr, .steady = false, .tookBlur = false, .blur = {}};
+        if (previous != active.end()) {
+            entry.tookBlur = previous->tookBlur;
+            entry.blur = previous->blur;
+            active.erase(previous);
+        }
+        active.push_back(std::move(entry));
+        if (!lead)
+            lead = w;
+    }
+    if (!lead)
+        return true;
+    for (const auto &picture : pictures)
+        if (picture->alive() && picture->monitor() == lead->m_monitor) {
+            picture->over(lead);
+            picture->slide(slide, distance);
+        }
+    return true;
+}
+
+bool reveal(const std::vector<PHLWINDOW> &windows, float speed, Card card, Slide slide) {
     std::vector<PHLWINDOW> shown;
     for (const auto &w : windows)
         if (w && w->m_isMapped && w->m_workspace && w->m_workspace->isVisible())
             shown.push_back(w);
     if (shown.empty())
         return false;
+    if (slide != Slide::None)
+        return slideIn(shown, speed, card, slide);
     const auto in = scaled("windowsIn", speed), fade = scaled("fadeIn", speed);
     const auto under = [&](const PHLWINDOW &w, bool framed) {
         return std::ranges::any_of(pictures, [&](const SP<Picture> &p) {

@@ -12,9 +12,12 @@ struct Card {
     bool whole = false;
     double extraTop = 0;
 };
+// A reveal with a direction slides instead of opening: what arrives moves up into place from below (Up) or down into
+// place from above (Down), and the picture of what it replaces moves the same way out of it, alongside, with no fade.
+enum class Slide { None, Up, Down };
 // What a map does to windows that have been mapped all along: the user's windowsIn on position and size, fadeIn on the
 // fade, from the style's start box to the tile. speed scales the duration (1 is exactly the user's animation).
-bool reveal(const std::vector<PHLWINDOW> &windows, float speed, Card card);
+bool reveal(const std::vector<PHLWINDOW> &windows, float speed, Card card, Slide slide = Slide::None);
 // The real close animation (windowsOut, fadeOut) of a live window, drawn from a snapshot: call before it moves away.
 bool leave(const std::vector<PHLWINDOW> &windows);
 // A still picture of a live window, under every window, until what is revealed next has faded in over it.

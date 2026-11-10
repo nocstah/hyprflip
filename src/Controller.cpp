@@ -1595,12 +1595,23 @@ Result Controller::cardAction(const std::string &arguments) {
         return {false, USAGE};
     if (verb == "reveal" || verb == "leave" || verb == "hold") {
         static constexpr auto REVEAL_USAGE = "Use card <id or 0x address> hold, card <id or 0x address> leave or "
-                                             "card <id or 0x address> reveal [speed from 0.05 to 4].";
+                                             "card <id or 0x address> reveal [speed from 0.05 to 4] [up|down].";
         double speed = 1;
+        auto slide = Reveal::Slide::None;
         if (verb == "reveal" && input >> value) {
-            const auto [end, error] = std::from_chars(value.data(), value.data() + value.size(), speed);
-            if (error != std::errc{} || end != value.data() + value.size() || !(speed >= .05 && speed <= 4))
-                return {false, "The speed of a reveal is a number from 0.05 to 4, not " + value + "."};
+            if (value != "up" && value != "down") {
+                const auto [end, error] = std::from_chars(value.data(), value.data() + value.size(), speed);
+                if (error != std::errc{} || end != value.data() + value.size() || !(speed >= .05 && speed <= 4))
+                    return {false, "The speed of a reveal is a number from 0.05 to 4, not " + value + "."};
+                if (!(input >> value))
+                    value.clear();
+            }
+            if (value == "up")
+                slide = Reveal::Slide::Up;
+            else if (value == "down")
+                slide = Reveal::Slide::Down;
+            else if (!value.empty())
+                return {false, REVEAL_USAGE};
         }
         if (input >> extra)
             return {false, REVEAL_USAGE};
@@ -1636,7 +1647,7 @@ Result Controller::cardAction(const std::string &arguments) {
         if (std::ranges::any_of(windows, [](const auto &w) { return Fullscreen::controller()->isFullscreen(w); }))
             return {true, "ok"};
         if (verb == "reveal") {
-            Reveal::reveal(windows, speed, whole);
+            Reveal::reveal(windows, speed, whole, slide);
             return {true, "ok"};
         }
         // A snapshot of a window has no card frame in it unless the frames draw into it.
@@ -2277,7 +2288,7 @@ Result Controller::dispatch(const std::string &action) {
             "workspace <number> [silent], move <left|right|up|down>, cancel, "
             "flip, peek [end], unpair, finish, restore [quiet] ..., "
             "card <id> <flip|show <front|back>|ungroup|workspace <workspace> [silent]>, "
-            "card <id or 0x address> hold|leave|reveal [speed], or status."};
+            "card <id or 0x address> hold|leave|reveal [speed] [up|down], or status."};
 }
 namespace {
 // notify-send on PATH, for desktop notifications through the user's daemon.
@@ -2389,7 +2400,7 @@ std::string Controller::status() {
            ",\"card_dividers\":" + (m_frames ? m_frames->dividers() : "[]") +
            ",\"native_cards\":true,\"floating_cards\":true,\"workspace_protection\":true,\"container_provider\":true" +
            ",\"layout_controls\":true,\"repair_cards\":true,\"card_ungroup\":true,\"pane_replacement\":true" +
-           ",\"reveal\":true,\"container_max_panes\":" + std::to_string(CONTAINER_MAX_PANES) +
+           ",\"reveal\":true,\"reveal_slide\":true,\"container_max_panes\":" + std::to_string(CONTAINER_MAX_PANES) +
            ",\"container_max_faces\":" + std::to_string(CONTAINER_MAX_FACES) +
            ",\"switcher\":" + m_switcher->status() + ",\"switch_pending\":" +
            (m_switch && !m_switch->open ? "true" : "false") + "}";
