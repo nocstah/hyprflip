@@ -95,6 +95,27 @@ std::string sizeProblem(PHLWINDOW w, Vector2D size) {
 bool sameBox(const CBox &a, const CBox &b) {
     return std::abs(a.x - b.x) < 1 && std::abs(a.y - b.y) < 1 && std::abs(a.w - b.w) < 1 && std::abs(a.h - b.h) < 1;
 }
+// Where a card's apps are drawn: its panes with their borders, as CardFrames
+// outlines them. A tiled card's slot also holds the gaps_in it leaves towards
+// its neighbours. A turn draws and clips the faces inside the box it is given,
+// so in the slot a slide carried them into that gap and narrowed it.
+CBox drawnBox(const std::vector<PHLWINDOWREF> &windows, const CBox &slot) {
+    std::optional<CBox> drawn;
+    for (const auto &ref : windows) {
+        const auto w = ref.lock();
+        if (!w)
+            continue;
+        const auto box = w->geometricBox(IGeometric::GEOMETRIC_GOAL).expand(w->getRealBorderSize());
+        if (!drawn) {
+            drawn = box;
+            continue;
+        }
+        const double x = std::min(drawn->x, box.x), y = std::min(drawn->y, box.y);
+        drawn = CBox{x, y, std::max(drawn->x + drawn->w, box.x + box.w) - x,
+                     std::max(drawn->y + drawn->h, box.y + box.h) - y};
+    }
+    return drawn && drawn->w >= 1 && drawn->h >= 1 ? *drawn : slot;
+}
 // The window the seat's pointer focus belongs to, read as CardFrames reads it.
 // A subsurface or popup stands for its window; layers and locks have none.
 PHLWINDOW pointerWindow() {
@@ -1284,7 +1305,7 @@ Result Controller::flip(std::optional<Transition> preview, Pair *target, std::op
     pose->perspective = m_settings.perspective->value();
     pose->retreat = m_settings.retreat->value();
     if (p->containerID)
-        pose->containerBox = s->geometry;
+        pose->containerBox = drawnBox(s->windows(), s->geometry);
     m_turn.emplace(Turn{p->id,
                         source,
                         // A longer slide takes a little longer, not proportionally.

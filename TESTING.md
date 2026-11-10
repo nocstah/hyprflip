@@ -1,5 +1,32 @@
 # Validation
 
+## Slides keep the gap beside a card (2026-11-10)
+
+Both CTest checks and all 380 Python unit tests pass. A tiled card's slot
+also holds the gaps_in towards its neighbour, and a turn was drawn and clipped
+in that slot. Measured in fresh nested sessions (Hyprland 0.56.2, Aquamarine
+0.15.1 with the render-node patch) with the pilot desktop's gaps (8 in, 18
+out, 2 px borders) at scale 1.5, a tile left of a tiled card: at rest the two
+border boxes are 16 px apart. Mid-slide, at progress 0.15, 0.4 and 0.7 and
+both ways, a three-face card (flip and slide both run the strip) and a
+two-face card with `slide` drew their faces up to 8 px from the tile, the
+slot's own edge. Drawn in the card's panes, every frame kept 16 px. Two-face
+flip, vertical, fade, portal and dissolve never drew in the gap.
+
+The new `tests/slide_gap_workflows.py` (4) captures frames mid-slide both ways
+for a three-face card right and then left of a tile, with and without a card
+frame, and for a two-face card with `slide`, and requires every column between
+the border boxes to show only the background. Against the 0.3.0-rc.18 core it
+fails: in all four frames of its first check the card's half of the gap was
+covered. Against this core it passes. Fresh nested sessions also passed
+`tests/transitions.py` (15), `tests/multiface_workflows.py` (9),
+`tests/switcher_workflows.py` (11) and `tests/floating_workflows.py` (10).
+`tests/fullscreen_workflows.py` passes its first 7 checks, every transition
+and peek while fullscreen among them, then fails when an app leaves a
+fullscreen card: afterwards no window has the focus. It failed there twice
+with this core and once with the 0.3.0-rc.18 core, so this change is not the
+cause.
+
 ## Show any face from the panel; release checks for 0.3.0-rc.19 (2026-11-10)
 
 Both CTest checks and all 386 Python unit tests pass, six of them new: the

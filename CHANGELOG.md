@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- A tiled card's faces slide inside the card. Its place in the layout also
+  holds the gap towards the window beside it, and a slide (a card with three or
+  more faces, or the slide transition) was drawn across that whole place, so
+  the gap beside the card shrank by half until the slide ended.
+
 ## 0.3.0-rc.19 — 2026-11-10
 
 - The panel helper has a `face` action that shows any face of a card and
