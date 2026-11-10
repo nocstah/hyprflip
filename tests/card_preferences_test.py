@@ -68,6 +68,29 @@ class PreferencesTest(unittest.TestCase):
             self.assertEqual((root / 'accent_color').read_text(), '#F78DBB\n')
             self.assertEqual(sorted(p.name for p in root.iterdir()), ['accent_color', 'accent_ring'])
 
+    def test_nearby_card_persists_applies_and_refuses_older_cores(self):
+        with tempfile.TemporaryDirectory() as directory:
+            ipc = setup.Hyprctl({'XDG_STATE_HOME': directory})
+            state, calls = {'nearby_card': True}, []
+            ipc.status = lambda: state.copy()
+            def apply(*args):
+                calls.append(args[1])
+                state['nearby_card'] = 'nearby_card=true' in args[1]
+            ipc.call = apply
+            ipc.save_nearby_card(False)
+            self.assertEqual(state, {'nearby_card': False})
+            self.assertEqual((Path(directory) / 'hyprflip' / 'nearby_card').read_text(), 'off\n')
+            ipc.save_nearby_card(True)
+            self.assertEqual((Path(directory) / 'hyprflip' / 'nearby_card').read_text(), 'on\n')
+        ipc = setup.Hyprctl()
+        with patch.object(ipc, 'call') as call, patch.object(ipc, 'status', return_value={'nearby_card': True}):
+            for value in (None, 1, 'on'):
+                with self.assertRaises(setup.SetupError): ipc.save_nearby_card(value)
+            call.assert_not_called()
+        with patch.object(ipc, 'call') as call, patch.object(ipc, 'status', return_value={}):
+            with self.assertRaises(setup.SetupError): ipc.save_nearby_card(False)
+            call.assert_not_called()
+
     def test_invalid_accent_or_older_core_does_not_write_or_dispatch(self):
         ipc = setup.Hyprctl()
         with patch.object(ipc, 'call') as call, patch.object(ipc, 'status', return_value={'accent_ring': False, 'accent_color': ''}):

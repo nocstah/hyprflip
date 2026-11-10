@@ -133,6 +133,9 @@ preferences apply to existing cards without changing their membership.
 first when enabling. `control.py accent-color --color '#RRGGBB'` updates only
 the color, without a panel request, so a shell can follow its theme; unchanged
 colors are not rewritten or dispatched. Both values persist like spacing.
+`capabilities.nearby` gates the card-keys-beside-a-card switch. Snapshots
+expose `nearby_card` (boolean); the `nearby` action takes `enabled` and
+persists it like the accent ring.
 `fullscreen` toggles whole-card fullscreen for a native (dwindle or floating)
 multi-app card, targeted like `floating`; two-window groups are refused. Apps are not told they are fullscreen, so browsers keep their toolbars.
 Cards report `fullscreen` and `native` (a dwindle or floating card that can

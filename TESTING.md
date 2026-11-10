@@ -1,5 +1,17 @@
 # Validation
 
+## Card keys beside a card (2026-11-10)
+
+Both CTest checks and all 378 Python unit tests pass, one new for the
+`nearby_card` preference (persisted, applied, refused on an older core). In a
+fresh nested session (Hyprland 0.56.2, Aquamarine 0.15.1 with the render-node
+patch), `tests/nearby_card_workflows.py` passes 6 checks: on by default; from
+a tile beside a card, `flip`, `face <n>` and `unfold` act on that card and the
+focus stays on the tile; turned off, a flip from the tile does nothing while
+one from inside the card still turns; and with two cards on the workspace a
+flip from the tile turns neither. Peek and the switcher hold need real keys,
+which `wtype` does not deliver in a nested session; they use the same lookup.
+
 ## Installed release for panels (2026-11-10)
 
 Release checks for 0.3.0-rc.17. Both CTest checks and all 377 Python unit

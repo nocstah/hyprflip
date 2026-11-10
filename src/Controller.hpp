@@ -18,7 +18,7 @@
 namespace Hyprflip {
 struct Settings {
     SP<Config::Values::Int> duration, cardGap, fullscreenDivider, switcherDelay, swipeFingers;
-    SP<Config::Values::Bool> switcher, enabled, notifications, cardFrame, dragToAdd, accentRing, desktopNotifications;
+    SP<Config::Values::Bool> nearbyCard, switcher, enabled, notifications, cardFrame, dragToAdd, accentRing, desktopNotifications;
     SP<Config::Values::Float> perspective, retreat;
     SP<Config::Values::String> transition, accentColor, dividerColor;
 };
@@ -108,6 +108,9 @@ class Controller {
         }
     };
     Pair *find(PHLWINDOW window);
+    // The card a card key acts on: the focused window's, or with nearby_card on, the only card shown on the focused
+    // window's workspace when that window is in none (a terminal beside its card).
+    Pair *cardFor(PHLWINDOW window);
     Pair *find(uint64_t id);
     bool valid(const Pair &pair) const;
     std::optional<State> state(const Pair &pair) const;

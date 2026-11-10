@@ -335,6 +335,16 @@ class Hyprctl:
         self._save_preference('accent_ring', 'on' if enabled else 'off', 'accent_ring', enabled, current,
                               lambda on: 'true' if on else 'false', 'The accent ring could not be applied.')
 
+    def save_nearby_card(self, enabled):
+        """Card keys from a window in no card (a terminal beside its card) act on the card on its workspace."""
+        if type(enabled) is not bool:
+            raise SetupError('Turn card keys beside a card on or off.')
+        current = self.status().get('nearby_card')
+        if type(current) is not bool:
+            raise SetupError('Update Hyprflip to use card keys beside a card.')
+        self._save_preference('nearby_card', 'on' if enabled else 'off', 'nearby_card', enabled, current,
+                              lambda on: 'true' if on else 'false', 'Card keys beside a card could not be changed.')
+
     def save_accent_color(self, color):
         if not isinstance(color, str) or not re.fullmatch(r'#[0-9A-Fa-f]{6}', color):
             raise SetupError('Use an accent color like #F78DBB.')

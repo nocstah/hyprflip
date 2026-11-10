@@ -190,6 +190,8 @@ def snapshot(ipc):
         base['capabilities']['accent'] = type(state.get('accent_ring')) is bool
         base['accent_ring'] = state.get('accent_ring')
         base['accent_color'] = state.get('accent_color')
+        base['capabilities']['nearby'] = type(state.get('nearby_card')) is bool
+        base['nearby_card'] = state.get('nearby_card')
         # Only cores with whole-card fullscreen report its divider.
         base['capabilities']['divider'] = type(state.get('fullscreen_divider')) is int
         base['capabilities']['fullscreen'] = base['capabilities']['divider']
@@ -373,7 +375,7 @@ def run_operation(ipc, payload, menu):
     if not isinstance(payload, dict) or type(payload.get('protocol')) is not int or payload['protocol'] != PROTOCOL:
         raise w.SetupError('OmaCards and the Hyprflip helper need matching protocol versions.')
     action, ctx = payload.get('action'), payload.get('context')
-    if action not in ('flip', 'unfold', 'floating', 'edit', 'create', 'open', 'manage', 'transition', 'preview', 'duration', 'shortcut', 'appearance', 'spacing', 'accent', 'divider', 'fullscreen'):
+    if action not in ('flip', 'unfold', 'floating', 'edit', 'create', 'open', 'manage', 'transition', 'preview', 'duration', 'shortcut', 'appearance', 'spacing', 'accent', 'nearby', 'divider', 'fullscreen'):
         raise w.SetupError('Choose an available card action.')
     validate_context(ipc, ctx)
     request = menu.request
@@ -494,6 +496,13 @@ def run_operation(ipc, payload, menu):
                 ipc.save_accent_color(payload['color'])
             ipc.save_accent_ring(enabled)
         return 'Accent ring on for all cards.' if enabled else 'Accent ring off.'
+
+    if action == 'nearby':
+        enabled = payload.get('enabled')
+        with request.exclusive():
+            request.check()
+            ipc.save_nearby_card(enabled)
+        return 'Card keys now also work beside a card.' if enabled else 'Card keys work only inside a card.'
 
     if action == 'divider':
         width = payload.get('width')

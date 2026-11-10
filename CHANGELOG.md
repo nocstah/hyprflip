@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- Card keys work from beside a card. With `plugin:hyprflip:nearby_card`
+  (on by default), flip, the face keys and switcher, peek, unfold and card
+  fullscreen act on the one card shown on the focused window's workspace when
+  that window is in no card, such as the terminal beside OmaRelay's workspace
+  card; the focus stays where it is. With two cards there, nothing happens.
+  Off, the keys act only inside a card. The panel helper has the switch:
+  `nearby` action, `capabilities.nearby` and `nearby_card` in snapshots.
+
 ## 0.3.0-rc.17 — 2026-11-10
 
 - `scripts/bootstrap.py` records the release it installed, the newest release

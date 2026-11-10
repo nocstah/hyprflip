@@ -115,6 +115,8 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE h) {
             if (Hyprflip::transition(value)) return {};
             return std::unexpected("Choose flip, vertical, slide, fade, dissolve, portal or instant");
         }}));
+    settings.nearbyCard = config(makeConfigValue<Bool>("plugin:hyprflip:nearby_card",
+        "Card keys from a window in no card act on the one card shown on its workspace", true));
     settings.switcher = config(makeConfigValue<Bool>("plugin:hyprflip:switcher",
         "Hold the flip key on a card with three or more faces to pick a face; a tap goes back to the last face", true));
     settings.switcherDelay = config(makeConfigValue<Int>("plugin:hyprflip:switcher_delay_ms",

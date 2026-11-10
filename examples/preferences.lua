@@ -51,6 +51,14 @@ if hl.plugin.hyprflip and hl.plugin.hyprflip.preview then
             pcall(function() hl.config({plugin={hyprflip={accent_ring=ring == "on"}}}) end)
         end
     end
+    local nearby_file = io.open(root .. "/hyprflip/nearby_card", "r")
+    if nearby_file then
+        local nearby = nearby_file:read("*l")
+        nearby_file:close()
+        if nearby == "on" or nearby == "off" then
+            pcall(function() hl.config({plugin={hyprflip={nearby_card=nearby == "on"}}}) end)
+        end
+    end
     local divider_file = io.open(root .. "/hyprflip/fullscreen_divider", "r")
     if divider_file then
         local text = divider_file:read("*l") or ""

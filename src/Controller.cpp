@@ -324,6 +324,23 @@ Controller::Pair *Controller::find(PHLWINDOW w) {
     });
     return it == m_pairs.end() ? nullptr : &*it;
 }
+Controller::Pair *Controller::cardFor(PHLWINDOW w) {
+    if (auto *own = find(w); own || !w || !m_settings.nearbyCard || !m_settings.nearbyCard->value())
+        return own;
+    const auto workspace = w->m_workspace;
+    if (!workspace || workspace->m_isSpecialWorkspace)
+        return nullptr;
+    Pair *only = nullptr;
+    for (auto &p : m_pairs) {
+        const auto s = state(p);
+        if (!s || std::ranges::none_of(s->faces[s->active], [&](const PHLWINDOW &x) { return x && x->m_workspace == workspace; }))
+            continue;
+        if (only)
+            return nullptr; // two cards here: which one is meant is the focus's to say
+        only = &p;
+    }
+    return only;
+}
 Controller::Pair *Controller::find(uint64_t id) {
     auto it = std::ranges::find_if(m_pairs, [&](const Pair &p) { return p.id == id; });
     return it == m_pairs.end() ? nullptr : &*it;
@@ -404,13 +421,13 @@ std::optional<Controller::State> Controller::state(const Pair &p) const {
 bool Controller::valid(const Pair &p) const { return state(p).has_value(); }
 size_t Controller::faceSize() {
     reconcile();
-    const auto p = find(Desktop::focusState()->window());
+    const auto p = cardFor(Desktop::focusState()->window());
     const auto s = p && p->containerID ? state(*p) : std::nullopt;
     return s ? s->faces[s->active].size() : 0;
 }
 bool Controller::inContainer() {
     reconcile();
-    const auto p = find(Desktop::focusState()->window());
+    const auto p = cardFor(Desktop::focusState()->window());
     return p && p->containerID;
 }
 void Controller::reconcile() {
@@ -903,7 +920,9 @@ bool Controller::canReturnPeek() const {
         return false;
     const auto p = std::ranges::find_if(m_pairs, [this](const Pair &p) { return p.id == m_peek->pairID; });
     const auto s = p == m_pairs.end() ? std::nullopt : state(*p);
-    if (!s || s->unfolded || !s->contains(Desktop::focusState()->window()) ||
+    // a peek from a window beside the card (nearby_card) comes back as one from inside it
+    if (!s || s->unfolded ||
+        const_cast<Controller *>(this)->cardFor(Desktop::focusState()->window()) != &*p ||
         !sameBox(s->geometry, m_peek->geometry) || s->windows() != m_peek->windows)
         return false;
     for (const auto &ref : s->windows()) {
@@ -917,7 +936,7 @@ bool Controller::canReturnPeek() const {
 Result Controller::peek() {
     if (m_peek) return {true, "ok"};
     if (m_turn) return {false, "Let the turn finish before peeking."};
-    auto p = find(Desktop::focusState()->window());
+    auto p = cardFor(Desktop::focusState()->window());
     auto s = p ? state(*p) : std::nullopt;
     if (!s) return {false, "Focus an app in a Hyprflip card before peeking."};
     if (s->unfolded) return {false, "Both sides are already visible. Fold the card with O before peeking."};
@@ -932,7 +951,7 @@ Result Controller::showFace(const std::string &number) {
     const auto [end, error] = std::from_chars(number.data(), number.data() + number.size(), face);
     if (error != std::errc{} || end != number.data() + number.size() || !face || face > CONTAINER_MAX_FACES)
         return {false, "Use face <number>, from 1 to " + std::to_string(CONTAINER_MAX_FACES) + "."};
-    auto p = find(Desktop::focusState()->window());
+    auto p = cardFor(Desktop::focusState()->window());
     const auto s = p && valid(*p) ? state(*p) : std::nullopt;
     if (!s) return {false, "Focus a card first."};
     if (face > s->count) return {false, "This card has " + std::to_string(s->count) + " faces."};
@@ -1028,7 +1047,7 @@ bool Controller::switchHeld() const {
     return m_switch && (m_switch->key || g_pInputManager->getModsFromAllKBs() != 0);
 }
 Result Controller::flipKey() {
-    auto p = find(Desktop::focusState()->window());
+    auto p = cardFor(Desktop::focusState()->window());
     if (m_switch) {
         if (p && p->id == m_switch->pairID) {
             // Each further press steps along the faces.
@@ -1195,7 +1214,7 @@ Result Controller::endPeek() {
     return s && s->active != pending.source ? flip(std::nullopt, p, pending.source) : Result{true, "ok"};
 }
 Result Controller::flip(std::optional<Transition> preview, Pair *target, std::optional<unsigned> to) {
-    auto p = target ? target : find(Desktop::focusState()->window());
+    auto p = target ? target : cardFor(Desktop::focusState()->window());
     if (!p || !valid(*p))
         return {false, "This window has no reverse side. Use mark, then pair."};
     if (inputBusy())
@@ -1783,7 +1802,7 @@ Result Controller::move(char direction) {
 Result Controller::unfold() {
     if (inputBusy())
         return {false, "Finish the active grab or drag before unfolding the card."};
-    auto p = find(Desktop::focusState()->window());
+    auto p = cardFor(Desktop::focusState()->window());
     if (!p || !p->containerID)
         return {false, "Focus a Hyprflip container to show both faces together."};
     finish();
@@ -2076,7 +2095,7 @@ Result Controller::restore(const std::string &arguments) {
 }
 Result Controller::fullscreen() {
     if (inputBusy()) return {false, "Finish the active grab or drag before changing fullscreen."};
-    auto p = find(Desktop::focusState()->window());
+    auto p = cardFor(Desktop::focusState()->window());
     if (!p || !p->containerID || p->providerEpoch != FloatingCards::EPOCH)
         return {false, "Focus an app in a multi-app card to fullscreen the card."};
     finish();
@@ -2327,6 +2346,7 @@ std::string Controller::status() {
                        ",\"card_frame\":" + (m_settings.cardFrame->value() ? "true" : "false") +
                        ",\"card_gap\":" + std::to_string(m_settings.cardGap->value()) +
                        ",\"accent_ring\":" + (m_settings.accentRing->value() ? "true" : "false") +
+                       ",\"nearby_card\":" + (m_settings.nearbyCard->value() ? "true" : "false") +
                        ",\"accent_color\":" + quote(parseAccent(m_settings.accentColor->value()) ? m_settings.accentColor->value() : "") +
                        ",\"fullscreen_divider\":" + std::to_string(m_settings.fullscreenDivider->value()) +
                        ",\"divider_color\":" + quote(parseAccent(m_settings.dividerColor->value()) ? m_settings.dividerColor->value() : "") +
