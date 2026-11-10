@@ -25,6 +25,7 @@
 #include <map>
 #include <memory>
 #include <numeric>
+#include <utility>
 
 namespace Hyprflip::FloatingCards {
 using namespace Desktop::View;
@@ -65,6 +66,8 @@ class PaneTarget final : public ITarget {
   public:
     SP<ITarget> original;
     std::weak_ptr<Card> card;
+    // The layout's last box for this pane went unused: its card was parked (setPositionGlobal).
+    bool kept = false;
     static SP<PaneTarget> create(SP<ITarget> original, const std::shared_ptr<Card> &card) {
         auto p = makeShared<PaneTarget>();
         p->original = original;
@@ -473,6 +476,16 @@ void PaneTarget::setPositionGlobal(const STargetBox &box, uint8_t flags) {
     // whichever box a caller passes (the layout's tile, or Hyprland's group
     // fullscreen transfer, which reuses another member's pane).
     const auto full = c->fullscreenBox();
+    // A parked card (on a special workspace no monitor shows) keeps each app
+    // at the size it had on screen. Nobody sees it there, and an app told
+    // another size redraws for it, then again on its way back, which a reveal
+    // waits for. The card's own workspace, as a move has already set it.
+    const auto where = c->group ? c->group->m_target->workspace() : nullptr;
+    if (!full && where && where->m_isSpecialWorkspace && !where->isVisible()) {
+        kept = true;
+        c->visibility();
+        return;
+    }
     CBox outer = full ? *full : box.visualBox.empty() ? box.logicalBox : box.visualBox;
     // A tiled layout leaves the visual slot empty and lets Hyprland's window
     // target add gaps_in on inner edges. Panes pass an explicit slot, which
@@ -504,6 +517,10 @@ void PaneTarget::setPositionGlobal(const STargetBox &box, uint8_t flags) {
         Fullscreen::controller()->m_windowPosSettingQueued = true;
     m_box = {pane, pane};
     original->setPositionGlobal(m_box, flags);
+    // Its special workspace shown, a parked card is laid out there at once,
+    // as it was when parked cards took that layout unseen.
+    if (std::exchange(kept, false) && where && where->m_isSpecialWorkspace)
+        original->warpPositionSize();
     c->visibility();
 }
 void PaneTarget::recalc() {

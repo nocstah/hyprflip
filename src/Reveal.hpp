@@ -3,6 +3,7 @@
 // over a still picture of what they replace.
 #pragma once
 #include <hyprland/src/desktop/view/Window.hpp>
+#include <optional>
 #include <vector>
 
 namespace Hyprflip::Reveal {
@@ -27,6 +28,9 @@ bool hold(const std::vector<PHLWINDOW> &windows, Card card);
 bool steady(const PHLWINDOW &w);
 // Runs every frame: hands finished windows back to the move animation, and keeps pictures that are fading damaged.
 void frame();
+// How long the last slide waited for its apps to draw at their size, in ms: from its reveal to the frame it began in.
+// None before the first slide.
+std::optional<double> lastSlideWait();
 // The monitor went away: its pictures go now, whether or not a frame follows.
 void monitorGone(const PHLMONITOR &monitor);
 // Before the plugin unloads: nothing of ours may stay in Hyprland's lists.

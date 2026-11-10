@@ -208,8 +208,8 @@ hl.workspace_rule({{workspace="{PLACE}",monitor="{output}"}})
     ipc.call('dispatch', f'hl.dsp.focus({{monitor="{output}"}})')
     ipc.call('dispatch', f'hl.dsp.focus({{workspace={PLACE}}})')
 
-    assert ipc.status()['reveal'] is True
-    passed('status says "reveal":true')
+    assert ipc.status()['reveal'] is True and ipc.status()['last_slide_wait_ms'] is None
+    passed('status says "reveal":true, and no slide has waited yet')
 
     # The tile that keeps working, and the two windows that take turns beside it.
     tile = spawn('tile', '203040')
@@ -383,6 +383,8 @@ hl.workspace_rule({{workspace="{PLACE}",monitor="{output}"}})
     one_boxes, one_frame = {a: box(a) for a in one_shown}, frame_of(one)
     panes2 = []
     batch(f'hyprflip card {one} workspace {PARK} silent')
+    # Parked, its apps keep the size they had in the tile, whatever the special workspace's layout would give them.
+    assert {a: box(a) for a in one_shown} == one_boxes, ({a: box(a) for a in one_shown}, one_boxes)
     focus(tile)
     panes2 = [spawn(name, color) for name, color in (('d1', 'c2601a'), ('d2', 'c2601a'), ('d3', '00ff00'))]
     two = build_card(panes2[0], panes2[1], panes2[2])
@@ -422,10 +424,11 @@ hl.workspace_rule({{workspace="{PLACE}",monitor="{output}"}})
             target = boxes[a]
             path = [win for _, win in of(frames, a) if win['goal'] == target]
             assert path, (a, way)
-            # unseen in its tile until the app has drawn at the tile's size, then the slide
+            # A slide waits, unseen in the tile, until the app has drawn at the tile's size. One parked from this tile
+            # kept that size, so it starts at once.
             waiting = [win for win in path if win['fade'] < .001]
             trace = [(round(ms), round(win['fade'], 3), win['box'], win['goal']) for ms, win in of(frames, a)]
-            assert len(waiting) <= 15 and all(same(win['box'], target, .5) for win in waiting), (way, len(waiting), trace[:20])
+            assert len(waiting) <= 1 and all(same(win['box'], target, .5) for win in waiting), (way, len(waiting), trace[:20])
             path = [win for win in path if win['fade'] >= .001]
             assert path, (a, way, 'never slid', len(frames), trace[:25])
             ys = [win['box'][1] for win in path]
@@ -437,6 +440,8 @@ hl.workspace_rule({{workspace="{PLACE}",monitor="{output}"}})
             assert all(abs(win['box'][0] - target[0]) < .5 and same(win['box'][2:], target[2:], .5) for win in path), 'Only y moves'
             assert all(win['fade'] > .999 for win in path), 'A slide does not fade'
             assert same(path[-1]['box'], target, .5), path[-1]
+        # from the reveal to the frame the slide began in: the next frame, not a wait
+        assert 0 <= ipc.status()['last_slide_wait_ms'] <= 34, ipc.status()['last_slide_wait_ms']
         assert max(f['fadeouts'] for f in frames) >= 1 and fadeouts() == 0
         assert {a: box(a) for a in shown} == boxes
         assert active() == tile and pointer() == before and box(tile) == tile_box
@@ -454,6 +459,17 @@ hl.workspace_rule({{workspace="{PLACE}",monitor="{output}"}})
     time.sleep(.8)
     passed('reveal up and down slide a card in from below and from above with no fade, its picture goes out alongside, '
            'a bad direction is refused, and the neighbour, the focus and the pointer stay')
+
+    # Its special workspace shown, a parked card is laid out there at once, with no move from the tile it kept.
+    frames = record(['dispatch hl.dsp.workspace.toggle_special("reveal-park")'], .5)
+    for a in two_shown:
+        seen = [win['box'] for _, win in of(frames, a)]
+        assert seen and all(same(b, seen[-1], .5) for b in seen) and same(seen[-1], box(a), .5), (a, seen[:3], box(a))
+        assert not same(box(a), two_boxes[a], .5), (a, box(a))
+    batch('dispatch hl.dsp.workspace.toggle_special("reveal-park")')
+    focus(tile)
+    passed('a parked card keeps the size it had in its tile and slides back in at once; shown on its special workspace, '
+           'it is laid out there with no move')
 
     before = rest(tile)
     notices = notify_log.read_text()

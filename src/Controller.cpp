@@ -2420,7 +2420,9 @@ std::string Controller::status() {
            ",\"card_dividers\":" + (m_frames ? m_frames->dividers() : "[]") +
            ",\"native_cards\":true,\"floating_cards\":true,\"workspace_protection\":true,\"container_provider\":true" +
            ",\"layout_controls\":true,\"repair_cards\":true,\"card_ungroup\":true,\"pane_replacement\":true" +
-           ",\"reveal\":true,\"reveal_slide\":true,\"container_max_panes\":" + std::to_string(CONTAINER_MAX_PANES) +
+           ",\"reveal\":true,\"reveal_slide\":true,\"last_slide_wait_ms\":" +
+           (Reveal::lastSlideWait() ? std::to_string(static_cast<long>(std::lround(*Reveal::lastSlideWait()))) : "null") +
+           ",\"container_max_panes\":" + std::to_string(CONTAINER_MAX_PANES) +
            ",\"container_max_faces\":" + std::to_string(CONTAINER_MAX_FACES) +
            ",\"switcher\":" + m_switcher->status() + ",\"switch_pending\":" +
            (m_switch && !m_switch->open ? "true" : "false") + "}";

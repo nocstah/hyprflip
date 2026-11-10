@@ -37,6 +37,7 @@ struct Active {
 };
 std::vector<Active> active;
 constexpr auto SLIDE_WAIT = std::chrono::milliseconds(200);
+std::optional<double> lastWait;
 
 bool waitingToSlide(const PHLWINDOW &w) {
     return std::ranges::any_of(active, [&](const Active &a) { return a.slideBy && a.window.lock() == w; });
@@ -431,6 +432,7 @@ void startSlides() {
         const auto w = a.window.lock();
         if (!a.slideBy || !w)
             continue;
+        lastWait = std::chrono::duration<double, std::milli>(now - (a.until - SLIDE_WAIT)).count();
         const auto goal = w->positionAnimation()->goal();
         w->alpha(WINDOW_ALPHA_FADE)->setValueAndWarp(1.F);
         w->positionAnimation()->setValueAndWarp(goal + Vector2D{0., *a.slideBy});
@@ -458,6 +460,8 @@ void frame() {
     }
     drop([](const SP<Picture> &picture) { return picture->done(); });
 }
+
+std::optional<double> lastSlideWait() { return lastWait; }
 
 void monitorGone(const PHLMONITOR &monitor) {
     drop([&](const SP<Picture> &picture) { return picture->monitor() == monitor; });

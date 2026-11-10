@@ -1,5 +1,25 @@
 # Validation
 
+## Parked cards keep their size (2026-11-10)
+
+Both CTest checks and all 378 Python unit tests pass. Measured in a fresh nested
+session (Hyprland 0.56.2, Aquamarine 0.15.1 with the render-node patch) at scale
+1.5, with two cards of a real Helium window and a foot terminal taking turns
+beside a tile the way OmaRelay switches them (`no_anim` cuts, hold, park on a
+special workspace holding three more parked cards, unpark, `reveal 0.7 up`):
+before, a parked card was laid out at 938x491 or 458x491 on the special
+workspace against its 938x1025 tile, and all 8 slides waited the full 200 ms,
+the browser never drawing at its tile's size unseen; after, the parked card
+kept 938x1025 and all 8 slides began in the first frame after the batch.
+
+Fresh nested sessions passed `tests/reveal_workflows.py` (19, one new: a card
+parked from its tile keeps its apps' boxes, slides back with no frame waiting
+and `last_slide_wait_ms` within two frames, and, its special workspace shown,
+is laid out there with no move; `last_slide_wait_ms` is null before the first
+slide), `tests/card_id_workflows.py` (13), `tests/unattended_workflows.py`
+(12) and `tests/install_cards.py` (64). OmaRelay's `cards-nested` (13 checks)
+and its card unit tests (161) pass against this core.
+
 ## Card keys beside a card (2026-11-10)
 
 Both CTest checks and all 378 Python unit tests pass, one new for the

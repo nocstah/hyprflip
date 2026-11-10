@@ -106,7 +106,7 @@ single window's address with its `0x`.
 | `card <id or address> hold` | Keep a still picture of what shows now, under every window, until what is revealed next has faded in over it |
 | `card <id or address> reveal` | Give it the user's open animation, as it stands in its tile, at the user's speed |
 | `card <id or address> reveal <speed>` | The same with the duration multiplied by `<speed>`, from 0.05 to 4: `0.7` takes 70% as long |
-| `card <id or address> reveal [speed] up` / `down` | Slide it into its tile from below (`up`) or from above (`down`) at the window move animation, with no fade, while the held picture slides out the same way beside it, the card's height and a small gap away. It starts once each app has drawn at its tile's size, waiting at most 200 ms with the picture in place. Cores that have it report `"reveal_slide": true` |
+| `card <id or address> reveal [speed] up` / `down` | Slide it into its tile from below (`up`) or from above (`down`) at the window move animation, with no fade, while the held picture slides out the same way beside it, the card's height and a small gap away. It starts once each app has drawn at its tile's size, waiting at most 200 ms with the picture in place: at once for a card parked from that tile, which kept that size (see [Parked cards](#parked-cards)). Cores that have it report `"reveal_slide": true`, and `"last_slide_wait_ms"`: how long the last slide waited, from its reveal to the frame it began in (`null` before the first) |
 | `card <id or address> leave` | Play the user's close animation from a picture of it, over what comes next |
 
 Send them in one `hyprctl --batch`, so that no frame falls between the requests.
@@ -189,8 +189,12 @@ not start with `ok:` as not done.
 A card moved to a special workspace that is not shown is parked: its apps keep
 running, Find leaves it out (it lists apps on normal workspaces only) and
 drag-to-add offers only cards on visible normal workspaces. Bring it back with
-`card <id> workspace <number> silent`. Showing that special workspace shows the
-card there.
+`card <id> workspace <number> silent`.
+
+While parked, its apps keep the size they had on screen: the special
+workspace's layout is not applied to them unseen, so none redraws for it, and a
+card brought back to the tile it left comes in already drawn at its size.
+Showing that special workspace lays the card out there at once.
 
 The saved-card menus and OmaCards leave a parked card alone. They never count
 it as an open saved card, go to it, reveal it or fill in its missing apps, and

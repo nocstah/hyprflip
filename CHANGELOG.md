@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- A parked card keeps its apps at the size they had on screen instead of
+  taking its special workspace's layout unseen. Brought back to the tile it
+  left, it is already drawn at its size, so a sliding reveal starts at once
+  rather than waiting up to 200 ms for its apps to redraw. Showing that special
+  workspace lays the card out there at once. `status` reports
+  `last_slide_wait_ms`, how long the last slide waited.
 - A reveal that slides waits, up to 200 ms and with the held picture still in
   place, until each app has drawn at the size of its tile. A card parked at
   another size no longer shows its old layout for a few frames and then
