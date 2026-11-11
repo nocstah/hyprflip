@@ -31,7 +31,7 @@ if hl.plugin.hyprflip then
     end
     shortcuts.bind("SUPER + CTRL + ALT + M", run("mark"), { description = "Hyprflip: mark first side" })
     shortcuts.bind("SUPER + CTRL + ALT + P", run("pair"), { description = "Hyprflip: attach second side" })
-    shortcuts.bind("SUPER + CTRL + ALT + F", run("flip"), { description = "Hyprflip: turn window over" })
+    shortcuts.bind("SUPER + CTRL + ALT + Tab", run("flip"), { description = "Hyprflip: change face" })
     shortcuts.bind("SUPER + CTRL + ALT + U", run("unpair"), { description = "Hyprflip: separate windows" })
     shortcuts.bind("SUPER + CTRL + ALT + Escape", run("cancel"), { description = "Hyprflip: cancel pairing" })
 end

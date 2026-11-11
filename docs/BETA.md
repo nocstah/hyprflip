@@ -30,7 +30,7 @@ Use three disposable terminal windows, or apps whose work you have saved.
 All shortcuts below use **Super+Ctrl+Alt**.
 
 1. Focus the front app, press **O**, and select the other two apps for the back.
-2. Press **F** to flip. Focus either back app, flip twice, and check that focus
+2. Press **Tab** to flip. Focus either back app, flip twice, and check that focus
    returns to the app you were using.
 3. Press **O** to unfold and again to fold. Try your usual laptop resolution
    and scale. Faces may get unequal space to respect app size limits.

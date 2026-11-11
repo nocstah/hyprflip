@@ -1,7 +1,9 @@
 -- Owned binding registry. Plain preferences are parsed, never evaluated.
 local M = { version = 1 }
 local names = {
-    ["turn window over"]="flip", ["unfold, fold or create a card"]="create",
+    -- "turn window over" is the face key's earlier name, in configs from before.
+    ["change face"]="flip", ["turn window over"]="flip",
+    ["unfold, fold or create a card"]="create",
     ["unfold or fold both faces"]="create", ["edit card"]="edit",
     ["open saved card"]="library", ["hold to peek at the other side"]="peek",
     ["find an app in cards"]="find",

@@ -48,14 +48,14 @@ def answer(*args):
     return p.stdout.strip()
 
 binds = json.loads(ctl("-j", "binds"))
-keys = {"M", "P", "F", "U", "ESCAPE"}
+keys = {"M", "P", "TAB", "U", "ESCAPE"}
 conflicts = [b for b in binds if b["modmask"] == 76 and b["key"].upper() in keys
              and not b.get("description", "").startswith("Hyprflip:")]
 if conflicts:
     raise SystemExit("Shortcut conflict; adjust examples/hyprflip.lua before installing: " + json.dumps(conflicts))
 
 print(f"Plugin: {library}\nShortcuts: {module}\nLoad from: {main}")
-print("Super+Ctrl+Alt with M=mark, P=pair, F=flip, U=unpair, Escape=cancel")
+print("Super+Ctrl+Alt with M=mark, P=pair, Tab=change face, U=unpair, Escape=cancel")
 installed = any(p["name"] == "hyprflip" for p in json.loads(ctl("-j", "plugin", "list")))
 installed_state = json.loads(ctl("hyprflip", "status")) if installed else {}
 

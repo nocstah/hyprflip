@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Changing face moved from Super+Ctrl+Alt+F to **Super+Ctrl+Alt+Tab**, and the
+  action is called Change face instead of Flip card: on cards of three or four
+  faces it changes face more often than it flips. It works like Alt+Tab: a tap
+  goes back to the last face shown, and holding it opens the face switcher, where
+  Tab steps. Omarchy 4.5 binds Super+Ctrl+Alt+F to its full-screen desktop toggle,
+  so the installer stopped there; Super+Ctrl+Alt+Tab is free. A key saved in the
+  shortcut settings stays, and configs that still call the action "turn window
+  over" stay editable there.
 - A slide lets the apps it waits for draw while they wait unseen. An app given
   another size out of sight draws only when Hyprland says it may, and Hyprland
   says so as it draws the app, which it does not while the slide waits. An app

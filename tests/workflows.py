@@ -208,7 +208,7 @@ local hl = setmetatable({ bind = record_bind }, { __index = hl })
     assert card()['unfolded'] and all(clients()[w]['workspace']['id'] == 2 for w in members)
     ctl('reload'); assert not ctl('configerrors')
     assert card()['unfolded'] and card()['faces'] == faces
-    focus(c); bind('SUPER + CTRL + ALT + F')
+    focus(c); bind('SUPER + CTRL + ALT + Tab')
     assert not card()['unfolded'] and card()['active'] == 0 and active() == a
     visible()
     passed('unfolded cards survive workspace moves and reload; flip folds to the opposite face')

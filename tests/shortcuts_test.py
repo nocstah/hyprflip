@@ -72,6 +72,20 @@ class ShortcutsTest(unittest.TestCase):
         lua = (Path(__file__).resolve().parents[1] / 'examples/shortcuts.lua').read_text()
         self.assertIn('["fullscreen the whole card"]="fullscreen"', lua)
 
+    def test_change_face_defaults_to_tab_and_keeps_its_earlier_name(self):
+        for description in ('Hyprflip: change face', 'Hyprflip: turn window over'):
+            with self.subTest(description=description):
+                self.ipc.binds = [{'description': description, 'key': 'Tab', 'modmask': 76}]
+                row = next(r for r in shortcuts.snapshot(self.ipc)['rows'] if r['id'] == 'flip')
+                self.assertEqual((row['label'], row['default_mask'], row['default_key'], row['shortcut']),
+                                 ('Change face', 76, 'Tab', 'Super+Ctrl+Alt+Tab'))
+                self.assertTrue(row['editable'])
+        self.assertEqual(shortcuts.save(self.ipc, 'flip', 76, 'S'), 'Change face: Super+Ctrl+Alt+S')
+        project = Path(__file__).resolve().parents[1]
+        self.assertIn('["change face"]="flip", ["turn window over"]="flip"', (project / 'examples/shortcuts.lua').read_text())
+        self.assertIn('shortcuts.bind("SUPER + CTRL + ALT + Tab", run("flip"), { description = "Hyprflip: change face" })',
+                      (project / 'examples/hyprflip.lua').read_text())
+
     def test_rejects_injection_modifiers_and_unknown_keysyms(self):
         for mask, key in ((True, 'F'), (0, 'F'), (1, 'F'), (256, 'F'), (64, 'F);os.exit()'),
                           (64, 'made_up_key'), (64, 'Super_L')):

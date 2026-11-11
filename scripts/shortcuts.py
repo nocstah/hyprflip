@@ -10,7 +10,7 @@ from workflow import SetupError
 
 # Stable IDs are shared with examples/shortcuts.lua.
 DEFINITIONS = (
-    ('flip', 'Flip card', 'F', 'turn window over'),
+    ('flip', 'Change face', 'Tab', 'change face'),
     ('create', 'Create, unfold or fold', 'O', 'unfold, fold or create a card'),
     ('edit', 'Edit card', 'C', 'edit card'),
     ('library', 'Open saved cards', 'L', 'open saved card'),
@@ -33,6 +33,8 @@ DEFINITIONS = (
 BY_ID = {row[0]: row for row in DEFINITIONS}
 DESCRIPTIONS = {'Hyprflip: ' + row[3]: row[0] for row in DEFINITIONS}
 DESCRIPTIONS['Hyprflip: unfold or fold both faces'] = 'create'
+# The face key's earlier name, in configs installed before it moved to Tab.
+DESCRIPTIONS['Hyprflip: turn window over'] = 'flip'
 MODS = ((64, 'Super'), (4, 'Ctrl'), (8, 'Alt'), (1, 'Shift'))
 
 

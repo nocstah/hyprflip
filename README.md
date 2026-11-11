@@ -152,7 +152,7 @@ With the core and guided setup installed:
    Apps on other workspaces are available under **Add from workspace X**.
    Floating apps are resized to fit automatically.
 4. The card groups automatically with Gmail in front. Press
-   **Super+Ctrl+Alt+F** to turn it over.
+   **Super+Ctrl+Alt+Tab** to turn it over.
 5. Press **Super+Ctrl+Alt+O** to use all three apps together. Focus the side you
    want to keep and press O again with the same modifiers to fold back.
 
@@ -160,7 +160,7 @@ Already created a two-app card with O? Flip to WhatsApp, press
 **Super+Ctrl+Alt+C → Add an app to this side**, then choose Telegram.
 
 For native pairs, focus the front app and press **Super+Ctrl+Alt+M**, focus the
-back app and press **Super+Ctrl+Alt+P**, then use **F** with the same modifiers.
+back app and press **Super+Ctrl+Alt+P**, then use **Tab** with the same modifiers.
 Both apps must share a workspace and both be tiled or both floating.
 
 ### Shape the card around your workflow
@@ -212,7 +212,7 @@ Hold **Super + Ctrl + Alt** for the following keys:
 
 | Key | Action | Required setup |
 | --- | --- | --- |
-| **F** | Flip the focused pair or card | Core bindings |
+| **Tab** | Change face, like Alt+Tab: a tap goes back to the last face, holding it shows them all | Core bindings |
 | **M** / **P** | Mark the front / pair the focused app as the back | Core bindings |
 | **U** | Ungroup the card; keep its apps open | Core bindings |
 | **Escape** | Cancel a pending mark | Core bindings |

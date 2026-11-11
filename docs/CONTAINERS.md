@@ -131,7 +131,7 @@ face; `restore` writes faces after the back as `face …`.
 A card with three or more faces slides sideways instead of flipping: the faces
 stand in a row, the next one comes in from the right and the one before from
 the left, and a face further away slides past the ones between.
-A tap of the flip key goes back to the last face shown, so two faces in use
+A tap of the face key (**Super+Ctrl+Alt+Tab**) goes back to the last face shown, so two faces in use
 are one tap apart. Hold the key to see every face: a strip of previews opens
 over the card after `switcher_delay_ms` (200 ms). Press the key again, Tab or
 the arrow keys to step, a digit to pick, Escape to put it away, or click a
@@ -168,7 +168,7 @@ contain live, interactive applications.
 
 Press **Super+Ctrl+Alt+O** again to fold onto the face containing the focused
 application. Inner split proportions are retained. While unfolded,
-**Super+Ctrl+Alt+F** folds onto the
+**Super+Ctrl+Alt+Tab** folds onto the
 opposite face; it does not run the perspective turn while both faces are visible.
 Movement, release, close and config reload continue to work. Leave fullscreen
 before moving a card. Cards fullscreen as a whole:
@@ -200,7 +200,7 @@ reopening missing apps wait until you leave. No compositor library is replaced o
   choose **Create card** or add a third. When only one other window is
   available, one selection is enough.
 - The selected apps group automatically, with the card folded onto the front.
-  **Super+Ctrl+Alt+F** flips to the back; **Super+Ctrl+Alt+O** shows both faces
+  **Super+Ctrl+Alt+Tab** flips to the back; **Super+Ctrl+Alt+O** shows both faces
   together when you want them.
 - **Escape** at any menu cancels without changing the windows, their layout or
   any pending mark. Ungrouping removes the card; the same shortcut can create it
