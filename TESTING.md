@@ -1,5 +1,21 @@
 # Validation
 
+## Change face with Tab; release checks for 0.3.0-rc.20 (2026-11-11)
+
+Both CTest checks and all 388 Python unit tests pass, one of them new: the
+shortcut registry offers Change face on Tab and still knows the action by its
+earlier description, so older configs stay editable. The key itself was
+checked with real key presses (a virtual keyboard sending evdev codes) in a
+nested session: a tap, a hold, a second Tab stepping exactly one face without
+running the binding again, and no Alt+Tab binding running when Super and Ctrl
+are let go first.
+
+OmaCards' `tests/run-native.py` (9 checks) passed twice in a fresh nested
+session (Hyprland 0.56.2, Aquamarine 0.15.1 with the render-node patch)
+against this helper and core. The slide, unseen-draw and bound-window changes
+in this release were checked as described below; no other nested suite was
+rerun for it.
+
 ## Apps waiting unseen may draw (2026-11-10)
 
 Both CTest checks and all 387 Python unit tests pass. The new

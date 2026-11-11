@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.0-rc.20 — 2026-11-11
 
 - Changing face moved from Super+Ctrl+Alt+F to **Super+Ctrl+Alt+Tab**, and the
   action is called Change face instead of Flip card: on cards of three or four
