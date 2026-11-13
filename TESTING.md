@@ -1,5 +1,19 @@
 # Validation
 
+## Updating a build directory in place; release checks for 0.3.0-rc.22 (2026-11-13)
+
+Found on the pilot desktop: OmaCards' panel installing 0.3.0-rc.21 over its
+existing Hyprflip source stopped at the build step with "Hyprland links Lua
+5.5, but pkg-config found Lua 5.4.9 (lua5.4)", the cached result of 0.3.0-rc.20's
+lua5.4 check. Reproduced in one build directory configured first with
+0.3.0-rc.20's CMakeLists.txt and then with 0.3.0-rc.21's. With this change the
+same directory configures against Lua 5.5.1 (`lua5.5`), builds, links
+`liblua.so.5.5` and passes all three CTest checks; the same directory also
+switches to `-DHYPRFLIP_LUA=5.4` and back. A fresh build passes all three CTest
+checks and all 403 Python unit tests pass. The plugin's code is unchanged from
+0.3.0-rc.21, so no nested suite was rerun; see that release's checks below. The
+retry after a search that found the wrong Lua version was not exercised.
+
 ## Lua from Hyprland; release checks for 0.3.0-rc.21 (2026-11-13)
 
 All three CTest checks and all 403 Python unit tests pass. The new CTest

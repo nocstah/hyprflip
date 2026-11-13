@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.0-rc.22 — 2026-11-13
+
+- Updating in place builds again. 0.3.0-rc.21 reused the Lua 5.4 that an
+  older build directory had found, saw it did not match the Lua 5.5 Hyprland
+  links, and stopped at the build step, so OmaCards' panel, hyprpm and `make`
+  could not update an existing Hyprflip; a fresh clone built. Nothing was
+  installed or reloaded when it stopped. The build now searches again in a
+  directory configured for another Lua.
+
 ## 0.3.0-rc.21 — 2026-11-13
 
 - `scripts/uninstall.py` removes Hyprflip as its installers put it in place:
