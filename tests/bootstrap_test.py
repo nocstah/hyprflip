@@ -15,8 +15,11 @@ PINNED = "efb50993780079460b0cbed1363e2166a2de1d9f"
 
 class BootstrapTest(unittest.TestCase):
     def setUp(self):
-        self.tools = {"cmake", "ninja", "pkg-config", "c++", "git", "python3", "hyprctl"}
-        self.modules = {"lua5.4", "glesv2", "hyprland"}
+        self.tools = {"cmake", "ninja", "pkg-config", "c++", "readelf", "git", "python3", "hyprctl"}
+        self.modules = {"glesv2", "hyprland"}
+        # Arch today: hyprland 0.56.2-4 links Lua 5.5 (the lua package); lua54 stays for libinput.
+        self.lua = {"lua": "5.5.1", "lua5.4": "5.4.9"}
+        self.hyprland_lua = "liblua.so.5.5"
         self.running = {"tag": "v0.56.2", "commit": PINNED}
         self.headers = "0.56.2"
 
@@ -24,8 +27,14 @@ class BootstrapTest(unittest.TestCase):
         command = list(command)
         if command[:2] == ["pkg-config", "--exists"]:
             return subprocess.CompletedProcess(command, 0 if command[2] in self.modules else 1, "", "")
-        if command[:2] == ["pkg-config", "--modversion"]:
+        if command[:2] == ["pkg-config", "--modversion"] and command[2] == "hyprland":
             return subprocess.CompletedProcess(command, 0, self.headers + "\n", "")
+        if command[:2] == ["pkg-config", "--modversion"]:
+            found = self.lua.get(command[2])
+            return subprocess.CompletedProcess(command, 0 if found else 1, (found or "") + "\n", "")
+        if command[:2] == ["readelf", "-d"]:
+            needed = f" 0x0000000000000001 (NEEDED)             Shared library: [{self.hyprland_lua}]\n"
+            return subprocess.CompletedProcess(command, 0, needed if self.hyprland_lua else "", "")
         if command[:2] == ["hyprctl", "version"]:
             return subprocess.CompletedProcess(command, 0, json.dumps(self.running), "")
         if command[:2] == ["cmake", "--version"]:
@@ -57,10 +66,27 @@ class BootstrapTest(unittest.TestCase):
 
     def test_missing_tools_and_modules_name_their_packages(self):
         self.tools -= {"ninja", "c++"}
-        self.modules -= {"lua5.4"}
+        del self.lua["lua"]
         failed = self.failure()
         self.assertIn("ninja", failed["detail"])
+        self.assertIn("Lua 5.5", failed["detail"])
         self.assertEqual(failed["fix"], "sudo pacman -S --needed gcc lua ninja")
+
+    def test_lua_is_the_one_hyprland_links(self):
+        # Hyprland runs the plugin's Lua functions on its own Lua state.
+        self.hyprland_lua = "liblua5.4.so.5.4"
+        code, events = self.check()
+        self.assertEqual(code, 0)
+        del self.lua["lua5.4"]
+        failed = self.failure()
+        self.assertEqual((failed["detail"], failed["fix"]), ("Missing Lua 5.4", "sudo pacman -S --needed lua54"))
+        # Lua 5.5 installed is not enough for a Hyprland that links Lua 5.4, nor the reverse.
+        self.hyprland_lua, self.lua = "liblua.so.5.5", {"lua5.4": "5.4.9"}
+        self.assertEqual(self.failure()["fix"], "sudo pacman -S --needed lua")
+
+    def test_an_unreadable_hyprland_lua_is_refused(self):
+        self.hyprland_lua = ""
+        self.assertIn("Could not tell which Lua", self.failure()["detail"])
 
     def test_other_hyprland_version_is_refused(self):
         self.running = {"tag": "v0.57.0", "commit": "f" * 40}

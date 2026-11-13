@@ -22,7 +22,7 @@ See [the panel interface](PANEL_API.md) for its behavior and compatibility.
 
 | Component | Requirements |
 | --- | --- |
-| Core | Hyprland 0.56.2 and matching development headers; matching C++26-capable compiler; CMake 3.25+; Ninja; pkg-config; Lua 5.4; GLESv2 |
+| Core | Hyprland 0.56.2 and matching development headers; matching C++26-capable compiler; CMake 3.25+; Ninja; pkg-config; readelf (binutils); the Lua that Hyprland links, with its development files (5.5 on current Arch); GLESv2 |
 | Supplied installer | Python 3, `hyprctl`, a running Hyprland session and an existing `~/.config/hypr/hyprland.lua` |
 | Guided menus and saved cards | Python 3, `hyprctl`, `notify-send` (libnotify), `gio`/`gdbus` (GLib), and either a responding Omarchy 4 shell or Fuzzel / Rofi with Wayland support / Wofi |
 | Launch progress and Cancel | A desktop notification service supporting actions, such as Omarchy shell, Mako or Dunst |
@@ -32,8 +32,13 @@ Check the compositor and headers before building:
 
 ```sh
 hyprctl version
-pkg-config --modversion hyprland lua5.4 glesv2
+pkg-config --modversion hyprland glesv2
+readelf -d "$(command -v Hyprland)" | grep liblua
 ```
+
+Hyprland runs Hyprflip's Lua functions on its own Lua state, so the build uses
+the Lua library that Hyprland links (`liblua.so.5.5` means Lua 5.5, found as
+`lua5.5` or `lua` by pkg-config). Set `-DHYPRFLIP_LUA=5.5` to choose it by hand.
 
 The Hyprland package version alone is insufficient if its commit, dependencies
 or compiler ABI differ from the running compositor. The project keeps build-time

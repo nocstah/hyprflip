@@ -13,6 +13,14 @@
   Saved cards and preferences stay unless `--purge`. A new configuration error
   puts everything back, and a parked card stops it before it changes anything.
   The Inapse Spaces installer runs it to reverse its own Hyprflip install.
+- The plugin is built against the Lua that Hyprland links instead of always
+  Lua 5.4. Hyprland runs the plugin's Lua functions on its own Lua state, and
+  Arch's hyprland 0.56.2-4 links Lua 5.5, so the plugin was compiled with 5.4
+  headers and called into 5.5. The calls it makes happen to be the same in
+  both, so nothing broke, but a change could have. The build reads the Lua
+  library from Hyprland (`-DHYPRFLIP_LUA=5.5` sets it by hand), a new self-test
+  fails if the plugin links any other, and the installer's check names the
+  package for that Lua: `lua` for 5.5, `lua54` for 5.4.
 
 ## 0.3.0-rc.20 — 2026-11-11
 

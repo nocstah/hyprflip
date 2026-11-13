@@ -21,8 +21,11 @@ import tomllib
 
 project = Path(__file__).resolve().parent.parent
 # pkg-config module or command -> Arch package that provides it.
-PACKAGES = {'cmake': 'cmake', 'ninja': 'ninja', 'pkg-config': 'pkgconf', 'c++': 'gcc', 'git': 'git',
-            'python3': 'python', 'hyprland': 'hyprland', 'lua5.4': 'lua', 'glesv2': 'libglvnd'}
+PACKAGES = {'cmake': 'cmake', 'ninja': 'ninja', 'pkg-config': 'pkgconf', 'c++': 'gcc', 'readelf': 'binutils',
+            'git': 'git', 'python3': 'python', 'hyprland': 'hyprland', 'glesv2': 'libglvnd'}
+# Lua version -> Arch package with its development files.
+LUA_PACKAGES = {'5.5': 'lua', '5.4': 'lua54', '5.3': 'lua53'}
+LUA_LIBRARY = re.compile(r'\[liblua-?(\d+\.\d+)\.so|\[liblua\.so\.(\d+\.\d+)')
 
 
 class Failed(Exception):
@@ -86,14 +89,42 @@ def plugin_version():
     return re.search(r'project\(hyprflip VERSION ([\d.]+)', (project / 'CMakeLists.txt').read_text()).group(1)
 
 
+def hyprland_lua():
+    """The Lua version Hyprland links, such as 5.5. Hyprland runs the plugin's
+    Lua functions on its own Lua state, so the build uses that Lua, as
+    CMakeLists.txt does."""
+    binary = shutil.which('Hyprland') or '/usr/bin/Hyprland'
+    code, output = run('readelf', '-d', binary)
+    match = None if code else LUA_LIBRARY.search(output)
+    if not match:
+        raise Failed(f'Could not tell which Lua {binary} links',
+                     'Configure the build by hand with -DHYPRFLIP_LUA=<the Lua version Hyprland uses>')
+    return match.group(1) or match.group(2)
+
+
+def has_lua(version):
+    for module in (f'lua{version}', f'lua-{version}', 'lua' + version.replace('.', ''), 'lua'):
+        code, found = run('pkg-config', '--modversion', module)
+        if not code:
+            return found == version or found.startswith(version + '.')
+    return False
+
+
 def check():
-    missing = [tool for tool in ('cmake', 'ninja', 'pkg-config', 'c++', 'git', 'python3') if not shutil.which(tool)]
+    missing = [tool for tool in ('cmake', 'ninja', 'pkg-config', 'c++', 'readelf', 'git', 'python3')
+               if not shutil.which(tool)]
+    packages = {PACKAGES[name] for name in missing}
     if 'pkg-config' not in missing:
-        missing += [module for module in ('lua5.4', 'glesv2', 'hyprland')
+        missing += [module for module in ('glesv2', 'hyprland')
                     if subprocess.run(['pkg-config', '--exists', module]).returncode]
+        packages |= {PACKAGES[name] for name in missing}
+        if 'readelf' not in missing and 'hyprland' not in missing:
+            lua = hyprland_lua()
+            if not has_lua(lua):
+                missing.append(f'Lua {lua}')
+                packages.add(LUA_PACKAGES.get(lua, 'lua'))
     if missing:
-        packages = sorted({PACKAGES[name] for name in missing})
-        raise Failed('Missing ' + ', '.join(missing), 'sudo pacman -S --needed ' + ' '.join(packages))
+        raise Failed('Missing ' + ', '.join(missing), 'sudo pacman -S --needed ' + ' '.join(sorted(packages)))
     if not shutil.which('hyprctl'):
         raise Failed('hyprctl is not available; run this inside a Hyprland session')
     code, output = run('hyprctl', 'version', '-j')
