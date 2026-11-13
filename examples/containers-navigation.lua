@@ -1,8 +1,18 @@
 -- Optional Omarchy-compatible movement bindings, loaded after existing binds
 -- and hyprflip-containers. A failed card move never falls back to moving one pane.
+
+-- The plugin when the focused window is itself in a multi-app card. With
+-- nearby_card on, in_container() also answers for the card beside a window in no
+-- card, so that the card keys reach it from there. These keys move the focused
+-- window, so a window beside a card moves on its own: card_box() answers only for
+-- a card's own windows. When that cannot be told, the card keeps the key.
 local function container()
     local plugin = hl.plugin.hyprflip
-    if plugin and plugin.in_container and plugin.in_container() then return plugin end
+    if not (plugin and plugin.in_container and plugin.in_container()) then return end
+    if not plugin.card_box then return plugin end -- a core from before nearby_card
+    local window = hl.get_active_window()
+    local ok, x = pcall(plugin.card_box, window and window.address)
+    if not ok or x then return plugin end
 end
 
 local function move_workspace(workspace, follow)

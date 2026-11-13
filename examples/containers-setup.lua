@@ -59,11 +59,19 @@ end
 if hl.plugin.hyprflip and hl.plugin.hyprflip.face_size then
     -- Omarchy's Super+J toggles the focused split, but on a native card the
     -- layout only sees the whole card's tile. On a face with several apps,
-    -- flip that face between beside and stacked instead.
+    -- flip that face between beside and stacked instead. With nearby_card on,
+    -- face_size() also answers for the card beside a window in no card; that
+    -- window keeps its own split. card_box() answers only for a card's windows.
+    local function in_card(plugin)
+        if not plugin.card_box then return true end -- a core from before nearby_card
+        local window = hl.get_active_window()
+        local ok, x = pcall(plugin.card_box, window and window.address)
+        return not ok or x ~= nil
+    end
     hl.unbind("SUPER + J")
     hl.bind("SUPER + J", function()
         local plugin = hl.plugin.hyprflip
-        if plugin and plugin.face_size and plugin.face_size() >= 2 then
+        if plugin and plugin.face_size and plugin.face_size() >= 2 and in_card(plugin) then
             plugin.layout("toggle")
         else
             hl.dispatch(hl.dsp.layout("togglesplit"))

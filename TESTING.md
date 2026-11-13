@@ -1,5 +1,40 @@
 # Validation
 
+## Move keys and Super+J beside a card (2026-11-14)
+
+Found on the pilot desktop: with `nearby_card` on, Super+Shift+<number> on a
+new app opened beside a card showed "Focus a multi-app card to move it as a
+unit." and moved nothing. It reproduces in fresh nested sessions (Hyprland
+0.56.2, Aquamarine 0.15.1 with the render-node patch, on the AMD GPU) with
+0.3.0-rc.22's plugin and key modules. `tests/workflows.py` stops at "ordinary
+window shortcuts still work", and the session records that warning; this file
+lists no run of that suite since 0.3.0-rc.18.
+
+`tests/nearby_card_workflows.py` gains four checks. Each runs the shipped
+modules' own bound function. From the window beside the card:
+- Super+Shift+arrow no longer asks the card to move;
+- Super+Shift+Alt+3 moves that window alone;
+- Super+J turns that window's split instead of being refused for the card's
+  two-app face.
+
+From inside the card, Super+J still turns the face. The session sets
+`dwindle:preserve_split` as Omarchy does; without it, dwindle redraws each
+split from the tile's shape and togglesplit shows nothing.
+
+With the fixed modules both suites pass, 10 checks each. Five planted faults
+were each caught by the check written for it:
+- the move keys asking `in_container()` alone, as rc.22 does;
+- only the number keys doing so;
+- Super+J asking `face_size()` alone, as rc.22 does;
+- Super+J never acting on a card;
+- the move keys never acting on a card, caught by `tests/workflows.py`.
+
+The plugin is unchanged; CTest passes its three checks.
+
+Hyprland swaps no window with a card's locked group. So from beside a card,
+Super+Shift+arrow toward it leaves both in place, as it did before
+0.3.0-rc.18.
+
 ## Updating a build directory in place; release checks for 0.3.0-rc.22 (2026-11-13)
 
 Found on the pilot desktop: OmaCards' panel installing 0.3.0-rc.21 over its

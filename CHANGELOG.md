@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased
+
+- The move keys and Super+J act on the focused window again when it is beside
+  a card. Since 0.3.0-rc.18, with `nearby_card` on, `in_container()` and
+  `face_size()` also answer for the one card beside a window in no card, so the
+  card keys reach that card. The shipped movement module took that answer to
+  mean the window was in the card. Super+Shift+<number>,
+  Super+Shift+Alt+<number> and Super+Shift+arrows on such a window, such as a
+  new app opened beside a card, asked the card to move. The card refused with
+  "Focus a multi-app card to move it as a unit." and nothing moved. Super+J
+  from the guided setup likewise asked the card's two-app face to turn and was
+  refused. Both now act on a card only when the focused window is in it
+  (`card_box()` answers only for a card's own windows). Otherwise they move or
+  split that window as Hyprland does. Flip, the face keys, peek, unfold and
+  card fullscreen still reach the card from beside it.
+  - Super+J arrives with the next guided-setup install, which rewrites
+    `hyprflip-setup.lua`.
+  - No installer writes `hyprflip-navigation.lua`. Copy
+    `examples/containers-navigation.lua` over it again, or make the same
+    change in a copy you have edited.
+
 ## 0.3.0-rc.22 — 2026-11-13
 
 - Updating in place builds again. 0.3.0-rc.21 reused the Lua 5.4 that an
