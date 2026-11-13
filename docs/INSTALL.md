@@ -423,6 +423,34 @@ and [validation limits](../TESTING.md).
 
 ## Remove or disable
 
+### Everything
+
+From the checkout you installed from, inside the Hyprland session:
+
+```sh
+python3 scripts/uninstall.py --dry-run   # what it would remove
+python3 scripts/uninstall.py             # asks first; --yes does not
+```
+
+It removes what `scripts/bootstrap.py`, `install.py` and `install-setup.py` put
+in place:
+- **hyprland.lua.** The installers' `require` lines and the comments they wrote
+  above them come out. So does the module search path block, unless another
+  module still needs it.
+- **The plugin.** Hyprland reloads without it, and open cards come apart into
+  ordinary windows with their apps still open. A card parked on a special
+  workspace stops it first: the program that parked it has to bring it back.
+- **Files.** `~/.local/lib/hyprflip` goes. The Lua modules and the installers'
+  backups move to `~/.local/state/hyprflip/uninstalled-<time>/`.
+
+If Hyprland reports a new configuration error, everything is put back as it
+was. Saved cards and preferences stay in `~/.local/state/hyprflip`; `--purge`
+removes that folder too. Lines you added yourself, such as a `require` of your
+own module, stay. For a hyprpm installation, use `hyprpm disable hyprflip`
+instead.
+
+The sections below remove one part by hand.
+
 ### Core
 
 Remove `require("hypr.hyprflip")` from the main configuration and reload. If the

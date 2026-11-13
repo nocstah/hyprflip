@@ -1,5 +1,30 @@
 # Validation
 
+## Uninstall (2026-11-13)
+
+`tests/uninstall_test.py` (13 tests, a stand-in Hyprland in a disposable home)
+covers:
+- every line, file and marker the installers wrote coming out;
+- a plugin a reload left loaded being unloaded;
+- a dry run;
+- a new configuration error putting everything back;
+- the search path staying for another module;
+- earlier errors not counting;
+- parked cards stopping it;
+- the user's own lines staying;
+- `--purge`;
+- running without Hyprland;
+- the question and its refusal without a terminal.
+
+`tests/uninstall_session.py` passed both of its checks in a fresh nested session
+(Hyprland 0.56.2, Aquamarine with the render-node patch), started with its own
+home, so that the session loads the plugin from the configuration the installers
+edit:
+- after `install.py`, `install-setup.py` and a card of two apps, the uninstall
+  unloads the plugin with the reload, leaves both apps as ungrouped windows and
+  restores hyprland.lua byte for byte;
+- a new install then loads again and uninstalls again.
+
 ## Change face with Tab; release checks for 0.3.0-rc.20 (2026-11-11)
 
 Both CTest checks and all 388 Python unit tests pass, one of them new: the

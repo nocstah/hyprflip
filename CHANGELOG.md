@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+- `scripts/uninstall.py` removes Hyprflip as its installers put it in place:
+  - their lines in hyprland.lua;
+  - the plugin, unloaded with a reload, with open cards coming apart into
+    ordinary windows;
+  - the helper;
+  - the Lua modules and the installers' backups, which move to
+    `~/.local/state/hyprflip/uninstalled-<time>/`.
+
+  Saved cards and preferences stay unless `--purge`. A new configuration error
+  puts everything back, and a parked card stops it before it changes anything.
+  The Inapse Spaces installer runs it to reverse its own Hyprflip install.
+
 ## 0.3.0-rc.20 — 2026-11-11
 
 - Changing face moved from Super+Ctrl+Alt+F to **Super+Ctrl+Alt+Tab**, and the
