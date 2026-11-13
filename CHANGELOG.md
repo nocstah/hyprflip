@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.0-rc.21 — 2026-11-13
 
 - `scripts/uninstall.py` removes Hyprflip as its installers put it in place:
   - their lines in hyprland.lua;

@@ -1,5 +1,24 @@
 # Validation
 
+## Lua from Hyprland; release checks for 0.3.0-rc.21 (2026-11-13)
+
+All three CTest checks and all 403 Python unit tests pass. The new CTest
+`lua_library` requires the plugin to link the Lua library Hyprland links and no
+other. On this Arch system (hyprland 0.56.2-4, which links `liblua.so.5.5`) the
+build now finds Lua 5.5.1 (`lua5.5`) and the plugin links `liblua.so.5.5`; built
+with `-DHYPRFLIP_LUA=5.4`, as before, it links `liblua5.4.so.5.4`, and the
+check fails on it. Two new bootstrap tests check the package the installer
+names: `lua54` for a Hyprland that links Lua 5.4, `lua` for 5.5, and a refusal
+when Hyprland's Lua cannot be read.
+
+In fresh nested sessions (Hyprland 0.56.2, Aquamarine 0.15.1 with the
+render-node patch) against this core and helper:
+- `tests/dwindle_workflows.py` (7 checks) passed; it calls the plugin's Lua API;
+- `tests/uninstall_session.py` (2 checks) passed;
+- OmaCards' `tests/run-native.py` (9 checks) passed twice.
+
+No other nested suite was rerun for this release.
+
 ## Uninstall (2026-11-13)
 
 `tests/uninstall_test.py` (13 tests, a stand-in Hyprland in a disposable home)
