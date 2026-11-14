@@ -21,12 +21,29 @@
   window move when the nearest tile in that direction is a card. Every other
   neighbour is swapped as before, since Hyprland's window move would also
   cross to the next monitor at a screen edge.
-- On an existing install:
-  - Super+J arrives with the next guided-setup install, which rewrites
-    `hyprflip-setup.lua`.
-  - No installer writes `hyprflip-navigation.lua`. Copy
-    `examples/containers-navigation.lua` over it again, or make the same
-    changes in a copy you have edited.
+- The number keys of the movement module follow Omarchy's per-monitor
+  workspaces where Omarchy has them. Omarchy 4.5 gives each monitor its own
+  1…10, so on a second monitor Super+Shift+3 means that monitor's third
+  workspace, as Omarchy's own key does; the module took a card or window to
+  workspace 3 instead. A window in no card now moves with Omarchy's own key.
+  A configuration can define `hyprflip_workspace_id(number)` for a numbering
+  of its own, which the module asks when a number key is pressed
+  (docs/INSTALL.md).
+- `scripts/install-setup.py --navigation` installs the movement module as
+  `hyprflip-navigation.lua` and loads it, and later runs keep it current.
+  Without `--navigation` it is updated only while it is as an install or a
+  release left it: a copy with changes of its own stays as it is, and
+  `--navigation` replaces it, keeping that copy with the backup. Before, the
+  module was copied by hand and no installer updated it.
+- `tests/key_suites.py` runs every compositor suite that loads the shipped key
+  modules, each in its own nested session; CONTRIBUTING.md now has a release
+  checklist that runs it. `tests/workflows.py` already caught the bug above,
+  but it had not been run since 0.3.0-rc.18.
+- On an existing install, the next guided-setup install brings all of this:
+  it rewrites `hyprflip-setup.lua`, and it updates `hyprflip-navigation.lua`
+  when that is the unchanged copy from docs/INSTALL.md. A copy you have
+  edited stays as it is; move your changes into your own configuration (a
+  numbering into `hyprflip_workspace_id`) and run it with `--navigation`.
 
 ## 0.3.0-rc.22 — 2026-11-13
 

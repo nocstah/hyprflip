@@ -1,5 +1,7 @@
 -- Optional Omarchy-compatible movement bindings, loaded after existing binds
 -- and hyprflip-containers. A failed card move never falls back to moving one pane.
+-- scripts/install-setup.py --navigation installs this file, and updates replace it
+-- while it is unchanged: keep settings of your own in your own config.
 
 -- The plugin when the focused window is itself in a multi-app card. With
 -- nearby_card on, in_container() also answers for the card beside a window in no
@@ -50,26 +52,66 @@ local function card_ahead(window, direction)
     return card == true
 end
 
-local function move_workspace(workspace, follow)
+-- Omarchy's per-monitor workspaces (Omarchy 4.5: each monitor its own block of ten), when it has them.
+local function omarchy_workspaces()
+    local omarchy = rawget(_G, "o")
+    local workspaces = type(omarchy) == "table" and omarchy.workspaces
+    if type(workspaces) == "table" and type(workspaces.workspace_id) == "function" then return workspaces end
+end
+
+local function whole(id)
+    id = tonumber(id)
+    if id and id >= 1 and id % 1 == 0 then return id end
+end
+
+-- The workspace a number key means, asked when the key is pressed. A config of your
+-- own can define a global function hyprflip_workspace_id(number) that returns it, for
+-- a monitor layout of your own; this file can then be replaced on updates. Without
+-- one, Omarchy's numbering applies where Omarchy has it, else the number itself. The
+-- second value says whether your function answered.
+local function workspace_id(number)
+    local custom = rawget(_G, "hyprflip_workspace_id")
+    if type(custom) == "function" then
+        local ok, id = pcall(custom, number)
+        if ok and whole(id) then return whole(id), true end
+    end
+    local workspaces = omarchy_workspaces()
+    local monitor = workspaces and hl.get_active_monitor()
+    if monitor then
+        local ok, id = pcall(workspaces.workspace_id, monitor, number)
+        if ok and whole(id) then return whole(id), false end
+    end
+    return number, false
+end
+
+local function move_workspace(number, follow)
+    -- A window in no card moves with Omarchy's own key where Omarchy has one, so its
+    -- workspace bookkeeping runs as well.
+    local workspaces = omarchy_workspaces()
+    local omarchy_move = workspaces and type(workspaces.move_window) == "function"
+        and workspaces.move_window(number, follow)
     return function()
+        local workspace, custom = workspace_id(number)
         local plugin = container()
         if plugin then
             plugin.workspace(workspace, follow)
+        elseif type(omarchy_move) == "function" and not custom then
+            omarchy_move()
         else
             hl.dispatch(hl.dsp.window.move({ workspace = tostring(workspace), follow = follow }))
         end
     end
 end
 
-for workspace = 1, 10 do
+for number = 1, 10 do
     -- Physical number-row keys, matching Omarchy's default bindings.
-    local key = "code:" .. tostring(workspace + 9)
+    local key = "code:" .. tostring(number + 9)
     hl.unbind("SUPER + SHIFT + " .. key)
-    hl.bind("SUPER + SHIFT + " .. key, move_workspace(workspace, true),
-        { description = "Move card or window to workspace " .. workspace })
+    hl.bind("SUPER + SHIFT + " .. key, move_workspace(number, true),
+        { description = "Move card or window to workspace " .. number })
     hl.unbind("SUPER + SHIFT + ALT + " .. key)
-    hl.bind("SUPER + SHIFT + ALT + " .. key, move_workspace(workspace, false),
-        { description = "Move card or window silently to workspace " .. workspace })
+    hl.bind("SUPER + SHIFT + ALT + " .. key, move_workspace(number, false),
+        { description = "Move card or window silently to workspace " .. number })
 end
 
 for key, direction in pairs({ LEFT = "l", RIGHT = "r", UP = "u", DOWN = "d" }) do

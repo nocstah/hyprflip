@@ -1,5 +1,41 @@
 # Validation
 
+## Movement module installed; Omarchy's workspace numbers (2026-11-14)
+
+`scripts/install-setup.py --navigation` installs `hyprflip-navigation.lua`,
+and later runs update it while it is unchanged. Seven new unit tests run the
+installer against a stand-in Hyprland in a disposable home:
+- the module comes only with `--navigation`, once, loaded last in
+  `hyprland.lua`;
+- an unchanged copy of the one module every release before had is updated
+  without asking, and it stays loaded the user's way (this test needs the
+  `v0.3.0-rc.22` tag and skips without it);
+- a copy an earlier install recorded is updated;
+- a copy with changes of its own is kept until `--navigation` replaces it, and
+  the backup holds that copy;
+- movement shortcuts that do not register each exactly once put every file
+  back;
+- a dry run writes nothing, and `--backend-only` refuses `--navigation`.
+
+A new uninstall test removes the module, its lines and the installer's record.
+
+`tests/nearby_card_workflows.py` gains two checks, 13 in all. A
+`hyprflip_workspace_id` of the user's own decides where Super+Shift+Alt+3 takes
+a window or a whole card. Without one, a stand-in for Omarchy 4.5's per-monitor
+workspaces applies: a window moves with Omarchy's own key and a card goes to
+Omarchy's number for that key. The stand-in's key and number differ on purpose,
+so each check shows which one was used. The user's own function wins over
+Omarchy's.
+
+Ten planted faults were each caught: four in the module by the nested suite
+(the user's function never asked; Omarchy's key never used; a card ignoring
+Omarchy's number; Omarchy's key winning over the user's function) and six in
+the installers by the unit tests (an edited copy replaced anyway; no require
+line; the shortcuts unchecked after the reload; the released copy unknown;
+nothing recorded; uninstall leaving the record). All 410 Python unit tests pass.
+The setup, edit and pane suites, which load the setup module, pass 7, 14 and
+12 checks with this branch.
+
 ## Move keys and Super+J beside a card (2026-11-14)
 
 Found on the pilot desktop: with `nearby_card` on, Super+Shift+<number> on a

@@ -275,25 +275,39 @@ for the panel's requirements, controls and removal instructions.
 ### Move cards with normal shortcuts
 
 The optional navigation module replaces the corresponding Omarchy movement
-bindings so an entire card moves together:
+bindings so an entire card moves together. The guided setup installs it:
 
 ```sh
-install -m644 examples/containers-navigation.lua \
-  "${XDG_CONFIG_HOME:-$HOME/.config}/hypr/hyprflip-navigation.lua"
+python3 scripts/install-setup.py --navigation
 ```
 
-Load it after your normal keybindings and Hyprflip modules:
+This puts `examples/containers-navigation.lua` in place as
+`~/.config/hypr/hyprflip-navigation.lua` and loads it at the end of
+`hyprland.lua`, after your normal keybindings and Hyprflip modules. Later runs
+of `install-setup.py`, which updates run too, keep the file current while it is
+as an install left it. A copy with changes of your own stays as it is until you
+run `--navigation` again, which replaces it and keeps your copy with the backup.
+A copy made by hand from an earlier release, unchanged, is updated as well.
+
+Super+Shift+1…0 moves and follows the card; Super+Shift+Alt+1…0 moves
+silently; Super+Shift+arrows reorders the card. Destinations must be numbered
+normal workspaces; the card moves as one group. From a window in no card these
+keys move that window, as Omarchy's do; Super+Shift+arrow toward a card takes
+the window past it. This module does not add drag bindings or special-workspace
+movement. Floating cards already move and resize as a unit using the desktop's
+ordinary mouse bindings.
+
+The number keys follow Omarchy's per-monitor workspaces where Omarchy has them
+(Omarchy 4.5 gives each monitor its own 1…10). For a numbering of your own,
+define this function anywhere in your configuration; the module asks it each
+time a number key is pressed, so its own file can still be replaced on updates:
 
 ```lua
-require("hypr.hyprflip-navigation")
+-- an example: 9 and 10 on a second monitor's workspaces, 19 and 20
+function hyprflip_workspace_id(number)
+    return number > 8 and number + 10 or number
+end
 ```
-
-Reload once. Super+Shift+1…0 moves and follows the card;
-Super+Shift+Alt+1…0 moves silently; Super+Shift+arrows reorders the card.
-Destinations must be numbered normal workspaces; the card moves as one group.
-Ordinary windows retain ordinary workspace movement. This module does not
-add drag bindings or special-workspace movement. Floating cards already move
-and resize as a unit using the desktop's ordinary mouse bindings.
 
 ## hyprpm
 

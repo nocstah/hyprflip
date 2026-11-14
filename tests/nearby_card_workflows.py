@@ -3,7 +3,9 @@
 fullscreen act on the one card shown on the focused window's workspace, and the focus stays where it is. Off, or
 with two cards there, they act on nothing. The move keys of examples/containers-navigation.lua and Super+J of
 examples/containers-setup.lua stay the focused window's own there, as Hyprland's keys, and act on a card only from
-inside it. Only the Hyprflip core is loaded. Start the session with --notify-recorder."""
+inside it. The number keys take a window or a card to the workspace a hyprflip_workspace_id of the user's own names,
+else to Omarchy's per-monitor number (a stand-in here). Only the Hyprflip core is loaded. Start the session with
+--notify-recorder."""
 import argparse
 import json
 from pathlib import Path
@@ -115,6 +117,7 @@ try:
                      'package.preload["hypr.hyprflip-preferences"] = function() return true end')
     spy = ('local hl = setmetatable({bind = function(key, fn) _G.nearby_keys[key] = fn end,'
            ' unbind = function() end}, {__index=hl})\n')
+    navigation = (project / 'examples/containers-navigation.lua').read_text()
     for module in ('containers-navigation.lua', 'containers-setup.lua'):
         ipc.call('repl', spy + (project / 'examples' / module).read_text())
     # As Omarchy sets it: without it dwindle redraws each split from the tile's shape, and togglesplit shows nothing.
@@ -152,6 +155,53 @@ try:
     ipc.call('dispatch', f'hl.dsp.window.move({{window="address:{herdr}",workspace="{PLACE}",follow=false}})')
     wait(lambda: on(int(PLACE), herdr)); settle()
     passed('Super+Shift+Alt+3 from beside the card moves that window alone, and the card stays')
+
+    def window_back():
+        ipc.call('dispatch', f'hl.dsp.window.move({{window="address:{herdr}",workspace="{PLACE}",follow=false}})')
+        wait(lambda: on(int(PLACE), herdr)); settle()
+
+    def card_back():
+        assert act(f'card {one} workspace {PLACE} silent').startswith('ok')
+        wait(lambda: on(int(PLACE), front, back)); settle()
+
+    # A numbering of the user's own, asked when the key is pressed: a window and a whole card go there.
+    ipc.call('repl', '_G.hyprflip_workspace_id = function(n) return tostring(n + 40) end')
+    focus(herdr); key('SUPER + SHIFT + ALT + code:12')
+    wait(lambda: on(43, herdr))
+    assert on(int(PLACE), front, back)
+    window_back()
+    focus(front); key('SUPER + SHIFT + ALT + code:12')
+    wait(lambda: on(43, front, back)); settle()
+    assert on(int(PLACE), herdr) and card(one)['faces'] == faces
+    card_back()
+    passed('Super+Shift+Alt+3 takes a window, or a whole card, to the workspace hyprflip_workspace_id names')
+
+    # Omarchy's per-monitor workspaces, as a stand-in whose own key goes elsewhere than its number for the slot, so
+    # that each shows which one was used: a window moves with Omarchy's key, a card to Omarchy's number.
+    ipc.call('repl', '_G.hyprflip_workspace_id = nil\n'
+                     '_G.o = {workspaces = {workspace_id = function(monitor, slot) return monitor and 50 + slot end,\n'
+                     '  move_window = function(slot, follow) return function()\n'
+                     '    local window = hl.get_active_window()\n'
+                     '    hl.dispatch(hl.dsp.window.move({workspace = tostring(60 + slot), follow = follow ~= false,\n'
+                     '                                    window = "address:" .. window.address}))\n'
+                     '  end end}}')
+    ipc.call('repl', spy + navigation)
+    focus(herdr); key('SUPER + SHIFT + ALT + code:12')
+    wait(lambda: on(63, herdr))
+    window_back()
+    focus(front); key('SUPER + SHIFT + ALT + code:12')
+    wait(lambda: on(53, front, back)); settle()
+    assert card(one)['faces'] == faces
+    card_back()
+    # the user's own numbering comes first
+    ipc.call('repl', '_G.hyprflip_workspace_id = function(n) return n + 40 end')
+    focus(herdr); key('SUPER + SHIFT + ALT + code:12')
+    wait(lambda: on(43, herdr))
+    window_back()
+    ipc.call('repl', '_G.hyprflip_workspace_id = nil\n_G.o = nil')
+    ipc.call('repl', spy + navigation)
+    focus(herdr)
+    passed("without it, Omarchy's numbering: a window moves with Omarchy's own key, a card to its number for the key")
 
     companion = spawn('companion', '777700')
     focus(companion); ipc.action('mark'); focus(front); ipc.action('attach horizontal'); settle()

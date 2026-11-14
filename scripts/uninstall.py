@@ -31,7 +31,8 @@ state = Path(os.environ.get('XDG_STATE_HOME', home / '.local/state')) / 'hyprfli
 # The lines install.py and install-setup.py add, and docs/INSTALL.md's optional ones.
 REQUIRES = {f'require("hypr.{name}")' for name in ('hyprflip', 'hyprflip-setup', 'hyprflip-preferences', 'hyprflip-mouse',
                                                    'hyprflip-navigation', 'hyprflip-containers')}
-COMMENTS = {'-- Two-sided application windows.', '-- Hyprflip helpers and saved motion preferences.'}
+COMMENTS = {'-- Two-sided application windows.', '-- Hyprflip helpers and saved motion preferences.',
+            '-- Move whole Hyprflip cards with the normal movement shortcuts.'}
 MODULES = ('hyprflip.lua', 'hyprflip-setup.lua', 'hyprflip-preferences.lua', 'hyprflip-shortcuts.lua',
            'hyprflip-mouse.lua', 'hyprflip-navigation.lua', 'hyprflip-containers.lua')
 # install.py's backups of hyprland.lua and of the modules, and the retired provider's
@@ -118,7 +119,8 @@ def main():
         candidates = list(dict.fromkeys(text for text in (without_path(kept, block), kept) if text != original))
     files = [config / name for name in MODULES if (config / name).is_file() or (config / name).is_symlink()]
     files += sorted(path for path in config.glob('*.bak-*') if BACKUPS.fullmatch(path.name) and not path.is_dir())
-    markers = [path for path in (state / 'installed-release', state / 'installed-commit') if path.exists()]
+    markers = [path for path in (state / 'installed-release', state / 'installed-commit', state / 'navigation.sha256')
+               if path.exists()]
     session = hyprland()
     try:
         plugin = session and loaded()
