@@ -150,6 +150,20 @@ class BootstrapTest(unittest.TestCase):
                          "Loaded; kept 3 open card(s); could not check or return the tile of 2; "
                          "the keyboard or what a monitor shows is not as it was")
 
+    def test_navigation_goes_on_to_the_setup_installer(self):
+        spec = importlib.util.spec_from_file_location("hyprflip_bootstrap", PROJECT / "scripts/bootstrap.py")
+        bootstrap = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(bootstrap)
+        calls = []
+        def run(command, **kwargs):
+            calls.append(command)
+            return subprocess.CompletedProcess(command, 0, "Guided setup installed", "")
+        with patch("subprocess.run", side_effect=run):
+            bootstrap.install_helper()
+            bootstrap.install_helper(True)
+        self.assertEqual([list(command[1:]) for command in calls],
+                         [["scripts/install-setup.py"], ["scripts/install-setup.py", "--navigation"]])
+
 
 if __name__ == "__main__":
     unittest.main()

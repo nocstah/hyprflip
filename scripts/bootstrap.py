@@ -181,8 +181,8 @@ def install_core():
             ('; the keyboard or what a monitor shows is not as it was' if 'is not as it was before the update' in output else ''))
 
 
-def install_helper():
-    code, output = run(sys.executable, 'scripts/install-setup.py', timeout=300)
+def install_helper(navigation=False):
+    code, output = run(sys.executable, 'scripts/install-setup.py', *(['--navigation'] if navigation else []), timeout=300)
     if code:
         raise Failed(last_lines(output))
     return 'Card menus, shortcuts and the OmaCards helper are installed'
@@ -221,7 +221,11 @@ def main():
     parser.add_argument('--json', action='store_true', help='report each step as one JSON object per line')
     parser.add_argument('--check', action='store_true', help='only check prerequisites')
     parser.add_argument('--core-only', action='store_true', help='skip the guided-setup helper')
+    parser.add_argument('--navigation', action='store_true',
+                        help='also install the movement shortcuts that move a whole card (install-setup.py --navigation)')
     args = parser.parse_args()
+    if args.navigation and args.core_only:
+        parser.error('--navigation comes with the guided-setup helper, which --core-only skips')
     report = Reporter(args.json)
     try:
         report.step('check', 'Check prerequisites', check)
@@ -229,7 +233,7 @@ def main():
             report.step('build', 'Build Hyprflip', build)
             report.step('core', 'Install the plugin', install_core)
             if not args.core_only:
-                report.step('helper', 'Install card menus and the OmaCards helper', install_helper)
+                report.step('helper', 'Install card menus and the OmaCards helper', lambda: install_helper(args.navigation))
     except Failed:
         report.emit(event='done', ok=False, checked_only=args.check)
         return 1

@@ -361,7 +361,8 @@ python3 scripts/bootstrap.py
 `bootstrap.py` checks the prerequisites (naming the packages to install if any
 are missing), builds and self-tests, then runs `scripts/install.py` and
 `scripts/install-setup.py`. `--check` only checks; `--json` reports each step as
-one JSON line for panels such as OmaCards. The installers can also be run by
+one JSON line for panels such as OmaCards; `--navigation` also installs the
+[movement shortcuts](#move-cards-with-normal-shortcuts) that move a whole card. The installers can also be run by
 hand as before.
 
 Open dwindle and floating cards, native pairs and customized core settings are
