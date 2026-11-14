@@ -1,5 +1,30 @@
 # Validation
 
+## card_of; the key-module suites in one run (2026-11-14)
+
+`hl.plugin.hyprflip.card_of(address)` is new in the core. `tests/nearby_card_workflows.py`
+gains two checks, 15 in all:
+- `card_of()` names the card a window is in, by address or for the focused
+  window, with the apps on its shown face (1, then 2 once a companion is
+  attached); it gives nothing for the window beside the card, nor for an unknown
+  address;
+- on a core without `card_of`, simulated by hiding it from the modules, Super+Shift+Alt+3 and
+  Super+J still act on the window beside the card, and on the card from inside
+  it.
+
+Five planted faults were each caught. One is in the core: `card_of` also
+answering for the card beside a window, built and run like the fix. Four are in
+the modules: the move keys or Super+J taking any answer from `card_of` for a
+card, and on an older core the move keys asking `in_container()` alone or
+Super+J asking `face_size()` alone.
+
+`python tests/key_suites.py --hyprglass … --aquamarine …` then ran the five
+suites that load the key modules, each in a fresh session: `workflows.py` 10,
+`nearby_card_workflows.py` 15, `setup_workflows.py` 7, `edit_workflows.py` 14
+and `pane_workflows.py` 12, all passing. A runner stopped mid-suite closed its
+session and left no session directory. CTest passes its three checks, and the
+410 Python unit tests pass.
+
 ## Movement module installed; Omarchy's workspace numbers (2026-11-14)
 
 `scripts/install-setup.py --navigation` installs `hyprflip-navigation.lua`,

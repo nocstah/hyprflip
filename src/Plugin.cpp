@@ -72,6 +72,16 @@ int cardBox(lua_State *L) {
         lua_pushnumber(L, value);
     return 4;
 }
+int cardOf(lua_State *L) {
+    const auto card = controller->cardOf(luaL_optstring(L, 1, ""));
+    if (!card) {
+        lua_pushnil(L);
+        return 1;
+    }
+    lua_pushinteger(L, static_cast<lua_Integer>(card->first));
+    lua_pushinteger(L, static_cast<lua_Integer>(card->second));
+    return 2;
+}
 int cardPlace(lua_State *L) {
     const CBox box{luaL_checknumber(L, 2), luaL_checknumber(L, 3), luaL_checknumber(L, 4), luaL_checknumber(L, 5)};
     lua_pushboolean(L, controller->placeCard(luaL_checkstring(L, 1), box));
@@ -176,6 +186,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE h) {
                                    {"face_size", faceSize},
                                    {"protects_workspace", protectsWorkspace},
                                    {"card_box", cardBox},
+                                   {"card_of", cardOf},
                                    {"chill_blocked", chillBlocked},
                                    {"card_place", cardPlace},
                                    {"adopt", adopt},

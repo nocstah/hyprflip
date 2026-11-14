@@ -42,6 +42,10 @@ class Controller {
     // The whole card's rectangle for any of its apps, so tools that treat a
     // group as one window (Chill) can measure the card instead of one pane.
     std::optional<CBox> cardBox(const std::string &window) const;
+    // The multi-app card a window is in (the focused window for an empty
+    // address): its id and the apps on its shown face. Only a card's own
+    // windows count; nearby_card never applies here.
+    std::optional<std::pair<uint64_t, size_t>> cardOf(const std::string &window);
     bool placeCard(const std::string &window, CBox box);
     void notify(const Result &result);
 

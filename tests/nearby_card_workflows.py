@@ -3,9 +3,9 @@
 fullscreen act on the one card shown on the focused window's workspace, and the focus stays where it is. Off, or
 with two cards there, they act on nothing. The move keys of examples/containers-navigation.lua and Super+J of
 examples/containers-setup.lua stay the focused window's own there, as Hyprland's keys, and act on a card only from
-inside it. The number keys take a window or a card to the workspace a hyprflip_workspace_id of the user's own names,
-else to Omarchy's per-monitor number (a stand-in here). Only the Hyprflip core is loaded. Start the session with
---notify-recorder."""
+inside it, through card_of(), or on a core without it through in_container(), face_size() and card_box(). The number
+keys take a window or a card to the workspace a hyprflip_workspace_id of the user's own names, else to Omarchy's
+per-monitor number (a stand-in here). Only the Hyprflip core is loaded. Start the session with --notify-recorder."""
 import argparse
 import json
 from pathlib import Path
@@ -110,6 +110,18 @@ try:
     assert card(one)['unfolded'] is False
     passed('unfold from beside the card unfolds and folds it')
 
+    def card_of(address=None):
+        call = 'hl.plugin.hyprflip.card_of(' + (json.dumps(address) if address else '') + ')'
+        return ipc.call('repl', f'local id, apps = {call} return tostring(id) .. " " .. tostring(apps)')
+    focus(herdr)
+    assert card_of() == 'nil nil' and card_of(herdr) == 'nil nil', (card_of(), card_of(herdr))
+    assert card_of(front) == card_of(back) == f'{one} 1', (card_of(front), card_of(back))
+    assert card_of('0x1') == 'nil nil'
+    focus(back)
+    assert card_of() == f'{one} 1'
+    focus(herdr)
+    passed('card_of() names the card a window is in and its shown face\'s apps, and nothing for the window beside it')
+
     # The shipped move keys and Super+J, each run as its bound function. They are the
     # focused window's own: beside the card they do for that window what Hyprland does,
     # and only from inside the card do they act on the card.
@@ -207,6 +219,7 @@ try:
     focus(companion); ipc.action('mark'); focus(front); ipc.action('attach horizontal'); settle()
     faces = card(one)['faces']
     assert len(faces[card(one)['active']]) == 2, faces
+    assert card_of(front) == f'{one} 2' and card_of(herdr) == 'nil nil'
     focus(herdr)
     size = client(herdr)['size']
     key('SUPER + J')
@@ -221,6 +234,35 @@ try:
     wait(lambda: stacked() != was); settle()
     assert card(one)['faces'] == faces
     passed('Super+J inside the card still turns its face between beside and stacked')
+
+    # A core from before card_of: the same keys tell a window beside the card from one in it through in_container(),
+    # face_size() and card_box().
+    older = ('local hl = setmetatable({bind = function(key, fn) _G.nearby_keys[key] = fn end, unbind = function() end,\n'
+             '  plugin = setmetatable({hyprflip = setmetatable({card_of = false}, {__index = hl.plugin.hyprflip})},\n'
+             '                        {__index = hl.plugin})}, {__index = hl})\n')
+    for module in ('containers-navigation.lua', 'containers-setup.lua'):
+        ipc.call('repl', older + (project / 'examples' / module).read_text())
+    focus(herdr); key('SUPER + SHIFT + ALT + code:12')
+    wait(lambda: on(3, herdr))
+    assert on(int(PLACE), front, back, companion) and not refusals(), refusals()
+    window_back()
+    focus(front); key('SUPER + SHIFT + ALT + code:12')
+    wait(lambda: on(3, front, back, companion)); settle()
+    assert on(int(PLACE), herdr) and card(one)['faces'] == faces
+    card_back()
+    focus(herdr)
+    size = client(herdr)['size']
+    key('SUPER + J')
+    wait(lambda: client(herdr)['size'] != size); settle()
+    assert card(one)['faces'] == faces and not refusals(), refusals()
+    focus(front)
+    was = stacked()
+    key('SUPER + J')
+    wait(lambda: stacked() != was); settle()
+    for module in ('containers-navigation.lua', 'containers-setup.lua'):
+        ipc.call('repl', spy + (project / 'examples' / module).read_text())
+    passed('on a core without card_of, Super+Shift+Alt+3 and Super+J still act on the window beside the card, '
+           'and on the card from inside it')
 
     # Beside ordinary windows the key still swaps, as Hyprland's own binding does: the
     # neighbour takes the window's tile exactly. A move would split a tile instead.

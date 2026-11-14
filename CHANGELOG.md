@@ -35,6 +35,12 @@
   release left it: a copy with changes of its own stays as it is, and
   `--navigation` replaces it, keeping that copy with the backup. Before, the
   module was copied by hand and no installer updated it.
+- `hl.plugin.hyprflip.card_of(address)` returns the id of the multi-app card
+  a window is in (the focused window without an address) and the number of
+  apps on its shown face, or nil. Unlike `in_container()` and `face_size()`,
+  it never answers for the card beside a window. The shipped key modules use
+  it, and fall back to `in_container()`, `face_size()` and `card_box()` on an
+  older core.
 - `tests/key_suites.py` runs every compositor suite that loads the shipped key
   modules, each in its own nested session; CONTRIBUTING.md now has a release
   checklist that runs it. `tests/workflows.py` already caught the bug above,

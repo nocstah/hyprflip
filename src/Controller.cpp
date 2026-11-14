@@ -1754,6 +1754,25 @@ std::optional<CBox> Controller::cardBox(const std::string &window) const {
     }
     return std::nullopt;
 }
+std::optional<std::pair<uint64_t, size_t>> Controller::cardOf(const std::string &window) {
+    if (m_stopping)
+        return std::nullopt;
+    reconcile();
+    PHLWINDOW w;
+    if (window.empty())
+        w = Desktop::focusState()->window();
+    else
+        for (const auto &candidate : Desktop::windowState()->windows())
+            if (address(candidate) == quote(window)) {
+                w = candidate;
+                break;
+            }
+    const auto p = find(w);
+    const auto s = p && p->containerID ? state(*p) : std::nullopt;
+    if (!s)
+        return std::nullopt;
+    return std::pair{p->id, s->faces[s->active].size()};
+}
 bool Controller::placeCard(const std::string &window, CBox box) {
     if (m_stopping || m_mutating || inputBusy()) return false;
     for (auto& pair : m_pairs) {

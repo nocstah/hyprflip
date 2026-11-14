@@ -3,14 +3,20 @@
 -- scripts/install-setup.py --navigation installs this file, and updates replace it
 -- while it is unchanged: keep settings of your own in your own config.
 
--- The plugin when the focused window is itself in a multi-app card. With
--- nearby_card on, in_container() also answers for the card beside a window in no
--- card, so that the card keys reach it from there. These keys move the focused
--- window, so a window beside a card moves on its own: card_box() answers only for
--- a card's own windows. When that cannot be told, the card keeps the key.
+-- The plugin when the focused window is itself in a multi-app card. These keys
+-- move the focused window, so a window beside a card moves on its own: card_of()
+-- answers for a card's own windows alone. On older cores, with nearby_card on,
+-- in_container() also answers for the card beside a window in no card, and
+-- card_box() only for a card's own windows. When that cannot be told, the card
+-- keeps the key.
 local function container()
     local plugin = hl.plugin.hyprflip
-    if not (plugin and plugin.in_container and plugin.in_container()) then return end
+    if not plugin then return end
+    if plugin.card_of then
+        local ok, id = pcall(plugin.card_of)
+        if ok then return id and plugin or nil end
+    end
+    if not (plugin.in_container and plugin.in_container()) then return end
     if not plugin.card_box then return plugin end -- a core from before nearby_card
     local window = hl.get_active_window()
     local ok, x = pcall(plugin.card_box, window and window.address)

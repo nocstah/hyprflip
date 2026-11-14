@@ -370,7 +370,11 @@ session from the parent desktop.
 Lua exposes `hl.plugin.hyprflip.attach("horizontal")`, `release()`,
 `workspace(2, follow)`, `move("left")`, `unfold()`, `floating()`,
 `fullscreen()` and `in_container()` alongside the existing direct action
-functions. `follow` defaults to true. The supplied modules bind M/P/F/U/Escape;
+functions. `follow` defaults to true. `card_of(address)` returns the id of the
+multi-app card a window is in (the focused window without an address) and the
+number of apps on its shown face, or nil for a window in none, even one beside a
+card: `in_container()` and `face_size()` also answer for that card while
+`plugin:hyprflip:nearby_card` is on. The supplied modules bind M/P/F/U/Escape;
 the guided setup module adds its keys plus H and V (`attach` beside or below)
 and E (`release`). Without guided setup, `examples/pane-keys.lua` binds H, V,
 E and a plain O unfold. Change any of them in OmaCards.
