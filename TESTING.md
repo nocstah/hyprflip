@@ -1521,6 +1521,12 @@ python tests/motion.py /tmp/hf-test/session.json --baseline /path/to/old/hyprfli
 python tests/config_upgrade.py /tmp/hf-test/session.json --baseline /path/to/0.1.0/hyprflip.so
 ```
 
+Before a release, `tests/key_suites.py` starts its own sessions and runs every suite that loads the shipped key modules, each in a fresh one (CONTRIBUTING.md, Releases):
+
+```sh
+python tests/key_suites.py --hyprglass /path/to/hyprglass.so
+```
+
 ## Motion measurements
 
 An initial comparison used identical 600 ms durations and 12 turns per version on the same nested output. Mean mismatch between pose advancement and render timestamps fell from 0.90 ms to 0.06 ms after moving from an 8 ms timer to render-cycle sampling. The 95th percentile fell from 2.18 ms to 0.37 ms. Median render intervals remained about 33.4 ms in both versions; 95th percentile CPU render duration changed from 3.86 ms to 4.28 ms.

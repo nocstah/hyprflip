@@ -17,6 +17,18 @@ Use the disposable nested session described in [TESTING.md](TESTING.md) for rend
 
 Changes targeting a new Hyprland version should include the matching version check, integration results and a `hyprpm.toml` commit pin. A pin maps a Hyprland commit to an existing plugin commit, so it is added after that implementation commit exists.
 
+## Releases
+
+Before tagging a release, run these on a desktop with the matching Hyprland, and record the results in [TESTING.md](TESTING.md) with the release's other checks:
+
+```sh
+make test
+python -m unittest discover -s tests -p '*_test.py'
+python tests/key_suites.py --hyprglass /path/to/hyprglass.so
+```
+
+`tests/key_suites.py` runs every compositor suite that loads the shipped key modules (`examples/containers-navigation.lua` and `examples/containers-setup.lua`), each in its own disposable nested session. Run it for every release, including those that change only the core: a core change can alter what those modules see. Add `--aquamarine` on NVIDIA, as TESTING.md describes. A release that changes a module also needs the nested suites for that change.
+
 ## Bug reports
 
 Include reproduction steps, Hyprland and plugin versions, compiler version, layout, monitor scale/rotation and other loaded plugins. For rendering issues, indicate whether the problem happens with an opaque terminal pair and whether it occurs in a nested session.
