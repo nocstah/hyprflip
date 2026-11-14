@@ -10,30 +10,38 @@ unit." and moved nothing. It reproduces in fresh nested sessions (Hyprland
 window shortcuts still work", and the session records that warning; this file
 lists no run of that suite since 0.3.0-rc.18.
 
-`tests/nearby_card_workflows.py` gains four checks. Each runs the shipped
+`tests/nearby_card_workflows.py` gains five checks. Each runs the shipped
 modules' own bound function. From the window beside the card:
-- Super+Shift+arrow no longer asks the card to move;
+- Super+Shift+arrow toward the card takes the window past it and back, and
+  the card stays whole;
 - Super+Shift+Alt+3 moves that window alone;
 - Super+J turns that window's split instead of being refused for the card's
   two-app face.
 
-From inside the card, Super+J still turns the face. The session sets
-`dwindle:preserve_split` as Omarchy does; without it, dwindle redraws each
-split from the tile's shape and togglesplit shows nothing.
+From inside the card, Super+J still turns the face. Beside ordinary windows,
+Super+Shift+arrow still swaps: the neighbour takes the window's tile exactly.
+The session sets `dwindle:preserve_split` as Omarchy does; without it,
+dwindle redraws each split from the tile's shape and togglesplit shows
+nothing. Dwindle places new windows by the pointer, so the swap check looks
+for the side the neighbours are on.
 
-With the fixed modules both suites pass, 10 checks each. Five planted faults
-were each caught by the check written for it:
+Hyprland swaps no window with a card's locked group, which is why the arrow
+toward a card uses Hyprland's window move. That move puts the window past
+the card, as a throwaway session showed before the check was written.
+
+With the fixed modules, `tests/nearby_card_workflows.py` passes 11 checks
+and `tests/workflows.py` passes 10. Seven planted faults were each caught by
+the check written for it:
 - the move keys asking `in_container()` alone, as rc.22 does;
 - only the number keys doing so;
 - Super+J asking `face_size()` alone, as rc.22 does;
 - Super+J never acting on a card;
-- the move keys never acting on a card, caught by `tests/workflows.py`.
+- the move keys never acting on a card, caught by `tests/workflows.py`;
+- a card ahead never seen;
+- every neighbour taken for a card.
 
-The plugin is unchanged; CTest passes its three checks.
-
-Hyprland swaps no window with a card's locked group. So from beside a card,
-Super+Shift+arrow toward it leaves both in place, as it did before
-0.3.0-rc.18.
+The plugin is unchanged. CTest passes its three checks, and the 403 Python
+unit tests pass.
 
 ## Updating a build directory in place; release checks for 0.3.0-rc.22 (2026-11-13)
 

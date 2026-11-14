@@ -134,12 +134,17 @@ try:
     focus(herdr)
     herdr_x, card_x = client(herdr)['at'][0], card(one)['box'][0]
     assert herdr_x != card_x, 'the window and the card stand side by side'
-    # Toward the card. Hyprland swaps no window with a card's locked group, so the
-    # window stays; what matters is that the key no longer asks the card to move.
-    key('SUPER + SHIFT + ' + ('RIGHT' if herdr_x < card_x else 'LEFT')); settle()
+    first = herdr_x < card_x
+    def left_of_card(): return client(herdr)['at'][0] < card(one)['box'][0]
+    # Hyprland swaps no window with a card's locked group: the key moves the window past it.
+    key('SUPER + SHIFT + ' + ('RIGHT' if first else 'LEFT'))
+    wait(lambda: left_of_card() != first); settle()
     assert not refusals(), refusals()
     assert card(one)['faces'] == faces and on(int(PLACE), herdr, front, back) and active() == herdr
-    passed('Super+Shift+arrow from beside the card stays that window\'s key: the card is not asked to move')
+    key('SUPER + SHIFT + ' + ('LEFT' if first else 'RIGHT'))
+    wait(lambda: left_of_card() == first); settle()
+    assert card(one)['faces'] == faces and active() == herdr
+    passed('Super+Shift+arrow from beside the card takes that window past it and back; the card stays whole')
 
     key('SUPER + SHIFT + ALT + code:12')
     wait(lambda: on(3, herdr))
@@ -166,6 +171,26 @@ try:
     wait(lambda: stacked() != was); settle()
     assert card(one)['faces'] == faces
     passed('Super+J inside the card still turns its face between beside and stacked')
+
+    # Beside ordinary windows the key still swaps, as Hyprland's own binding does: the
+    # neighbour takes the window's tile exactly. A move would split a tile instead.
+    ipc.call('dispatch', 'hl.dsp.focus({workspace=31})')
+    alone = spawn('plain-left', '334455'); spawn('plain-top', '445566'); spawn('plain-below', '556677')
+    focus(alone)
+    def tiles(): return {a: (tuple(c['at']), tuple(c['size'])) for a, c in ipc.windows().items() if c['workspace']['id'] == 31}
+    before = tiles()
+    assert len(before) == 3 and len({b for b in before.values()}) == 3, before
+    # Dwindle places new windows by the pointer, so look for the side the others are on.
+    way = 'RIGHT' if before[alone][0][0] == min(at[0] for at, _ in before.values()) else 'LEFT'
+    key('SUPER + SHIFT + ' + way)
+    try:
+        wait(lambda: tiles()[alone] != before[alone]); settle()
+    except AssertionError:
+        raise AssertionError({'way': way, 'alone': alone, 'before': before, 'after': tiles()}) from None
+    after = tiles()
+    partner = next((a for a in after if a != alone and after[a] == before[alone]), None)
+    assert partner and after[alone] == before[partner], (before, after)
+    passed('Super+Shift+arrow beside ordinary windows still swaps with the neighbour')
     focus(herdr)
 
     ipc.call('eval', 'hl.config({plugin={hyprflip={nearby_card=false}}})')

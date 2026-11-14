@@ -15,11 +15,18 @@
   (`card_box()` answers only for a card's own windows). Otherwise they move or
   split that window as Hyprland does. Flip, the face keys, peek, unfold and
   card fullscreen still reach the card from beside it.
+- Super+Shift+arrow from a window in no card toward a card beside it moves
+  the window past the card, which stays whole. Hyprland swaps no window with
+  a card's locked group, so the key did nothing there. It now uses Hyprland's
+  window move when the nearest tile in that direction is a card. Every other
+  neighbour is swapped as before, since Hyprland's window move would also
+  cross to the next monitor at a screen edge.
+- On an existing install:
   - Super+J arrives with the next guided-setup install, which rewrites
     `hyprflip-setup.lua`.
   - No installer writes `hyprflip-navigation.lua`. Copy
     `examples/containers-navigation.lua` over it again, or make the same
-    change in a copy you have edited.
+    changes in a copy you have edited.
 
 ## 0.3.0-rc.22 — 2026-11-13
 

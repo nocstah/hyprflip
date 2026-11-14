@@ -15,6 +15,41 @@ local function container()
     if not ok or x then return plugin end
 end
 
+local function xy(value) -- HL.Vec2, {x=, y=} or {x, y}
+    if type(value) ~= "table" then return 0, 0 end
+    return value.x or value[1] or 0, value.y or value[2] or 0
+end
+
+-- Whether the nearest tile in this direction from a window in no card is a card,
+-- counted as its whole box. Hyprland swaps no window with a card's locked group,
+-- so such a window moves past the card instead; other neighbours swap as before.
+local function card_ahead(window, direction)
+    local plugin = hl.plugin.hyprflip
+    if not (plugin and plugin.card_box and hl.get_windows and window.workspace) then return false end
+    local function box(of)
+        local ok, x, y, w, h = pcall(plugin.card_box, of.address)
+        if ok and x then return x, y, w, h, true end
+        local px, py = xy(of.at)
+        local sw, sh = xy(of.size)
+        return px, py, sw, sh, false
+    end
+    local x, y, w, h, own = box(window)
+    if own then return false end
+    local nearest, card
+    for _, other in ipairs(hl.get_windows({ workspace = window.workspace.id })) do
+        if other.address ~= window.address and other.visible and not other.floating then
+            local ox, oy, ow, oh, is_card = box(other)
+            local gap, beside
+            if direction == "l" then gap, beside = x - (ox + ow), oy < y + h and y < oy + oh
+            elseif direction == "r" then gap, beside = ox - (x + w), oy < y + h and y < oy + oh
+            elseif direction == "u" then gap, beside = y - (oy + oh), ox < x + w and x < ox + ow
+            else gap, beside = oy - (y + h), ox < x + w and x < ox + ow end
+            if beside and gap > -1 and (not nearest or gap < nearest) then nearest, card = gap, is_card end
+        end
+    end
+    return card == true
+end
+
 local function move_workspace(workspace, follow)
     return function()
         local plugin = container()
@@ -49,6 +84,8 @@ for key, direction in pairs({ LEFT = "l", RIGHT = "r", UP = "u", DOWN = "d" }) d
         local hy3 = hl.plugin.hy3
         if window and not window.floating and workspace and workspace.tiled_layout == "hy3" and hy3 then
             hl.dispatch(hy3.move_window(direction, { visible = true }))
+        elseif window and not window.floating and card_ahead(window, direction) then
+            hl.dispatch(hl.dsp.window.move({ direction = direction }))
         else
             hl.dispatch(hl.dsp.window.swap({ direction = direction }))
         end
