@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Release check for the shipped key modules (examples/containers-navigation.lua and
-examples/containers-setup.lua): runs every compositor suite that loads them, each in its own
+examples/containers-setup.lua): runs every compositor suite that loads them or switches them, each in its own
 disposable nested session (tests/nested_session.py), one after another, and prints a summary.
 
 Run it before every release (CONTRIBUTING.md, Releases). It needs what the nested session needs
@@ -26,6 +26,7 @@ SUITES = {
     'setup': ('setup_workflows.py', None),
     'edit': ('edit_workflows.py', None),
     'pane': ('pane_workflows.py', None),
+    'switch': ('navigation_switch_workflows.py', 'native-cards'),
 }
 
 parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -73,6 +74,8 @@ def run(name):
         command += ['--render-node', str(args.render_node)]
     if needs == 'notify-recorder':
         command.append('--notify-recorder')
+    elif needs == 'native-cards':
+        command.append('--native-cards')
     session_log = logs / f'{name}-session.log'
     suite_log = logs / f'{name}.log'
     with session_log.open('wb') as out:

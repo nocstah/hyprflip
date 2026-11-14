@@ -144,6 +144,25 @@ colors are not rewritten or dispatched. Both values persist like spacing.
 `capabilities.nearby` gates the card-keys-beside-a-card switch. Snapshots
 expose `nearby_card` (boolean); the `nearby` action takes `enabled` and
 persists it like the accent ring.
+`capabilities.navigation` gates the movement-shortcut switch. It is true when
+the helper has the shipped movement module beside it
+(`~/.local/lib/hyprflip/navigation.lua`, from a guided setup without
+`--backend-only`). Snapshots expose `navigation`, read from the files even when
+Hyprland does not answer: `on` while `hyprflip-navigation.lua` and its require
+line are in place, `edited` when that copy has changes of the user's own (it is
+not the shipped module, a released one or the one an install recorded), and
+`off` otherwise. `navigation_choice` is the user's last choice, `on` or `off`,
+or null when none was made since Hyprflip was installed. The `navigation` action
+takes `enabled`. Unlike the other actions it sends no handoff, so the panel stays
+open and the focus stays where it is. On, it installs the shipped module and its
+line as `install-setup.py --navigation` does; off, it removes both as
+`--no-navigation` does. Either way the changed files go into a backup in
+`~/.local/state/hyprflip/navigation-<time>/`, and the done message names it when
+it holds a copy with changes of the user's own. Hyprland reloads, so the keys
+change at once. When it reports a new configuration error, when the 24 movement
+keys do not all come or all go, or when a card changes, the files are put back
+and the action fails. Both record the choice; nothing changes when the
+shortcuts already are as asked.
 `fullscreen` toggles whole-card fullscreen for a native (dwindle or floating)
 multi-app card, targeted like `floating`; two-window groups are refused. Apps are not told they are fullscreen, so browsers keep their toolbars.
 Cards report `fullscreen` and `native` (a dwindle or floating card that can

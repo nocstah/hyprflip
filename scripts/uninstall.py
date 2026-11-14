@@ -119,8 +119,9 @@ def main():
         candidates = list(dict.fromkeys(text for text in (without_path(kept, block), kept) if text != original))
     files = [config / name for name in MODULES if (config / name).is_file() or (config / name).is_symlink()]
     files += sorted(path for path in config.glob('*.bak-*') if BACKUPS.fullmatch(path.name) and not path.is_dir())
-    markers = [path for path in (state / 'installed-release', state / 'installed-commit', state / 'navigation.sha256')
-               if path.exists()]
+    # what installs recorded, and the movement-shortcut choice: a later install is a new setup
+    markers = [path for path in (state / 'installed-release', state / 'installed-commit', state / 'navigation.sha256',
+                                 state / 'navigation-choice') if path.exists()]
     session = hyprland()
     try:
         plugin = session and loaded()

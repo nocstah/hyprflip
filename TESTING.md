@@ -1,5 +1,34 @@
 # Validation
 
+## Movement shortcuts on and off (2026-11-14)
+
+`scripts/navigation.py` holds what the guided setup and the panel helper share
+about the movement module: whether it is on, the user's choice, and the switch.
+`tests/navigation_test.py` has 18 unit tests against a stand-in Hyprland in a
+disposable home: the require line comes and goes with its comment; `on`,
+`edited` and `off` need both the file and its line, and only changes of the
+user's own count as edited; on installs, loads, records and checks all 24 keys;
+off removes the module, its line and the record; a changed copy is kept in the
+backup either way; nothing reloads when the shortcuts already are as asked; and
+keys that do not come or do not go, a new configuration error, a card that
+changed or Hyprland failing mid-switch each put every file back, with its mode,
+and leave no backup. A configuration error from before does not count, so the
+shortcuts can go off when their module is what fails. The installer gains six
+tests (`--no-navigation`, the choice, the shipped copy beside the helper and its
+removal by `--backend-only`), the panel helper five (the snapshot fields, also
+without Hyprland, and the action: no handoff, its checks, its errors) and the
+uninstaller one check. 22 planted faults across the four scripts were each
+caught; the 440 Python unit tests pass.
+
+`tests/navigation_switch_workflows.py` runs it in a nested session with
+`--native-cards`, in a home inside the session folder: `install-setup.py
+--navigation` loads all 24 keys over the configuration's own Super+Shift+1; the
+panel action through the installed `control.py` turns them off at once without a
+handoff (the own key is back, the card unchanged) and on again; an edited copy
+goes off with the backup the action names; `--no-navigation` turns them off and
+a later plain install leaves them off. Its 5 checks pass. `tests/key_suites.py`
+runs it as `switch`.
+
 ## card_of; the key-module suites in one run (2026-11-14)
 
 `hl.plugin.hyprflip.card_of(address)` is new in the core. `tests/nearby_card_workflows.py`

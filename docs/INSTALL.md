@@ -201,8 +201,9 @@ notification support does not undo a completed card operation; feedback can
 fall back to a Hyprland notification.
 
 `scripts/install-setup.py`, run after the core as shown above, installs the
-helper. It installs `setup.py`, `workflow.py`, `control.py` and `shortcuts.py` in
-`~/.local/lib/hyprflip/`, plus `hyprflip-setup.lua` and
+helper. It installs `setup.py`, `workflow.py`, `control.py`, `shortcuts.py` and
+`navigation.py` in `~/.local/lib/hyprflip/`, with the shipped movement module as
+`navigation.lua` beside them for panels to switch on (not with `--backend-only`), plus `hyprflip-setup.lua` and
 `hyprflip-preferences.lua` and `hyprflip-shortcuts.lua` in `~/.config/hypr/`.
 It adds the setup `require` after the other bindings,
 checks O/C/L/K/Space (and Return on cores with card fullscreen) for conflicts, backs up changed files and validates reload.
@@ -288,6 +289,12 @@ of `install-setup.py`, which updates run too, keep the file current while it is
 as an install left it. A copy with changes of your own stays as it is until you
 run `--navigation` again, which replaces it and keeps your copy with the backup.
 A copy made by hand from an earlier release, unchanged, is updated as well.
+
+To turn the shortcuts off, run `python3 scripts/install-setup.py --no-navigation`,
+or use the switch of a panel such as OmaCards. Either removes the file and its
+line and reloads Hyprland, so your desktop's own keys are back at once. A copy
+with changes of your own is kept with the backup. Later runs leave the shortcuts
+off until `--navigation`, or the panel, turns them on again.
 
 Super+Shift+1…0 moves and follows the card; Super+Shift+Alt+1…0 moves
 silently; Super+Shift+arrows reorders the card. Destinations must be numbered

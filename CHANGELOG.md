@@ -36,6 +36,18 @@
   `--navigation` replaces it, keeping that copy with the backup. Before, the
   module was copied by hand and no installer updated it. `scripts/bootstrap.py
   --navigation` passes the option on.
+- The movement shortcuts can be switched off again.
+  `scripts/install-setup.py --no-navigation` removes `hyprflip-navigation.lua`
+  and its require line, keeping a copy with changes of its own with the backup,
+  and later runs leave the shortcuts off. Panels switch them through the
+  helper: snapshots report `capabilities.navigation`, `navigation` (`on`,
+  `edited` or `off`) and `navigation_choice`, and the `navigation` action turns
+  them on or off and reloads Hyprland, so the keys change at once, without a
+  handoff. For that the guided setup puts the shipped module beside the helper,
+  as `~/.local/lib/hyprflip/navigation.lua`. The user's choice is kept in
+  `~/.local/state/hyprflip/navigation-choice`: `--navigation`,
+  `--no-navigation` and the action write it, and `scripts/uninstall.py` removes
+  it, so that a later install counts as a new setup.
 - `hl.plugin.hyprflip.card_of(address)` returns the id of the multi-app card
   a window is in (the focused window without an address) and the number of
   apps on its shown face, or nil. Unlike `in_container()` and `face_size()`,

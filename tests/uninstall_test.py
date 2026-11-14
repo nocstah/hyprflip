@@ -130,6 +130,7 @@ class UninstallTest(unittest.TestCase):
                              'require("hypr.hyprflip-navigation")\n')
         (self.config / 'hyprflip-navigation.lua').write_text('-- hyprflip-navigation.lua\n')
         (self.state / 'navigation.sha256').write_text('b' * 64 + '\n')
+        (self.state / 'navigation-choice').write_text('on\n')  # a reinstall is a new setup
         self.assertEqual(self.uninstall('--yes'), 0)
         self.assertEqual(self.main.read_text(), ORIGINAL)
         self.assertIn('hyprflip-navigation.lua', [p.name for p in self.kept().iterdir()])

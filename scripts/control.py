@@ -24,10 +24,13 @@ import sys
 import time
 
 import workflow as w
+import navigation
 import shortcuts
 
 PROTOCOL = 1
 MAX_MESSAGE = 65536
+# The shipped movement module, which install-setup.py puts beside the helper when it installs card shortcuts.
+SHIPPED_NAVIGATION = Path(__file__).resolve().with_name('navigation.lua')
 # Shared with unattended stores, so OmaCards' tokens stay the same.
 digest = w.digest
 
@@ -94,6 +97,10 @@ def snapshot(ipc):
         base['installed_release'] = release if re.fullmatch(r'\d+\.\d+\.\d+(?:-rc\.\d+)?', release) else None
     except OSError:
         base['installed_release'] = None
+    # The movement shortcuts as the files have them, and the user's last choice (navigation action).
+    shipped = shipped_navigation()
+    paths = navigation.Paths(env)
+    base['navigation'], base['navigation_choice'] = navigation.state(paths, shipped), navigation.choice(paths)
     try:
         windows, state = ipc.windows(), ipc.status()
         ctx = context(ipc, windows)
@@ -197,6 +204,7 @@ def snapshot(ipc):
         base['accent_color'] = state.get('accent_color')
         base['capabilities']['nearby'] = type(state.get('nearby_card')) is bool
         base['nearby_card'] = state.get('nearby_card')
+        base['capabilities']['navigation'] = shipped is not None
         # Only cores with whole-card fullscreen report its divider.
         base['capabilities']['divider'] = type(state.get('fullscreen_divider')) is int
         base['capabilities']['fullscreen'] = base['capabilities']['divider']
@@ -398,14 +406,43 @@ def turn_to(ipc, request, card, face, state):
         time.sleep(.04)
 
 
+def shipped_navigation():
+    try:
+        return SHIPPED_NAVIGATION.read_bytes()
+    except OSError:
+        return None
+
+
+def switch_navigation(ipc, payload, request):
+    """Quiet like the preferences, and without a handoff: the shortcuts change for every card, never the focus."""
+    enabled = payload.get('enabled')
+    if type(enabled) is not bool:
+        raise w.SetupError('Choose whether the movement shortcuts are on.')
+    shipped = shipped_navigation()
+    if shipped is None:
+        raise w.SetupError('Update Hyprflip, with its card shortcuts, to switch the movement shortcuts.')
+    with request.exclusive():
+        request.check()
+        try:
+            kept = navigation.switch(enabled, ipc.call, navigation.Paths(ipc.env if ipc.env is not None else os.environ),
+                                     shipped)
+        except navigation.Refused as error:
+            raise w.SetupError(str(error)) from None
+    message = ('Movement shortcuts on: Super+Shift moves a whole card.' if enabled else
+               'Movement shortcuts off: Super+Shift keys work as your desktop sets them.')
+    return message + (f' Your changed copy of the module is kept in {kept}.' if kept else '')
+
+
 def run_operation(ipc, payload, menu):
     if not isinstance(payload, dict) or type(payload.get('protocol')) is not int or payload['protocol'] != PROTOCOL:
         raise w.SetupError('OmaCards and the Hyprflip helper need matching protocol versions.')
     action, ctx = payload.get('action'), payload.get('context')
-    if action not in ('flip', 'face', 'unfold', 'floating', 'edit', 'create', 'open', 'manage', 'transition', 'preview', 'duration', 'shortcut', 'appearance', 'spacing', 'accent', 'nearby', 'divider', 'fullscreen'):
+    if action not in ('flip', 'face', 'unfold', 'floating', 'edit', 'create', 'open', 'manage', 'transition', 'preview', 'duration', 'shortcut', 'appearance', 'spacing', 'accent', 'nearby', 'divider', 'fullscreen', 'navigation'):
         raise w.SetupError('Choose an available card action.')
     validate_context(ipc, ctx)
     request = menu.request
+    if action == 'navigation':
+        return switch_navigation(ipc, payload, request)
     card = None
     if action in ('flip', 'face', 'unfold', 'floating', 'fullscreen', 'edit', 'preview'):
         card, windows, state = resolve_card(ipc, payload.get('target'), ctx)
