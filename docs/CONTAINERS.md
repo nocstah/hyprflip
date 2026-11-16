@@ -375,8 +375,12 @@ Focus and close still act on real applications. Tiled resizing adjusts panes;
 floating movement and resizing adjust the shared frame. Use the navigation module
 or explicit `workspace` action to move a whole card; an unadapted window-move
 command can act on the selected pane. Leave fullscreen before moving a card.
-New windows open outside the card. Unloading Hyprflip dissolves its cards
-into ordinary windows; the supplied installer rebuilds them across an update.
+New windows open outside the card: its native group stays locked, so
+`group:auto_group` never adds one. Beside a focused tiled card, dwindle splits
+the card's tile as it splits any focused window; with the classic appearance
+(no card outline) the new window can look like a pane until it closes.
+Unloading Hyprflip dissolves its cards into ordinary windows; the supplied
+installer rebuilds them across an update.
 
 ## Current boundaries
 

@@ -1,5 +1,41 @@
 # Validation
 
+## A window opening beside a focused card stays outside it (2026-11-17)
+
+Found on the pilot desktop: a chat link in a card's browser made another app
+open a window, which looked as if it shared the browser's face; once it closed,
+the browser showed a picture of its top half until it was restarted. The new
+`tests/outside_window_workflows.py` (3) uses the pilot settings:
+`group:auto_group` and `misc:focus_on_activate` on, the classic appearance, a
+12 px card gap, scale 1.5 and its animations. It passes in fresh nested
+sessions (Hyprland 0.56.2, Aquamarine 0.15.1 with the render-node patch) with
+the GTK fixture, Helium 0.21.3.1 and Chromium on the front face. It checks
+three things:
+
+- A window opening while the card has the keyboard is its own tile, and the
+  card's native group stays locked. This holds after show, hold, park, unpark,
+  reveal and a reload. Dwindle splits the card's tile, which is what looked
+  like a shared face.
+- Once that window closes, the front app is drawn at its full size again.
+- A pane that leaves a face leaves the other app drawn at its size again.
+
+Against a core that leaves card groups unlocked, the first check fails: the
+window joins the group and the card comes apart. The frozen picture did not
+reproduce in any of these setups:
+
+- the GTK fixture;
+- Helium on the AMD render node and on the NVIDIA GPU;
+- 2400x1600 and 3840x2160 at 1.5;
+- with and without OmaRelay's `no_anim` and `focus_on_activate` props;
+- the window tiled beside the card, or attached as a pane.
+
+Hyprflip touches no client buffer and no surface state. `docs/CONTAINERS.md`
+now says where new windows open.
+
+Both CTest checks and all 388 Python unit tests pass. Fresh nested sessions
+also passed `tests/unseen_draw_workflows.py` (3) and
+`tests/reveal_workflows.py` (19).
+
 ## Change face with Tab; release checks for 0.3.0-rc.20 (2026-11-11)
 
 Both CTest checks and all 388 Python unit tests pass, one of them new: the
