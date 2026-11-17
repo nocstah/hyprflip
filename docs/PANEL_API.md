@@ -82,6 +82,13 @@ older helpers offer it only from a face that holds a single app.
 card folds onto it; a core without numbered faces turns once), waits for the
 turn to end, and focuses `pane`, or else the face's own app.
 
+A card a program has covered with a window of its own
+([covering a card](SCRIPTING.md#cover-a-card-with-a-window)) has `covered: true`
+while the cover is shown. Its `faces` leave the cover out, and `active` is the
+face the card returns to. `face` and `edit` turn away from the cover, even to
+that face. `flip` turns from the cover, the face the card shows. `add_face`
+counts the cover's face against the most a card can hold.
+
 `run` emits newline-delimited JSON on stdout and reads responses on stdin:
 
 - `question`: id, mode (`select`/`input`), prompt, choices containing value,

@@ -601,7 +601,8 @@ bool dissolve(uint64_t id) {
     cards.erase(id);
     return true;
 }
-bool attach(uint64_t id, uintptr_t address, uint32_t side, bool vertical) {
+// The keyboard goes to the attached app only with focus.
+bool attachTo(uint64_t id, uintptr_t address, uint32_t side, bool vertical, bool focus) {
     auto c = get(id);
     auto w = resolve(address);
     if (!c || !c->valid() || !supports(address) || side > c->count || side >= CONTAINER_MAX_FACES ||
@@ -658,9 +659,12 @@ bool attach(uint64_t id, uintptr_t address, uint32_t side, bool vertical) {
         if (floating)
             c->group->m_target->setPositionGlobal({.logicalBox = box, .visualBox = {}});
         c->refresh();
-        select(id, side, true);
+        select(id, side, focus);
         return true;
     });
+}
+bool attach(uint64_t id, uintptr_t address, uint32_t side, bool vertical) {
+    return attachTo(id, address, side, vertical, true);
 }
 bool release(uint64_t id, uintptr_t address) {
     auto c = get(id);
@@ -784,47 +788,50 @@ bool arrange(uint64_t id, uint32_t side, bool vertical, uint32_t count, const ui
     c->refresh();
     return true;
 }
+// Moves an app of face `side` to face `other`. The card follows it there.
+bool toFace(uint64_t id, const std::shared_ptr<Card> &c, PHLWINDOW w, unsigned side, unsigned other) {
+    if (other == side || other >= c->count || c->faces[side].size() < 2 ||
+        c->faces[other].size() >= CONTAINER_MAX_PANES)
+        return false;
+    auto faces = c->faces;
+    auto ratios = c->ratios;
+    const auto had = Desktop::focusState()->window();
+    const bool inside = had && c->side(had).has_value();
+    // The panes left behind keep their proportions among themselves; the
+    // moved one joins the other face with an equal share, as an attach gives.
+    const auto index = std::ranges::find(c->faces[side], w) - c->faces[side].begin();
+    c->faces[side].erase(c->faces[side].begin() + index);
+    c->ratios[side].erase(c->ratios[side].begin() + index);
+    const double rest = std::accumulate(c->ratios[side].begin(), c->ratios[side].end(), 0.);
+    for (auto &weight : c->ratios[side])
+        weight = rest > 0 ? weight / rest : 1. / c->ratios[side].size();
+    c->faces[other].push_back(w);
+    const double share = 1. / c->faces[other].size();
+    for (auto &weight : c->ratios[other])
+        weight *= 1. - share;
+    c->ratios[other].push_back(share);
+    if (!c->fits(c->group->m_target->position())) {
+        c->faces = faces;
+        c->ratios = ratios;
+        return false;
+    }
+    if (c->focused[side] == w)
+        c->focused[side] = c->faces[side][0];
+    c->focused[other] = w;
+    c->refresh();
+    // The card follows the pane onto the other face, with the keyboard if it was in the card.
+    select(id, other, inside);
+    return true;
+}
 bool edit(uint64_t id, uintptr_t address, ContainerEdit op) {
     auto c = get(id);
     auto w = resolve(address);
     auto side = c ? c->side(w) : std::nullopt;
     if (!side || !c->valid())
         return false;
-    if (op == ContainerEdit::OtherSide) {
+    if (op == ContainerEdit::OtherSide)
         // The next face round: the other one on a two-face card.
-        auto other = (*side + 1) % c->count;
-        if (c->faces[*side].size() < 2 || c->faces[other].size() >= CONTAINER_MAX_PANES)
-            return false;
-        auto faces = c->faces;
-        auto ratios = c->ratios;
-        const auto had = Desktop::focusState()->window();
-        const bool inside = had && c->side(had).has_value();
-        // The panes left behind keep their proportions among themselves; the
-        // moved one joins the other face with an equal share, as an attach gives.
-        const auto index = std::ranges::find(c->faces[*side], w) - c->faces[*side].begin();
-        c->faces[*side].erase(c->faces[*side].begin() + index);
-        c->ratios[*side].erase(c->ratios[*side].begin() + index);
-        const double rest = std::accumulate(c->ratios[*side].begin(), c->ratios[*side].end(), 0.);
-        for (auto &weight : c->ratios[*side])
-            weight = rest > 0 ? weight / rest : 1. / c->ratios[*side].size();
-        c->faces[other].push_back(w);
-        const double share = 1. / c->faces[other].size();
-        for (auto &weight : c->ratios[other])
-            weight *= 1. - share;
-        c->ratios[other].push_back(share);
-        if (!c->fits(c->group->m_target->position())) {
-            c->faces = faces;
-            c->ratios = ratios;
-            return false;
-        }
-        if (c->focused[*side] == w)
-            c->focused[*side] = c->faces[*side][0];
-        c->focused[other] = w;
-        c->refresh();
-        // The card follows the pane onto the other face, with the keyboard if it was in the card.
-        select(id, other, inside);
-        return true;
-    }
+        return toFace(id, c, w, *side, (*side + 1) % c->count);
     std::array<uintptr_t, CONTAINER_MAX_PANES> windows{};
     std::array<double, CONTAINER_MAX_PANES> weights{};
     for (unsigned i = 0; i < c->faces[*side].size(); ++i) {
@@ -978,6 +985,16 @@ bool moveTo(uint64_t id, const std::string &destination, bool follow) {
     return true;
 }
 const ContainerAPI *api() { return &API; }
+bool attachFace(uint64_t id, uintptr_t window, bool focus) {
+    auto c = get(id);
+    return c && c->valid() && attachTo(id, window, c->count, false, focus);
+}
+bool moveToFace(uint64_t id, uintptr_t window, unsigned side) {
+    auto c = get(id);
+    auto w = resolve(window);
+    auto from = c ? c->side(w) : std::nullopt;
+    return from && c->valid() && toFace(id, c, w, *from, side);
+}
 namespace {
 // Describes the card a snapshot asks for, without touching any window. False
 // when an app is gone, appears twice or has no share of its face.
@@ -1156,24 +1173,35 @@ uint64_t create(const ContainerSnapshot &snapshot, bool floating, bool focus) {
     c->refresh();
     return id;
 }
-void closing(PHLWINDOW w) {
+bool closing(PHLWINDOW w, bool ownFace) {
     for (auto &[id, c] : cards)
         if (auto s = c->side(w)) {
-            if (c->faces[*s].size() == 1) {
+            // The last app of a face releases the others, unless its face is one
+            // the card can do without: then only that face goes.
+            const bool drop = ownFace && c->faces[*s].size() == 1 && c->count > 2;
+            if (c->faces[*s].size() == 1 && !drop) {
                 dissolve(id);
-                return;
+                return false;
             }
+            const bool shown = c->active == *s;
             c->changing = true;
             c->restore(w);
             c->group->remove(w, Math::DIRECTION_DEFAULT, CGroup::REMOVE_FROM_GROUP_REASON_UNMAP_WINDOW);
-            std::erase(c->faces[*s], w);
-            c->ratios[*s].assign(c->faces[*s].size(), 1. / c->faces[*s].size());
-            if (c->focused[*s] == w)
-                c->focused[*s] = c->faces[*s][0];
+            if (drop)
+                c->removeFace(*s);
+            else {
+                std::erase(c->faces[*s], w);
+                c->ratios[*s].assign(c->faces[*s].size(), 1. / c->faces[*s].size());
+                if (c->focused[*s] == w)
+                    c->focused[*s] = c->faces[*s][0];
+            }
             c->changing = false;
+            if (drop && c->valid())
+                c->current(c->focused[c->active].lock());
             c->refresh();
-            return;
+            return drop && shown;
         }
+    return false;
 }
 void focused(PHLWINDOW w) {
     for (auto &[_, c] : cards)

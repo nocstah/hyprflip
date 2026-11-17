@@ -3,6 +3,7 @@
 #include <lua.hpp>
 #include <memory>
 #include <stdexcept>
+#include <string_view>
 
 namespace {
 HANDLE handle = nullptr;
@@ -20,7 +21,12 @@ int pair(lua_State *L) { return invoke(L, "pair"); }
 int card(lua_State *L) { return invoke(L, "card"); }
 int flip(lua_State *L) { return invoke(L, "flip"); }
 int peek(lua_State *L) { return invoke(L, "peek"); }
-int face(lua_State *L) { return invoke(L, ("face " + std::to_string(luaL_checkinteger(L, 1))).c_str()); }
+int face(lua_State *L) {
+    // A face by its number among the card's own, or "cover".
+    if (lua_type(L, 1) == LUA_TSTRING && std::string_view(lua_tostring(L, 1)) == "cover")
+        return invoke(L, "face cover");
+    return invoke(L, ("face " + std::to_string(luaL_checkinteger(L, 1))).c_str());
+}
 int endPeek(lua_State *L) { return invoke(L, "peek end"); }
 int preview(lua_State *L) { return invoke(L, (std::string("preview ") + luaL_checkstring(L, 1)).c_str()); }
 int unpair(lua_State *L) { return invoke(L, "unpair"); }

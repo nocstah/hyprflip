@@ -215,9 +215,10 @@ std::string CardDrop::status() const {
     std::string json = "[";
     for (const auto &t : m_targets) {
         if (json.size() > 1) json += ',';
-        json += std::format("{{\"id\":{},\"side\":{},\"zone\":[{},{},{},{}],\"hovered\":{},\"allowed\":{}}}",
-                            t.offer.id, t.offer.side, t.zone.x, t.zone.y, t.zone.w, t.zone.h,
-                            t.hovered ? "true" : "false", t.offer.refusal.empty() ? "true" : "false");
+        json +=
+            std::format("{{\"id\":{},\"side\":{},\"zone\":[{},{},{},{}],\"hovered\":{},\"allowed\":{}}}", t.offer.id,
+                        t.offer.cover ? "null" : std::to_string(t.offer.listed), t.zone.x, t.zone.y, t.zone.w, t.zone.h,
+                        t.hovered ? "true" : "false", t.offer.refusal.empty() ? "true" : "false");
     }
     return json + ']';
 }

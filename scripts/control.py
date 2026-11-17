@@ -130,6 +130,8 @@ def snapshot(ipc):
                 cards.append({'id': card['id'], 'kind': kind, 'key': f"{kind}:{card['id']}",
                               'token': card_token(card, kind, windows, ctx['instance']), 'faces': face_rows,
                               'current': current, 'active': active, 'unfolded': bool(card.get('unfolded')),
+                              # A window covers the card: its own face is shown, and active is the one it returns to.
+                              'covered': bool(card.get('covered')),
                               'fullscreen': bool(card.get('fullscreen')),
                               # Native dwindle/floating cards; only these fullscreen as a whole.
                               'native': kind == 'container' and bool(card.get('native_group')),
@@ -350,8 +352,10 @@ def edit_prefix(intent, pane, face, card, state):
     if intent == 'add_face':
         if 'container_max_faces' not in state:
             raise w.SetupError('Update Hyprflip to add faces to a card.')
-        if len(card['faces']) >= w.max_faces(state):
-            raise w.SetupError(f'This card already has {len(card["faces"])} faces, the most it can hold.')
+        # A cover takes a face of its own, though status leaves it out.
+        if len(card['faces']) + bool(card.get('cover')) >= w.max_faces(state):
+            raise w.SetupError(f'This card already has {len(card["faces"])} faces' +
+                               (' and a cover' if card.get('cover') else '') + ', the most it can hold.')
         if card.get('fullscreen'):
             raise w.SetupError('Leave card fullscreen, then add the face.')
         return [intent]
@@ -389,7 +393,7 @@ def turn_to(ipc, request, card, face, state):
         if not shown or shown['faces'] != card['faces']:
             raise w.SetupError('The card changed while turning. Open Cards again.')
         if not latest.get('animating'):
-            if shown['active'] != face:
+            if shown['active'] != face or shown.get('covered'):
                 raise w.SetupError('The other side could not be shown. Open Cards again.' if len(card['faces']) == 2
                                    else f'{w.face_name(face)} could not be shown. Open Cards again.')
             return
@@ -441,7 +445,7 @@ def run_operation(ipc, payload, menu):
     if action == 'face':
         # Show one face and focus an app on it, without the edit chooser:
         # the chosen app when the panel names one, else the face's own.
-        if face != card['active'] or card.get('unfolded'):
+        if face != card['active'] or card.get('unfolded') or card.get('covered'):
             turn_to(ipc, request, card, face, state)
         members = card['faces'][face]
         current = next((c for c in ipc.status().get('containers', []) if c['id'] == card['id']), card)
@@ -451,10 +455,11 @@ def run_operation(ipc, payload, menu):
             ipc.focus(focus)
         return ''
     if action in ('flip', 'unfold', 'floating', 'fullscreen', 'preview', 'edit', 'create'):
-        anchor = card['current'] if card else ctx.get('anchor')
+        # A covered card turns from its cover, the face it shows.
+        anchor = (card['cover'] if card.get('covered') else card['current']) if card else ctx.get('anchor')
         if action == 'edit':
             anchor = (card['current'] if card['current'] in card['faces'][face] else card['faces'][face][0])
-            if face != card['active'] and not card.get('unfolded'):
+            if (face != card['active'] or card.get('covered')) and not card.get('unfolded'):
                 # Hyprland cannot focus a hidden provider pane directly. The
                 # UI explicitly calls this "Show and edit Front/Back/Face N".
                 turn_to(ipc, request, card, face, state)

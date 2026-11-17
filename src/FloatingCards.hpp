@@ -20,7 +20,16 @@ bool name(uint64_t id, unsigned side, const std::string &value);
 std::string fitProblem(const ContainerSnapshot &snapshot, bool floating);
 // An app's name for messages: its class, never its title, shortened.
 std::string appName(const PHLWINDOW &w);
-void closing(PHLWINDOW window);
+// A window is closing. The last app of a face takes the card apart, unless
+// ownFace: an app alone on a face the card can lose (a cover) takes only that
+// face. True when the face that went was the one shown.
+bool closing(PHLWINDOW window, bool ownFace = false);
+// Adds a window as a new face after the last and shows it. The keyboard goes
+// to it only with focus.
+bool attachFace(uint64_t id, uintptr_t window, bool focus);
+// Moves an app to another face of its card, as the OtherSide edit moves it to
+// the next one.
+bool moveToFace(uint64_t id, uintptr_t window, unsigned side);
 void focused(PHLWINDOW window);
 void shutdown();
 // Keeps fullscreen on the focused pane of a fullscreen card.

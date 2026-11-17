@@ -15,6 +15,9 @@ struct CardDropOffer {
     std::vector<PHLWINDOWREF> members;
     std::string refusal;
     std::string name; // the face's own name, if it has one
+    // Where status counts the face: among the card's own, which leave a cover out.
+    unsigned listed = 0;
+    bool cover = false;
 };
 
 // Observes native window moves; never takes over the compositor's drag state.

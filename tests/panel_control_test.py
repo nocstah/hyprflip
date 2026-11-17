@@ -249,6 +249,49 @@ class PanelControlTest(unittest.TestCase):
         with self.assertRaisesRegex(setup.SetupError, 'already has 4 faces'):
             control.edit_prefix('add_face', None, 1, card, {'container_max_faces': 4})
 
+    def covered(self):
+        """A window covers the card: status lists its own faces, with active the face it returns to."""
+        self.ipc.windows()['0xf'] = dict(self.ipc.windows()['0xa'], address='0xf', title='Cover')
+        self.ipc.snapshot['container_max_faces'] = 4
+        self.retarget(active=1, current='0xb', cover='0xf', covered=True)
+        return self.ipc.snapshot['containers'][0]
+
+    def test_snapshot_leaves_a_cover_out_of_the_faces_and_says_the_card_is_covered(self):
+        self.covered()
+        card = control.snapshot(self.ipc)['cards'][0]
+        self.assertEqual([f['name'] for f in card['faces']], ['Front', 'Back'])
+        self.assertEqual((card['active'], card['covered']), (1, True))
+        self.assertNotIn('0xf', [p['address'] for f in card['faces'] for p in f['panes']])
+
+    def test_face_on_a_covered_card_turns_to_the_face_it_returns_to(self):
+        card = self.covered()
+        def show(action):
+            self.assertEqual(action, 'card 1 show 2')
+            card['covered'] = False
+        with patch.object(self.ipc, 'action', side_effect=show) as shown:
+            self.run_action(self.payload('face', face=1, pane='0xc'))
+        shown.assert_called_once()
+        self.assertEqual(self.ipc.active, '0xc')
+
+    def test_a_turn_that_leaves_the_cover_shown_is_reported(self):
+        self.covered()
+        with patch.object(self.ipc, 'action'), self.assertRaisesRegex(setup.SetupError, 'could not be shown'):
+            self.run_action(self.payload('face', face=1))
+
+    def test_flip_on_a_covered_card_turns_from_the_cover(self):
+        self.covered()
+        with patch.object(self.ipc, 'focused') as turned:
+            self.run_action(self.payload('flip'))
+        turned.assert_called_once_with(('0xf', 'flip'))
+
+    def test_add_face_counts_the_cover(self):
+        card = self.covered()
+        card['faces'].append(['0xd'])
+        with self.assertRaisesRegex(setup.SetupError, 'already has 3 faces and a cover'):
+            control.edit_prefix('add_face', None, 1, card, {'container_max_faces': 4})
+        card['faces'].pop()
+        self.assertEqual(control.edit_prefix('add_face', None, 1, card, {'container_max_faces': 4}), ['add_face'])
+
     def test_named_open_has_no_extra_confirmation(self):
         recipe = {'example': 'definition'}
         plan = setup.SavedPlan('goto', 'Mail', recipe, None)

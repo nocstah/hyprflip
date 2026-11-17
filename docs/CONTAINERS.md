@@ -149,6 +149,12 @@ still does whatever Hyprland is set to do.
 **Super+Ctrl+Alt+1** to **4** go straight to that face, sliding past the
 faces between; `hyprctl hyprflip face <n>` does the same from scripts.
 
+A program can also cover a card with a window of its own, such as the terminal
+it runs in: the window joins the card as an extra face after the last, and the
+card shows it. Flips and the switcher go round it like any face; the digits
+count only the card's own faces, and `face cover` turns to the cover. See
+[covering a card](SCRIPTING.md#cover-a-card-with-a-window).
+
 Faces can be named, say Mail or Code, in place of Front, Back, Face 3 and
 Face 4: **Name this face…** in Edit card names the face shown, and
 `card <id> name <n> [name]` names any face; leaving the name empty gives the

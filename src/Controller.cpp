@@ -92,6 +92,9 @@ std::string sizeProblem(PHLWINDOW w, Vector2D size) {
     return name + " can be at most " + px(max.x) + " x " + px(max.y) + " px, but its place in the card is " +
            px(size.x) + " x " + px(size.y) + ".";
 }
+// A cover is alone on its face: an app added to a card goes to one of its own faces.
+constexpr auto COVER_FACE = "This face is the card's cover and holds only that window. Add the app to another face, "
+                            "or as a new face.";
 bool sameBox(const CBox &a, const CBox &b) {
     return std::abs(a.x - b.x) < 1 && std::abs(a.y - b.y) < 1 && std::abs(a.w - b.w) < 1 && std::abs(a.h - b.h) < 1;
 }
@@ -466,6 +469,19 @@ void Controller::reconcile() {
             discardContainer(p);
         }
     std::erase_if(m_pairs, [this](const Pair &p) { return !valid(p); });
+    for (auto &p : m_pairs) {
+        if (!p.cover.lock())
+            continue;
+        // A cover that left its face, or a card left with one face of its own,
+        // has no cover any more. Otherwise note the face of its own shown last.
+        const auto s = state(p);
+        const auto face = s ? coverFace(p, *s) : std::nullopt;
+        if (!face) {
+            p.cover.reset();
+            p.uncoverTo.reset();
+        } else if (s->active != *face)
+            p.uncoverTo = s->focused[s->active];
+    }
     syncFrames();
 }
 void Controller::syncFrames() {
@@ -513,6 +529,7 @@ std::vector<CardFrameView> Controller::frameViews() const {
             view.dividerWidth = m_settings.fullscreenDivider->value();
         }
         view.active = s->active;
+        view.reported = reportedFace(pair, *s);
         view.unfolded = s->unfolded;
         view.animating = m_turn && m_turn->pairID == pair.id;
         view.faces = s->count;
@@ -540,6 +557,7 @@ std::vector<CardDropOffer> Controller::dropOffers(PHLWINDOW window) const {
         if (!workspace || !workspace->m_visible || workspace->m_isSpecialWorkspace ||
             (Fullscreen::controller()->hasFullscreen(workspace) && !fullscreenCard) || window->m_workspace != workspace ||
             workspace->m_renderOffset->isBeingAnimated()) continue;
+        const auto cover = coverFace(p, *s);
         for (unsigned side = 0; side < s->count; ++side) {
             if (!s->unfolded && side != s->active) continue;
             CardDropOffer offer;
@@ -563,6 +581,11 @@ std::vector<CardDropOffer> Controller::dropOffers(PHLWINDOW window) const {
             }
             if (!any) continue;
             if (offer.count >= CONTAINER_MAX_PANES) offer.refusal = std::to_string(CONTAINER_MAX_PANES) + " apps already";
+            // Status numbers the card's own faces; a cover's face has no number there.
+            offer.cover = side == cover;
+            offer.listed = cover && side > *cover ? side - 1 : side;
+            if (offer.cover)
+                offer.refusal = "a cover takes no other app";
             offers.push_back(std::move(offer));
         }
     }
@@ -577,6 +600,8 @@ Result Controller::dropAttach(PHLWINDOW window, const CardDropOffer &offer) {
         (!before->unfolded && before->active != offer.side) ||
         window->m_workspace != before->focused[offer.side]->m_workspace)
         return {false, "The card changed during the drag. Try again."};
+    if (offer.side == coverFace(*p, *before))
+        return {false, COVER_FACE};
     if (before->faces[offer.side].size() >= CONTAINER_MAX_PANES)
         return {false, "This side already has five apps. Remove an app before adding another."};
     if (Fullscreen::controller()->hasFullscreen(window->m_workspace) &&
@@ -643,9 +668,27 @@ void Controller::onClose(PHLWINDOW w) {
         m_marked.reset();
     if (m_turn && std::ranges::find(m_turn->windows, w) != m_turn->windows.end())
         finish(false);
+    // A cover closing takes only its own face: the card stays, and shows the face it returns to.
+    Pair *covered = nullptr;
+    for (auto &p : m_pairs)
+        if (p.containerID && p.cover.lock() == w)
+            covered = &p;
+    const auto back = covered ? covered->uncoverTo : PHLWINDOWREF{};
     const bool mutating = m_mutating;
     m_mutating = true;
-    FloatingCards::closing(w);
+    const bool shown = FloatingCards::closing(w, covered != nullptr);
+    if (covered) {
+        covered->cover.reset();
+        covered->uncoverTo.reset();
+        covered->lastFace.reset();
+        const auto s = shown ? state(*covered) : std::nullopt;
+        for (unsigned side = 0; s && side < s->count; ++side)
+            if (std::ranges::find(s->faces[side], back.lock()) != s->faces[side].end()) {
+                if (s->active != side)
+                    select(*covered, side, false);
+                break;
+            }
+    }
     m_mutating = mutating;
     deferReconcile();
 }
@@ -970,15 +1013,24 @@ Result Controller::peek() {
 Result Controller::showFace(const std::string &number) {
     unsigned face = 0;
     const auto [end, error] = std::from_chars(number.data(), number.data() + number.size(), face);
-    if (error != std::errc{} || end != number.data() + number.size() || !face || face > CONTAINER_MAX_FACES)
-        return {false, "Use face <number>, from 1 to " + std::to_string(CONTAINER_MAX_FACES) + "."};
+    const bool cover = number == "cover";
+    if (!cover && (error != std::errc{} || end != number.data() + number.size() || !face || face > CONTAINER_MAX_FACES))
+        return {false, "Use face <number>, from 1 to " + std::to_string(CONTAINER_MAX_FACES) + ", or face cover."};
     auto p = cardFor(Desktop::focusState()->window());
     const auto s = p && valid(*p) ? state(*p) : std::nullopt;
     if (!s) return {false, "Focus a card first."};
-    if (face > s->count) return {false, "This card has " + std::to_string(s->count) + " faces."};
+    // Numbers count the card's own faces; a cover's face is reached by name.
+    const auto coverAt = coverFace(*p, *s);
+    const auto own = ownFaces(*s, coverAt);
+    if (cover && !coverAt)
+        return {false, "This card has no cover."};
+    if (!cover && face > own.size())
+        return {false, "This card has " + std::to_string(own.size()) + " faces."};
+    const unsigned goal = cover ? *coverAt : own[face - 1];
     cancelSwitch();
-    if (face - 1 == s->active && !(m_turn && m_turn->pairID == p->id)) return {true, "ok"};
-    return flip(std::nullopt, p, face - 1);
+    if (goal == s->active && !(m_turn && m_turn->pairID == p->id))
+        return {true, "ok"};
+    return flip(std::nullopt, p, goal);
 }
 Result Controller::nameFace(Pair &pair, unsigned face, const std::string &raw) {
     // Trim, keep it on one line, and keep it short enough for the header.
@@ -1461,6 +1513,8 @@ Result Controller::attach(bool vertical, bool newFace) {
         return {false, "This card changed. Pair its windows again."};
     if (newFace && s->count >= CONTAINER_MAX_FACES)
         return {false, "This card already has " + std::to_string(CONTAINER_MAX_FACES) + " faces."};
+    if (!newFace && s->active == coverFace(*p, *s))
+        return {false, COVER_FACE};
     if (!newFace && s->faces[s->active].size() >= CONTAINER_MAX_PANES)
         return {false, "This side already has five apps. Remove an app before adding another."};
     for (const auto &member : s->windows())
@@ -1507,6 +1561,8 @@ Result Controller::replacePane(const std::string &arguments) {
     auto s = state(*p);
     if (!s)
         return {false, "This card changed. Open the card menu again."};
+    if (s->active == coverFace(*p, *s))
+        return {false, "The card's cover is not replaced. Uncover the card, then add the app to one of its faces."};
     PHLWINDOW old, next;
     for (const auto &w : s->faces[s->active])
         if (address(w) == quote(outgoing)) old = w;
@@ -1542,6 +1598,21 @@ Result Controller::release() {
     if (!p->containerID)
         return unpair();
     finish();
+    if (const auto s = state(*p))
+        if (const auto coverAt = coverFace(*p, *s)) {
+            // Released, the cover leaves as uncover takes it out.
+            if (s->faces[*coverAt][0] == w) {
+                const auto result = uncover(*p);
+                reconcile();
+                return result.ok ? Result{true, "Window released into the layout."} : result;
+            }
+            // The last app of one of the card's two own faces takes the card apart, as it does with no cover.
+            for (unsigned side = 0; side < s->count; ++side)
+                if (s->faces[side].size() == 1 && s->faces[side][0] == w && s->count <= 3) {
+                    ungroup(*p);
+                    return {true, "Window released into the layout."};
+                }
+        }
     auto api = provider(p->providerEpoch);
     m_mutating = true;
     const bool ok = api && api->release(p->containerID, reinterpret_cast<uintptr_t>(w.get()));
@@ -1585,6 +1656,10 @@ Result Controller::moveCard(Pair &card, const std::string &destination, bool fol
     for (const auto &w : s->windows())
         if (Fullscreen::controller()->isFullscreen(w.lock()))
             return {false, "Leave fullscreen before moving this container."};
+    // Out of sight, a card never takes its cover along: the cover stays where the card was.
+    if (destination.starts_with("special") && coverFace(card, *s))
+        if (const auto result = uncover(card); !result.ok)
+            return result;
     auto api = provider(card.providerEpoch);
     const auto id = card.id;
     if (number) m_movingWorkspace = number;
@@ -1624,10 +1699,168 @@ Result Controller::show(Pair &p, unsigned side) {
     damage(p);
     return {true, "ok"};
 }
+std::optional<unsigned> Controller::coverFace(const Pair &p, const State &s) const {
+    const auto w = p.cover.lock();
+    if (!w || !p.containerID || s.count < 3)
+        return std::nullopt;
+    for (unsigned face = 0; face < s.count; ++face)
+        if (s.faces[face].size() == 1 && s.faces[face][0] == w)
+            return face;
+    return std::nullopt;
+}
+std::vector<unsigned> Controller::ownFaces(const State &s, std::optional<unsigned> cover) {
+    std::vector<unsigned> faces;
+    for (unsigned face = 0; face < s.count; ++face)
+        if (face != cover)
+            faces.push_back(face);
+    return faces;
+}
+unsigned Controller::returnFace(const Pair &p, const State &s, unsigned cover) const {
+    if (const auto back = p.uncoverTo.lock())
+        for (unsigned face = 0; face < s.count; ++face)
+            if (face != cover && std::ranges::find(s.faces[face], back) != s.faces[face].end())
+                return face;
+    return cover == 0 ? 1 : 0;
+}
+unsigned Controller::reportedFace(const Pair &p, const State &s) const {
+    const auto cover = coverFace(p, s);
+    const unsigned face = cover && s.active == *cover ? returnFace(p, s, *cover) : s.active;
+    return cover && face > *cover ? face - 1 : face;
+}
+Result Controller::cover(Pair &p, const std::string &target) {
+    if (!p.containerID || p.providerEpoch != FloatingCards::EPOCH)
+        return {false, "Only a multi-app card takes a cover; a pair does not."};
+    uintptr_t wanted = 0;
+    bool parsed = target.starts_with("0x");
+    if (parsed) {
+        const auto [end, error] = std::from_chars(target.data() + 2, target.data() + target.size(), wanted, 16);
+        parsed = error == std::errc{} && end == target.data() + target.size();
+    }
+    if (!parsed)
+        return {false, "Use card <id> cover <0x address>."};
+    PHLWINDOW w;
+    for (const auto &candidate : Desktop::windowState()->windows())
+        if (reinterpret_cast<uintptr_t>(candidate.get()) == wanted && candidate->m_isMapped)
+            w = candidate;
+    if (!w)
+        return {false, "No window has address " + target + "."};
+    auto s = state(p);
+    if (!s)
+        return {false, "This card changed. Read the ids from status."};
+    if (coverFace(p, *s))
+        return {false, "This card already has a cover. Uncover it first."};
+    if (find(w) || w->m_group)
+        return {false, "That window is already in a card, pair or group. Release it first."};
+    if (Fullscreen::controller()->isFullscreen(w))
+        return {false, "Leave fullscreen before covering a card with that window."};
+    if (std::ranges::any_of(s->windows(),
+                            [](const auto &ref) { return Fullscreen::controller()->isFullscreen(ref.lock()); }))
+        return {false, "Leave fullscreen before covering the card."};
+    if (s->unfolded)
+        return {false, "Fold the card before covering it."};
+    if (s->count >= CONTAINER_MAX_FACES)
+        return {false, "This card already has " + std::to_string(CONTAINER_MAX_FACES) +
+                           " faces, the most it can hold; a cover needs a face of its own."};
+    const auto space = s->focused[s->active]->m_workspace;
+    if (!space || w->m_workspace != space)
+        return {false, "Move the window to the card's workspace before covering the card with it."};
+    if (space->m_isSpecialWorkspace)
+        return {false, "Bring the card back from its special workspace before covering it."};
+    if (auto problem = unavailable(w); !problem.empty())
+        return {false, problem};
+    auto busy = members(p);
+    busy.push_back(w);
+    if (scriptBusy(busy))
+        return {false, "Finish the active grab or drag before covering the card."};
+    finish();
+    s = state(p);
+    if (!s)
+        return {false, "This card changed. Read the ids from status."};
+    // The keyboard goes to the cover only from the cover itself or the card.
+    const auto had = Desktop::focusState()->window();
+    const bool takes = had && (had == w || s->contains(had));
+    const auto source = s->active;
+    const auto back = s->focused[source];
+    m_mutating = true;
+    bool ok = FloatingCards::attachFace(p.containerID, reinterpret_cast<uintptr_t>(w.get()), takes);
+    std::string problem;
+    if (ok) {
+        // A tiled cover's tile closes and the card takes its place; a window that
+        // cannot have the card's size leaves again.
+        const auto covered = state(p);
+        if (!covered)
+            problem = "The card could not be laid out with that window.";
+        else
+            for (const auto &ref : covered->windows())
+                if (problem.empty() && !fits(ref.lock(), ref->size(IGeometric::GEOMETRIC_GOAL)))
+                    problem = sizeProblem(ref.lock(), ref->size(IGeometric::GEOMETRIC_GOAL));
+        if (!problem.empty()) {
+            if (auto api = provider(p.providerEpoch))
+                api->release(p.containerID, reinterpret_cast<uintptr_t>(w.get()));
+            if (auto after = state(p); after && source < after->count)
+                select(p, source, false);
+            if (had && Desktop::focusState()->window() != had)
+                Desktop::focusState()->fullWindowFocus(had, Desktop::FOCUS_REASON_KEYBIND);
+            ok = false;
+        }
+    }
+    m_mutating = false;
+    if (!ok)
+        return {false, problem.empty() ? "The card could not take that window as its cover." : problem};
+    p.cover = w;
+    p.uncoverTo = back;
+    if (const auto after = state(p))
+        if (const auto face = coverFace(p, *after)) {
+            remember(p, source, *face);
+            FloatingCards::name(p.containerID, *face, FloatingCards::appName(w));
+        }
+    damage(p);
+    m_frames->refresh(true);
+    return {true, "ok"};
+}
+Result Controller::uncover(Pair &p) {
+    finish();
+    const auto s = state(p);
+    const auto face = s ? coverFace(p, *s) : std::nullopt;
+    if (!face) {
+        p.cover.reset();
+        p.uncoverTo.reset();
+        return {true, "ok"};
+    }
+    const auto w = s->faces[*face][0];
+    const bool shown = s->active == *face;
+    const auto back = s->focused[returnFace(p, *s, *face)];
+    auto api = provider(p.providerEpoch);
+    m_mutating = true;
+    // The engine's release keeps the keyboard on the cover when it had it.
+    const bool ok = api && api->release(p.containerID, reinterpret_cast<uintptr_t>(w.get()));
+    m_mutating = false;
+    p.cover.reset();
+    p.uncoverTo.reset();
+    if (!ok)
+        return {false, "The cover could not leave the card."};
+    if (p.lastFace) {
+        if (*p.lastFace == *face)
+            p.lastFace.reset();
+        else if (*p.lastFace > *face)
+            --*p.lastFace;
+    }
+    if (const auto after = shown ? state(p) : std::nullopt)
+        for (unsigned side = 0; side < after->count; ++side)
+            if (std::ranges::find(after->faces[side], back) != after->faces[side].end()) {
+                if (after->active != side)
+                    select(p, side);
+                break;
+            }
+    damage(p);
+    return {true, "ok"};
+}
 Result Controller::cardAction(const std::string &arguments) {
-    static constexpr auto USAGE = "Use card <id> flip, card <id> show <front|back|face number>, card <id> name <n> [name], card <id> ungroup or "
-                                  "card <id> workspace <number|name:<name>|special[:<name>]> [silent], or "
-                                  "card <id or 0x address> hold|leave|reveal [speed from 0.05 to 4].";
+    static constexpr auto USAGE =
+        "Use card <id> flip, card <id> show <front|back|face number|cover>, card <id> name <n> [name], "
+        "card <id> cover <0x address>, card <id> uncover, card <id> ungroup or "
+        "card <id> workspace <number|name:<name>|special[:<name>]> [silent], or "
+        "card <id or 0x address> hold|leave|reveal [speed from 0.05 to 4].";
     std::istringstream input(arguments);
     std::string text, verb, value, extra;
     uint64_t id = 0;
@@ -1702,28 +1935,46 @@ Result Controller::cardAction(const std::string &arguments) {
         return {false, "No card has id " + text + ". Read the ids from status."};
     if (verb == "flip" && !(input >> extra))
         return flip(std::nullopt, p);
+    // Face numbers count the card's own faces: a cover's face is not one of them.
+    const auto s = state(*p);
+    const auto coverAt = s ? coverFace(*p, *s) : std::nullopt;
+    const auto own = s ? ownFaces(*s, coverAt) : std::vector<unsigned>{};
     if (verb == "name" && input >> value) {
         // card <id> name <face from 1> [name...]; no name gives back the default.
         unsigned face = 0;
         const auto [last, bad] = std::from_chars(value.data(), value.data() + value.size(), face);
-        const auto s = state(*p);
-        if (bad != std::errc{} || last != value.data() + value.size() || !face || !s || face > s->count)
-            return {false, "Use card <id> name <face number from 1 to " + std::to_string(s ? s->count : 2) + "> [name]."};
+        if (bad != std::errc{} || last != value.data() + value.size() || !face || face > own.size())
+            return {false,
+                    "Use card <id> name <face number from 1 to " + std::to_string(s ? own.size() : 2) + "> [name]."};
         std::string rest;
         std::getline(input, rest);
-        return nameFace(*p, face - 1, rest);
+        return nameFace(*p, own[face - 1], rest);
     }
     if (verb == "show" && input >> value && !(input >> extra)) {
         // front and back, or a face by its number from 1: front is 1, back is 2.
         unsigned face = 0;
         const auto [last, bad] = std::from_chars(value.data(), value.data() + value.size(), face);
         const bool number = bad == std::errc{} && last == value.data() + value.size();
-        const auto s = state(*p);
-        if (value == "front" || value == "back")
-            return show(*p, value == "back");
-        if (number && s && face >= 1 && face <= s->count)
-            return show(*p, face - 1);
-        return {false, "Use card <id> show front, back, or a face number from 1 to " + std::to_string(s ? s->count : 2) + "."};
+        if (value == "cover") {
+            if (!coverAt)
+                return {false, "This card has no cover."};
+            return show(*p, *coverAt);
+        }
+        if ((value == "front" || value == "back") && own.size() >= 2)
+            return show(*p, own[value == "back"]);
+        if (number && face >= 1 && face <= own.size())
+            return show(*p, own[face - 1]);
+        return {false, "Use card <id> show front, back, cover or a face number from 1 to " +
+                           std::to_string(s ? own.size() : 2) + "."};
+    }
+    if (verb == "cover" && input >> value && !(input >> extra))
+        return cover(*p, value);
+    if (verb == "uncover" && !(input >> extra)) {
+        if (!coverAt)
+            return uncover(*p);
+        if (scriptBusy(members(*p)))
+            return {false, "Finish the active grab or drag before uncovering the card."};
+        return uncover(*p);
     }
     // Another program takes its card apart, parked or on screen; the focus stays.
     if (verb == "ungroup" && !(input >> extra)) {
@@ -1865,12 +2116,20 @@ Result Controller::editContainer(ContainerEdit operation, const std::string &tar
             return {false, "Leave fullscreen before changing the card layout."};
     if (s->faces[s->active].size() < 2)
         return {false, "This side needs at least two apps. Add an app from the card menu first."};
-    if (operation == ContainerEdit::OtherSide && s->faces[s->next()].size() >= CONTAINER_MAX_PANES)
-        return {false, s->count > 2 ? "The next face already has five apps. Remove an app there first."
-                                    : "The other side already has five apps. Remove an app there first."};
+    // The next face among the card's own: a cover's face takes no app.
+    const auto coverAt = coverFace(*p, *s);
+    unsigned next = s->next();
+    if (next == coverAt)
+        next = (next + 1) % s->count;
+    const auto own = ownFaces(*s, coverAt).size();
+    if (operation == ContainerEdit::OtherSide && s->faces[next].size() >= CONTAINER_MAX_PANES)
+        return {false, own > 2 ? "The next face already has five apps. Remove an app there first."
+                               : "The other side already has five apps. Remove an app there first."};
     auto api = provider(p->providerEpoch);
     m_mutating = true;
-    const bool ok = api && api->edit(p->containerID, reinterpret_cast<uintptr_t>(w.get()), operation);
+    const bool ok = operation == ContainerEdit::OtherSide && coverAt
+                        ? FloatingCards::moveToFace(p->containerID, reinterpret_cast<uintptr_t>(w.get()), next)
+                        : api && api->edit(p->containerID, reinterpret_cast<uintptr_t>(w.get()), operation);
     m_mutating = false;
     reconcile();
     return {ok, ok ? "ok" : "The apps need more room for that layout. Enlarge the card and try again."};
@@ -2322,13 +2581,14 @@ Result Controller::dispatch(const std::string &action) {
         finish();
         return {true, "ok"};
     }
-    return {false,
-            "Unknown action. Use mark, pair, card, attach [horizontal|vertical], replace <old> <new>, release, unfold, "
-            "layout <horizontal|vertical|balance|toggle>, other_side, "
-            "workspace <number> [silent], move <left|right|up|down>, cancel, "
-            "flip, peek [end], unpair, finish, restore [quiet] ..., "
-            "card <id> <flip|show <front|back>|ungroup|workspace <workspace> [silent]>, "
-            "card <id or 0x address> hold|leave|reveal [speed] [up|down], or status."};
+    return {
+        false,
+        "Unknown action. Use mark, pair, card, attach [horizontal|vertical], replace <old> <new>, release, unfold, "
+        "layout <horizontal|vertical|balance|toggle>, other_side, "
+        "workspace <number> [silent], move <left|right|up|down>, cancel, "
+        "flip, peek [end], unpair, finish, restore [quiet] ..., "
+        "card <id> <flip|show <front|back|n|cover>|cover <address>|uncover|ungroup|workspace <workspace> [silent]>, "
+        "card <id or 0x address> hold|leave|reveal [speed] [up|down], or status."};
 }
 namespace {
 // notify-send on PATH, for desktop notifications through the user's daemon.
@@ -2400,16 +2660,22 @@ std::string Controller::status() {
         if (!first)
             json += ',';
         first = false;
-        json +=
-            std::format("{{\"id\":{},\"active\":{},\"unfolded\":{},\"current\":{},\"box\":[{},{},{},{}],\"faces\":[",
-                        p.id, s->active, s->unfolded ? "true" : "false", address(s->focused[s->active]), s->geometry.x,
-                        s->geometry.y, s->geometry.w, s->geometry.h);
-        for (unsigned side = 0; side < s->count; ++side) {
-            if (side)
+        // Faces are the card's own: a cover's face is left out of every list and number.
+        const auto coverAt = coverFace(p, *s);
+        const auto own = ownFaces(*s, coverAt);
+        const auto shown = own[reportedFace(p, *s)];
+        json += std::format("{{\"id\":{},\"active\":{},\"unfolded\":{},\"current\":{},\"cover\":{},\"covered\":{},"
+                            "\"box\":[{},{},{},{}],\"faces\":[",
+                            p.id, reportedFace(p, *s), s->unfolded ? "true" : "false", address(s->focused[shown]),
+                            coverAt ? address(s->faces[*coverAt][0]) : "null",
+                            coverAt && s->active == *coverAt ? "true" : "false", s->geometry.x, s->geometry.y,
+                            s->geometry.w, s->geometry.h);
+        for (unsigned i = 0; i < own.size(); ++i) {
+            if (i)
                 json += ',';
             json += '[';
             bool firstWindow = true;
-            for (const auto &w : s->faces[side]) {
+            for (const auto &w : s->faces[own[i]]) {
                 if (!firstWindow)
                     json += ',';
                 firstWindow = false;
@@ -2418,14 +2684,16 @@ std::string Controller::status() {
             json += ']';
         }
         json += "],\"names\":[";
-        for (unsigned side = 0; side < s->count; ++side) json += (side ? "," : "") + quote(s->names[side]);
+        for (unsigned i = 0; i < own.size(); ++i)
+            json += (i ? "," : "") + quote(s->names[own[i]]);
         json += "],\"native_group\":" + std::string(p.providerEpoch == FloatingCards::EPOCH ? "true" : "false") +
                 ",\"fullscreen\":" + std::string(std::ranges::any_of(s->windows(), [](const auto &w) { return Fullscreen::controller()->isFullscreen(w.lock()); }) ? "true" : "false") + ",\"floating\":" + std::string(s->focused[s->active]->m_isFloating ? "true" : "false");
         const auto space = s->focused[s->active]->m_workspace;
         json += ",\"workspace\":{\"id\":" + std::to_string(space ? space->m_id : 0) + ",\"name\":" + quote(space ? space->m_name : "") +
                 ",\"special\":" + (space && space->m_isSpecialWorkspace ? "true" : "false") + "},\"layouts\":[";
-        for (unsigned side = 0; side < s->count; ++side) {
-            if (side) json += ',';
+        for (const unsigned side : own) {
+            if (side != own.front())
+                json += ',';
             json += "{\"axis\":" + quote(s->vertical[side] ? "vertical" : "horizontal") +
                     ",\"focused\":" + address(s->focused[side]) + ",\"ratios\":[";
             for (unsigned i = 0; i < s->faces[side].size(); ++i) {
@@ -2440,12 +2708,13 @@ std::string Controller::status() {
            ",\"card_rings\":" + (m_frames ? m_frames->rings() : "[]") +
            ",\"card_dividers\":" + (m_frames ? m_frames->dividers() : "[]") +
            ",\"native_cards\":true,\"floating_cards\":true,\"workspace_protection\":true,\"container_provider\":true" +
-           ",\"layout_controls\":true,\"repair_cards\":true,\"card_ungroup\":true,\"pane_replacement\":true" +
+           ",\"layout_controls\":true,\"repair_cards\":true,\"card_ungroup\":true,\"card_cover\":true,\"pane_"
+           "replacement\":true" +
            ",\"reveal\":true,\"reveal_slide\":true,\"last_slide_wait_ms\":" +
-           (Reveal::lastSlideWait() ? std::to_string(static_cast<long>(std::lround(*Reveal::lastSlideWait()))) : "null") +
+           (Reveal::lastSlideWait() ? std::to_string(static_cast<long>(std::lround(*Reveal::lastSlideWait())))
+                                    : "null") +
            ",\"container_max_panes\":" + std::to_string(CONTAINER_MAX_PANES) +
-           ",\"container_max_faces\":" + std::to_string(CONTAINER_MAX_FACES) +
-           ",\"switcher\":" + m_switcher->status() + ",\"switch_pending\":" +
-           (m_switch && !m_switch->open ? "true" : "false") + "}";
+           ",\"container_max_faces\":" + std::to_string(CONTAINER_MAX_FACES) + ",\"switcher\":" + m_switcher->status() +
+           ",\"switch_pending\":" + (m_switch && !m_switch->open ? "true" : "false") + "}";
 }
 } // namespace Hyprflip

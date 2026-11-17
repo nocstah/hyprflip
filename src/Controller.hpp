@@ -59,6 +59,11 @@ class Controller {
         // The face shown before the current one: a tap of the flip key on a
         // card with three or more faces goes back to it.
         std::optional<unsigned> lastFace;
+        // A window covering the card (card <id> cover): alone on an extra face
+        // after the card's own, which status and face numbers leave out.
+        PHLWINDOWREF cover;
+        // A window on the face the card shows again when the cover leaves.
+        PHLWINDOWREF uncoverTo;
     };
     struct State {
         // Faces 0..count-1; a plain pair always has two.
@@ -137,6 +142,18 @@ class Controller {
     Result flip(std::optional<Transition> preview = std::nullopt, Pair *target = nullptr,
                 std::optional<unsigned> to = std::nullopt);
     Result show(Pair &pair, unsigned side);
+    // The face holding only the card's cover, when it has one. A card keeps
+    // two faces of its own besides.
+    std::optional<unsigned> coverFace(const Pair &pair, const State &state) const;
+    // The faces scripts see and number: all but the cover's, in order.
+    static std::vector<unsigned> ownFaces(const State &state, std::optional<unsigned> cover);
+    // The face the card shows again when its cover leaves.
+    unsigned returnFace(const Pair &pair, const State &state, unsigned cover) const;
+    // The face status reports as shown, counted among the card's own: while the
+    // cover shows, the face it returns to.
+    unsigned reportedFace(const Pair &pair, const State &state) const;
+    Result cover(Pair &pair, const std::string &address);
+    Result uncover(Pair &pair);
     Result cardAction(const std::string &arguments);
     // The flip key: a tap turns; on a card with three or more faces it goes
     // back to the last face, and holding it opens the face switcher.

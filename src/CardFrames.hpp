@@ -19,6 +19,8 @@ inline std::string faceName(unsigned side, const std::string &name) { return nam
 struct CardFrameView {
     uint64_t id = 0;
     unsigned active = 0;
+    // The shown face as status counts it: among the card's own, without a cover.
+    unsigned reported = 0;
     bool unfolded = false;
     bool animating = false;
     // Frame draws the shared outline and controls; the accent ring surrounds

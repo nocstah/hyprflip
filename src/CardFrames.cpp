@@ -586,7 +586,7 @@ std::string CardFrames::status() {
         result += std::format(
             "{{\"id\":{},\"box\":[{},{},{},{}],\"button\":[{},{},{},{}],\"active\":{},\"unfolded\":{}}}",
             layout.view.id, layout.box.x, layout.box.y, layout.box.w, layout.box.h, layout.button.x, layout.button.y,
-            layout.button.w, layout.button.h, layout.view.active, layout.view.unfolded ? "true" : "false");
+            layout.button.w, layout.button.h, layout.view.reported, layout.view.unfolded ? "true" : "false");
     }
     return result + ']';
 }

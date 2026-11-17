@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased
+
+- A program can cover a card with a window of its own:
+  `hyprctl hyprflip card <id> cover <address>`. On a narrow screen, a workspace
+  manager can put the terminal someone works in over a card instead of beside
+  it. The window joins the card as an extra face after the last, and the card
+  shows it. Flips, the face key and the face switcher go round it like any
+  face. `card <id> show cover` and `face cover` turn to it, and
+  `card <id> uncover` takes it out as an ordinary tile again.
+- For scripts the card keeps its own faces. In `status`, `faces`, `names` and
+  `layouts` leave the cover out, and face numbers count only the card's own
+  faces, in `card <id> show <n>`, `card <id> name <n>`, `face <n>` and
+  Super+Ctrl+Alt+1 to 4. Each container reports `cover` and `covered`, and the
+  core reports `"card_cover": true`.
+- A card that goes to a special workspace leaves its cover where it was. The
+  cover's face takes no other app. If the person releases or closes the cover,
+  the card stays, with no cover. See
+  [covering a card](docs/SCRIPTING.md#cover-a-card-with-a-window).
+- The panel API reports `covered` for each card, and its `face`, `edit`,
+  `flip` and `add_face` requests take the cover into account.
+
 ## 0.3.0-rc.22 — 2026-11-13
 
 - Updating in place builds again. 0.3.0-rc.21 reused the Lua 5.4 that an

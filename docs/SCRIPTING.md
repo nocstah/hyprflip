@@ -18,6 +18,7 @@ lists:
 | `unfolded` | Both sides shown side by side |
 | `workspace` | `id`, `name` and `special` (true on a special workspace) |
 | `floating`, `box` | Placement, and the whole card's `[x, y, w, h]` |
+| `cover`, `covered` | The window covering the card, or null, and whether it is the face shown ([below](#cover-a-card-with-a-window)) |
 
 An id lasts as long as its card. After the plugin or Hyprland reloads, read
 the ids again.
@@ -59,7 +60,9 @@ hyprctl hyprflip restore quiet tiled 0 0 0 0 1200 900 \
 | Action | Behavior |
 | --- | --- |
 | `card <id> show front` / `show back` / `show <n>` | Show that face (`n` from 1: front is 1, back is 2); an unfolded card folds onto it |
+| `card <id> show cover` | Show the card's cover ([below](#cover-a-card-with-a-window)) |
 | `card <id> flip` | Turn the card with the configured transition; instantly when its workspace is not on screen |
+| `card <id> cover <address>` / `uncover` | Cover the card with a window, or take its cover out ([below](#cover-a-card-with-a-window)) |
 | `card <id> workspace <workspace>` | Move a multi-app card and follow it |
 | `card <id> workspace <workspace> silent` | Move it and stay where you are |
 | `card <id> ungroup` | Take the card or pair apart where it is ([below](#ungroup-a-card-by-id)) |
@@ -93,6 +96,91 @@ workspace, then moves them where they belong:
 hyprctl hyprflip card 12 workspace special:park silent
 hyprctl hyprflip card 12 ungroup
 ```
+
+## Cover a card with a window
+
+On a narrow screen, a program can put a window of its own over a card instead
+of beside it, such as the terminal someone works in. That window becomes the
+card's cover: a face of its own after the card's last face, which the card then
+shows. A flip, the face key and the face switcher go round the cover like any
+other face, so the person turns the cover over to the card's apps and back.
+Cores that have it report `"card_cover": true` in `status`.
+
+| Action | Behavior |
+| --- | --- |
+| `card <id> cover <address>` | The window, by its address with `0x`, becomes the card's cover, and the card shows it |
+| `card <id> show cover` | Turn the card to its cover, as `show` turns to any face |
+| `face cover` | Turn the focused card to its cover, as `face <n>` turns it; in Lua, `hl.plugin.hyprflip.face("cover")` |
+| `card <id> uncover` | The cover leaves the card and is an ordinary window again |
+
+For scripts, the card stays what it was. In `status`, `faces`, `names` and
+`layouts` leave the cover out, and face numbers count only the card's own faces:
+`card <id> show <n>`, `card <id> name <n>`, `face <n>` and Super+Ctrl+Alt+1 to 4.
+`card_frames` and `drop_targets` count them the same way; a drop target on the
+cover has `"side": null`. Each container also has:
+
+| Field | Meaning |
+| --- | --- |
+| `cover` | The cover's address, or null |
+| `covered` | True while the cover is the face shown |
+| `active` | While covered, the face the card shows again when the cover leaves |
+| `current` | The focused app of that face |
+
+Covering:
+
+- A tiled cover's own tile closes and the card takes its place.
+- The keyboard goes to the cover when the cover or one of the card's apps had
+  it, and otherwise stays where it was. The pointer never moves.
+- The cover's face is named after the app, which the card header and the face
+  switcher show. `names` leaves it out.
+- It is refused with a sentence when the card is a pair, already has a cover,
+  has four faces, or is unfolded, fullscreen or on a special workspace; and when
+  the window is not mapped, is in a card, pair or group, is fullscreen, or is on
+  another workspace than the card.
+
+Uncovering:
+
+- The cover's face goes. The window becomes an ordinary window on the card's
+  workspace, in a tile of its own beside the card.
+- If the cover was showing, the card shows the face it showed before, or its
+  front if that face has gone.
+- The keyboard stays on the cover if it had it.
+- A card with no cover replies `ok` and nothing changes.
+
+Out of sight, a card never takes its cover along. `card <id> workspace
+special[:<name>]` uncovers the card first, in the same call, so the cover stays
+where the card was. A move to a numbered or named workspace takes the cover
+along.
+
+Card mode swaps cards under the program's window in one batch: the card that
+leaves gives its cover back to the tile as it parks, and the next comes in
+beside the cover and takes it, filling the tile:
+
+```sh
+hyprctl --batch "hyprflip card 12 workspace special:park silent ; \
+  hyprflip card 13 workspace 3 silent ; hyprflip card 13 cover 0x55d0a1b2c5f0"
+```
+
+The cover can also leave without the program:
+
+- If the person releases or closes the cover, the card has no cover any more
+  (`"cover": null`) and shows the face it showed before.
+- Releasing the last app of one of the card's two own faces takes the card
+  apart, as it does without a cover.
+- `card <id> ungroup`, an update and unloading the plugin leave the cover as an
+  ordinary window, like the card's apps. An update rebuilds the card without
+  its cover.
+
+The cover's face takes no other app. Attaching an app to it, dropping one on
+it and the menus' edits are refused: "This face is the card's cover and holds
+only that window." An app can still join the card as a new face, after the
+cover, and moving an app to the next face skips the cover. A card with a cover
+has room for three faces of its own. Like any card with three faces, a card
+with two faces and a cover turns with the sideways slide when the transition is
+flip, vertical or slide.
+
+`save` in [`control.py unattended`](#save-a-card) saves the card's own faces;
+its `members` leave the cover out.
 
 ## Swap with an animation
 
@@ -148,15 +236,16 @@ panes open. A card over a plain window brings its frame in with its panes.
 
 ## Scripted calls and input
 
-`card <id> workspace <workspace> silent`, `card <id> ungroup` and
-`restore quiet …` go ahead while the screen is locked and while a button is
-held on another window. They still refuse while:
+`card <id> workspace <workspace> silent`, `card <id> ungroup`,
+`card <id> cover …`, `card <id> uncover` and `restore quiet …` go ahead while
+the screen is locked and while a button is held on another window. They still
+refuse while:
 
 - a keyboard or pointer grab is active, such as an open popup menu;
 - a drag-and-drop is in progress;
 - the pointer is locked or confined;
 - a button pressed on one of the card's windows is still held (for a quiet
-  restore, on one of the apps it names);
+  restore, on one of the apps it names; for a cover, on the card or the cover);
 - one of those windows is being moved or resized, including a move the app
   asks for itself, such as dragging a GTK header bar.
 
@@ -382,7 +471,7 @@ late. `card` is the new card's id, ready for `card <id> …` calls.
 caller's store. It never focuses, moves or changes the card, and it never
 touches the user's library.
 
-- `members` must be exactly the card's apps (`changed`). An unknown id is
+- `members` must be exactly the card's apps, without its cover (`changed`). An unknown id is
   `no_card`, a pair `not_native`, and a fullscreen card `fullscreen`.
 - `previous` is the token the caller last read for `name`, or null for a new
   name. A token that no longer matches, or null for a name that exists, is
@@ -525,6 +614,7 @@ and checked names only, and its replies and its store carry no title either.
 ## How this is tested
 
 `tests/card_id_workflows.py` checks the calls by id,
+`tests/cover_workflows.py` covers,
 `tests/reveal_workflows.py` the swap with an animation and
 `tests/unattended_workflows.py` the helper, each in a nested session with only
 the core loaded. The refusal during a move the app asks for itself has been

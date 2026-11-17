@@ -1,5 +1,58 @@
 # Validation
 
+## Cover a card with a window (2026-11-17)
+
+All three CTest checks and all 408 Python unit tests pass. Five of the unit
+tests are new, in `tests/panel_control_test.py`. They check how the panel
+handles a covered card:
+- the snapshot leaves the cover out of `faces` and reports `covered`;
+- `face` turns away from the cover, and a turn that leaves the cover shown is
+  reported;
+- `flip` turns from the cover;
+- `add_face` counts the cover.
+
+The new `tests/cover_workflows.py` passed all 14 of its checks in a fresh
+nested session (Hyprland 0.56.2, Aquamarine 0.15.1 with the render-node patch),
+started with `--notify-recorder` and run with `--protocol` pointing to
+`wlr-virtual-pointer-unstable-v1.xml`. It ran again on the final build.
+Earlier runs without the drag check passed 12 and 13 checks. The checks cover:
+- the status flag, and a card with no cover;
+- every refusal, including a popup grab, which changes no card;
+- the cover's status, keyboard and tile;
+- numbering by the card's own faces in `show`, `name`, `face` and the Lua
+  `face`, with `show cover`, `face cover` and the order of flips;
+- apps added to the cover's face, to another face and as a new face, and
+  `other_side`;
+- uncover, and the keyboard rule;
+- moves to numbered and special workspaces;
+- the batch that swaps cards under a cover, with the pointer and keyboard
+  unchanged;
+- a real Super-drag onto the cover's face, refused with its notification;
+- `control.py unattended save` of a covered card;
+- with 300 ms animations: turns by flip, `face cover` and the switcher, and an
+  uncover, park or cover closing during a turn;
+- the cover released or closed by the user;
+- ungroup and unload.
+
+These suites also passed against this core, each in its own fresh session,
+built before a change that only reformatted lines and reworded a usage reply.
+The last three were started with `--notify-recorder`:
+- `card_id_workflows.py` (13);
+- `multiface_workflows.py` (9);
+- `edit_workflows.py` (14);
+- `switcher_workflows.py` (11);
+- `dwindle_workflows.py` (7);
+- `layout_workflows.py` (6);
+- `floating_workflows.py` (10);
+- `card_interactions.py` (9, with `--protocol`);
+- `unattended_workflows.py` (12);
+- `reveal_workflows.py` (19);
+- `nearby_card_workflows.py` (6).
+
+Not checked: a native Hyprland move of the card's group to a special workspace
+that bypasses Hyprflip (the cover goes along), and the menus' edits on the
+cover's face, which go through the same refusal as `attach`.
+
 ## Updating a build directory in place; release checks for 0.3.0-rc.22 (2026-11-13)
 
 Found on the pilot desktop: OmaCards' panel installing 0.3.0-rc.21 over its
