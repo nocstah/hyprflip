@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Fix: helper status reads no longer fail on an app class containing
+  'Lua error' or invalid UTF-8.
 - A program can cover a card with a window of its own:
   `hyprctl hyprflip card <id> cover <address>`. On a narrow screen, a workspace
   manager can put the terminal someone works in over a card instead of beside

@@ -173,10 +173,14 @@ class Hyprctl:
         self.env = env
 
     def call(self, *args):
+        # Replies carry text that apps and people choose (window classes, workspace
+        # names), so bytes that are not UTF-8 are replaced, and "Lua error" counts
+        # only in a reply that is not JSON.
         result = subprocess.run(['hyprctl', *args], env=self.env, capture_output=True,
-                                text=True, timeout=8)
+                                encoding='utf-8', errors='replace', timeout=8)
         reply = result.stdout.strip()
-        if result.returncode or reply.startswith('error') or 'Lua error' in reply:
+        if (result.returncode or reply.startswith('error') or
+                (not reply.startswith(('{', '[')) and 'Lua error' in reply)):
             raise SetupError(reply.removeprefix('error: ').strip() or 'Hyprland is not responding.')
         return reply
 
