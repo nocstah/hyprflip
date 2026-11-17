@@ -1,5 +1,6 @@
 #include <vector>
 #include "AccentColor.hpp"
+#include "CloseLedger.hpp"
 #include "InputGuard.hpp"
 #include "SplitLayout.hpp"
 #include "Timeline.hpp"
@@ -13,8 +14,183 @@ static void require(bool condition, const char *message) {
     }
 }
 
+// Close requests matched to closes, the record ring, and the "closes" JSON, on fake times.
+static void closeLedger() {
+    using namespace Hyprflip;
+    using std::chrono::milliseconds, std::chrono::seconds, std::chrono::minutes;
+    const Clock::time_point t0{};
+    const CloseWatch both{true, true}, closeOnly{true, false}, none{};
+    const auto ledger = [] { return CloseLedger("0123456789abcdef"); };
+    const auto isOwn = [](const CloseVerdict &v, CloseReason reason) {
+        return v.reason == reason && !v.via && !v.askedMs && !v.pid;
+    };
+    {
+        auto l = ledger();
+        l.ask(1, CloseAsk::Close, CloseVia::Key, 4242, t0);
+        const auto v = l.closed(1, t0 + seconds(119), both);
+        require(v.reason == CloseReason::Requested && v.via == CloseVia::Key && v.askedMs == 119000 && v.pid == 4242,
+                "a close unmapped within 120 s reads requested, with its via, the time since and the pid");
+    }
+    for (const auto &[watch, reason] : {std::pair{both, CloseReason::Own}, std::pair{closeOnly, CloseReason::Unknown}}) {
+        auto l = ledger();
+        l.ask(1, CloseAsk::Close, CloseVia::Key, 4242, t0);
+        require(isOwn(l.closed(1, t0 + milliseconds(120001), watch), reason),
+                "a close past 120 s reads own with both hooks and unknown without, with no via, time or pid");
+    }
+    {
+        auto l = ledger();
+        l.ask(1, CloseAsk::Kill, CloseVia::Key, 7, t0);
+        require(l.closed(1, t0 + seconds(9), both).reason == CloseReason::Killed, "a kill unmapped within 10 s reads killed");
+        l.ask(1, CloseAsk::Kill, CloseVia::Key, 7, t0);
+        require(isOwn(l.closed(1, t0 + milliseconds(10001), both), CloseReason::Own), "a kill past 10 s reads own");
+    }
+    {
+        auto l = ledger();
+        l.ask(1, CloseAsk::Close, CloseVia::Other, 7, t0);
+        l.ask(1, CloseAsk::Kill, CloseVia::Click, 8, t0 + seconds(1));
+        const auto killed = l.closed(1, t0 + seconds(2), both);
+        require(killed.reason == CloseReason::Killed && killed.via == CloseVia::Click && killed.askedMs == 1000 &&
+                    killed.pid == 8,
+                "a live kill wins over a live close");
+        l.ask(1, CloseAsk::Close, CloseVia::Other, 7, t0);
+        l.ask(1, CloseAsk::Kill, CloseVia::Click, 8, t0 + seconds(1));
+        const auto requested = l.closed(1, t0 + seconds(15), both);
+        require(requested.reason == CloseReason::Requested && requested.via == CloseVia::Other &&
+                    requested.askedMs == 15000 && requested.pid == 7,
+                "an expired kill leaves a live close to decide");
+    }
+    {
+        auto l = ledger();
+        l.ask(1, CloseAsk::Close, CloseVia::Other, 7, t0);
+        l.ask(1, CloseAsk::Close, CloseVia::Key, 7, t0 + seconds(100));
+        const auto v = l.closed(1, t0 + seconds(200), both);
+        require(v.reason == CloseReason::Requested && v.via == CloseVia::Key && v.askedMs == 100000,
+                "a repeated close restarts the clock and its via wins");
+    }
+    {
+        auto l = ledger();
+        l.ask(1, CloseAsk::Close, CloseVia::Key, 7, t0);
+        require(l.closed(1, t0 + seconds(1), both).reason == CloseReason::Requested, "the first close uses the request");
+        require(isOwn(l.closed(1, t0 + seconds(2), both), CloseReason::Own), "a second close of the same id reads own");
+        require(isOwn(l.closed(2, t0 + seconds(2), both), CloseReason::Own), "a close with no request reads own");
+        for (const int pid : {0, -1}) {
+            l.ask(3, CloseAsk::Close, CloseVia::Key, pid, t0);
+            const auto v = l.closed(3, t0 + seconds(1), both);
+            require(v.reason == CloseReason::Requested && !v.pid, "a pid of zero or less is stored as none");
+        }
+    }
+    {
+        auto l = ledger();
+        for (uint64_t id = 1; id <= 130; ++id)
+            l.ask(id, CloseAsk::Close, CloseVia::Key, 7, t0 + milliseconds(id));
+        require(l.pendingCount() == PENDING_LIMIT, "at most 128 windows have a request pending");
+        require(isOwn(l.closed(1, t0 + seconds(1), both), CloseReason::Own) &&
+                    isOwn(l.closed(2, t0 + seconds(1), both), CloseReason::Own) &&
+                    l.closed(3, t0 + seconds(1), both).reason == CloseReason::Requested,
+                "past 128 pending windows, the ones asked longest ago are dropped");
+    }
+    {
+        auto l = ledger();
+        l.ask(1, CloseAsk::Kill, CloseVia::Key, 7, t0);
+        l.ask(2, CloseAsk::Close, CloseVia::Key, 7, t0);
+        l.ask(3, CloseAsk::Close, CloseVia::Key, 7, t0 + seconds(11));
+        require(l.pendingCount() == 2, "a kill past 10 s is pruned on the next request; a live close stays");
+        l.ask(4, CloseAsk::Close, CloseVia::Key, 7, t0 + seconds(132));
+        require(l.pendingCount() == 1, "closes past 120 s are pruned on the next request");
+    }
+    // The record ring.
+    {
+        auto l = ledger();
+        for (uint64_t seq = 1; seq <= 3; ++seq)
+            require(l.append({}, t0) == seq, "append numbers records 1, 2, 3");
+        for (int i = 0; i < 67; ++i)
+            l.append({}, t0);
+        const auto json = l.json(t0, true, both);
+        size_t listed = 0;
+        for (size_t at = json.find("\"seq\":"); at != std::string::npos; at = json.find("\"seq\":", at + 1))
+            ++listed;
+        require(listed == RECORD_LIMIT && json.contains("\"next\":71,\"oldest\":7,") &&
+                    json.contains("{\"seq\":7,") && json.contains("{\"seq\":70,") && !json.contains("{\"seq\":6,"),
+                "70 records keep the newest 64: oldest 7, next 71");
+        require(l.json(t0 + minutes(10), true, both).contains("\"oldest\":7,"), "a record 10 minutes old is kept");
+        require(l.json(t0 + minutes(10) + milliseconds(1), true, both) ==
+                    R"({"instance":"0123456789abcdef","next":71,"oldest":71,"watch":{"close":true,"kill":true},"list":[]})",
+                "records older than 10 minutes are dropped, and with none listed oldest is next");
+    }
+    // Text and JSON.
+    require(CloseLedger::text("\xff\xfe") == "\xef\xbf\xbd\xef\xbf\xbd", "bytes that start no UTF-8 sequence become U+FFFD");
+    require(CloseLedger::text("a\xc0\xaf" "b\xed\xa0\x80" "c\xf4\x90\x80\x80") ==
+                "a\xef\xbf\xbd\xef\xbf\xbd" "b\xef\xbf\xbd\xef\xbf\xbd\xef\xbf\xbd" "c\xef\xbf\xbd\xef\xbf\xbd\xef\xbf\xbd\xef\xbf\xbd",
+            "overlong forms, surrogates and code points past U+10FFFF are replaced");
+    require(CloseLedger::text("caf\xc3\xa9 \xe2\x82\xac \xf0\x9f\x83\x8f") == "caf\xc3\xa9 \xe2\x82\xac \xf0\x9f\x83\x8f",
+            "valid UTF-8 is kept");
+    {
+        std::string wide;
+        for (int i = 0; i < 100; ++i)
+            wide += "\xe2\x82\xac";
+        const auto cut = CloseLedger::text(wide);
+        require(cut.size() <= TEXT_LIMIT && cut.size() == 255 && CloseLedger::text(cut) == cut,
+                "text is cut to 256 bytes at a code-point boundary");
+    }
+    require(CloseLedger::quote("a\"b\\c\n") == R"("a\"b\\c\u000a")", "quote escapes quotes, backslashes and controls");
+    require(ledger().json(t0, false, none) ==
+                R"({"instance":"0123456789abcdef","next":1,"oldest":1,"watch":{"close":false,"kill":false},"list":[]})",
+            "an empty ledger's JSON");
+    {
+        auto l = ledger();
+        CloseRecord inCard;
+        inCard.address = 0x55d0a1b2c3e0;
+        inCard.stableId = 0x40;
+        inCard.pid = 41234;
+        inCard.initialClass = "org.gnome.TextEditor";
+        inCard.workspaceId = 3;
+        inCard.workspaceName = "3";
+        inCard.place = {12, 1, 0, 3, false};
+        inCard.verdict = {CloseReason::Requested, CloseVia::Key, 140, 41234};
+        l.append(inCard, t0);
+        CloseRecord cover;
+        cover.address = 0x55d0a1b2c3d0;
+        cover.stableId = 0x3f;
+        cover.initialClass = "org.gnome.Nautilus";
+        cover.workspaceId = -98;
+        cover.workspaceName = "special:park";
+        cover.workspaceSpecial = true;
+        cover.place = {12, std::nullopt, std::nullopt, std::nullopt, true};
+        cover.dissolved = true;
+        cover.verdict = {CloseReason::Own, std::nullopt, std::nullopt, std::nullopt};
+        l.append(cover, t0 + milliseconds(30));
+        CloseRecord loose;
+        loose.address = 0x1;
+        loose.stableId = 0x2137;
+        loose.initialClass = "Lua error \"x\"";
+        loose.verdict = {CloseReason::Killed, CloseVia::Click, 5, std::nullopt};
+        l.append(loose, t0 + milliseconds(830));
+        const std::string head = R"({"instance":"0123456789abcdef","next":4,"oldest":1,"watch":{"close":true,"kill":true},"list":[)";
+        const std::string first =
+            R"({"seq":1,"age_ms":830,"address":"0x55d0a1b2c3e0","stable_id":"40","pid":41234,)"
+            R"("initial_class":"org.gnome.TextEditor","workspace":{"id":3,"name":"3","special":false},)"
+            R"("card":12,"face":1,"index":0,"faces":3,"cover":false,"dissolved":false,"reason":"requested","via":"key","asked_ms":140})";
+        const std::string second =
+            R"({"seq":2,"age_ms":800,"address":"0x55d0a1b2c3d0","stable_id":"3f","pid":null,)"
+            R"("initial_class":"org.gnome.Nautilus","workspace":{"id":-98,"name":"special:park","special":true},)"
+            R"("card":12,"face":null,"index":null,"faces":null,"cover":true,"dissolved":true,"reason":"own","via":null,"asked_ms":null})";
+        const std::string third =
+            R"({"seq":3,"age_ms":0,"address":"0x1","stable_id":"2137","pid":null,"initial_class":"Lua error \"x\"",)"
+            R"("workspace":null,"card":null,"face":null,"index":null,"faces":null,"cover":false,"dissolved":false,)"
+            R"("reason":"killed","via":"click","asked_ms":5})";
+        const auto json = l.json(t0 + milliseconds(830), true, both);
+        require(json == head + first + ',' + second + ',' + third + "]}",
+                "records list every field in order: in a card, the cover, and in no card with no workspace");
+        const auto halfHooked = l.json(t0 + milliseconds(830), false, closeOnly);
+        require(halfHooked.contains(R"("cover":true,"dissolved":true,"reason":"unknown","via":null)") &&
+                    !halfHooked.contains(R"("reason":"own")") && halfHooked.contains(R"("watch":{"close":true,"kill":false})"),
+                "without both hooks no record claims own");
+    }
+}
+
 int main() {
     using namespace Hyprflip;
+    closeLedger();
     require(balancedSplit(840, {200, 2000}, {200, 2000}) == 420, "unfold keeps balanced faces when both fit");
     require(balancedSplit(840, {200, 2000}, {530, 2000}) == 310, "a tall back face gets enough room on a laptop");
     require(balancedSplit(1400, {860, 2000}, {450, 2000}) == 860, "a wide front face keeps its minimum width");
@@ -143,5 +319,6 @@ int main() {
             }
         }
     }
-    std::cout << "Face size constraints, input guards, timeline, reversals, stalls and perspective bounds passed\n";
+    std::cout << "Close ledger, face size constraints, input guards, timeline, reversals, stalls and perspective bounds "
+                 "passed\n";
 }

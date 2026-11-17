@@ -1,10 +1,12 @@
 #include "AccentColor.hpp"
+#include "CloseReasons.hpp"
 #include "Controller.hpp"
 #include "FloatingCards.hpp"
 #include "Reveal.hpp"
 #include <algorithm>
 #include <bit>
 #include <charconv>
+#include <cstdlib>
 #include <cstring>
 #include <dlfcn.h>
 #include <filesystem>
@@ -35,6 +37,7 @@
 #include <hyprland/src/render/decorations/IHyprWindowDecoration.hpp>
 #include <limits>
 #include <cctype>
+#include <random>
 #include <linux/input-event-codes.h>
 #include <sstream>
 
@@ -139,10 +142,17 @@ PHLWINDOW pointerWindow() {
     }
     return CWindow::fromView(view);
 }
+// 16 lower-case hex digits, new for each load of the plugin: a status reader
+// that sees another instance knows the close records started again.
+std::string closeInstance() {
+    std::random_device random;
+    return std::format("{:08x}{:08x}", uint32_t(random()), uint32_t(random()));
+}
 } // namespace
 
 Controller::Controller(HANDLE handle, Settings settings)
-    : m_handle(handle), m_settings(std::move(settings)), m_shader(std::make_shared<FlipShader>()) {
+    : m_handle(handle), m_settings(std::move(settings)), m_shader(std::make_shared<FlipShader>()),
+      m_closes(closeInstance()) {
     // Only a watchdog for outputs that stop presenting (e.g. DPMS). Motion is
     // sampled by the output's render cycle, never by an independent timer.
     m_timer = makeShared<CEventLoopTimer>(std::nullopt, [this](SP<CEventLoopTimer>, void *) {
@@ -159,6 +169,10 @@ Controller::Controller(HANDLE handle, Settings settings)
     }, nullptr);
     g_pEventLoopManager->addTimer(m_switchTimer);
     FloatingCards::install(handle);
+    // HYPRFLIP_CLOSE_HOOKS=0 in Hyprland's environment leaves the close hooks out, as on a
+    // machine that cannot hook, so that case can be tried here.
+    const char *closeHooks = getenv("HYPRFLIP_CLOSE_HOOKS");
+    m_closeWatch = CloseReasons::install(handle, &m_closes, !(closeHooks && std::string_view(closeHooks) == "0"));
     m_frames = std::make_unique<CardFrames>([this]() { return frameViews(); }, [this](uint64_t id) {
         // A button is a click on release. Leave the input dispatch stack before
         // changing layout/focus, and resolve the card again in case it closed.
@@ -198,6 +212,11 @@ Controller::Controller(HANDLE handle, Settings settings)
                 monitor->scheduleFrame();
     }));
     m_listeners.emplace_back(e.window.close.listen([this](PHLWINDOW w) { onClose(w); }));
+    // hyprctl kill and a click: Hyprland says which window before it kills, so no hook is needed.
+    m_listeners.emplace_back(e.window.kill.listen([this](PHLWINDOW w) {
+        if (w)
+            m_closes.ask(w->m_stableID, CloseAsk::Kill, CloseVia::Click, w->getPID(), Clock::now());
+    }));
     m_listeners.emplace_back(e.window.destroy.listen([this](PHLWINDOWREF) { deferReconcile(); }));
     m_listeners.emplace_back(e.window.active.listen([this](PHLWINDOW w, Desktop::eFocusReason) { onFocus(w); }));
     m_listeners.emplace_back(e.window.moveToWorkspace.listen([this](PHLWINDOW, PHLWORKSPACE) {
@@ -336,6 +355,7 @@ Controller::~Controller() {
             g->setLocked(pair.previousLock);
     }
     m_pairs.clear();
+    CloseReasons::uninstall();
     FloatingCards::shutdown();
     m_marked.reset();
     m_shader.reset();
@@ -663,6 +683,8 @@ void Controller::deferReconcile() {
     m_reconcileLater = g_pEventLoopManager->doLaterLock([this]() { reconcile(); });
 }
 void Controller::onClose(PHLWINDOW w) {
+    // The window's place before anything below changes its card.
+    const auto place = placeOf(w);
     if (m_peek && std::ranges::find(m_peek->windows, w) != m_peek->windows.end()) m_peek.reset();
     if (m_marked == w)
         m_marked.reset();
@@ -710,7 +732,56 @@ void Controller::onClose(PHLWINDOW w) {
             }
     }
     m_mutating = mutating;
+    const bool dissolved = place.card && ([&] {
+        const auto *p = find(*place.card);
+        return !p || !state(*p);
+    })();
+    noteClose(w, place, dissolved);
     deferReconcile();
+}
+ClosePlace Controller::placeOf(PHLWINDOW w) {
+    for (const auto &p : m_pairs) {
+        if (!p.containerID)
+            continue;
+        const auto s = state(p);
+        if (!s || !s->contains(w))
+            continue;
+        const auto coverAt = coverFace(p, *s);
+        if (coverAt && s->faces[*coverAt][0] == w)
+            return {p.id, std::nullopt, std::nullopt, std::nullopt, true};
+        const auto own = ownFaces(*s, coverAt);
+        for (unsigned face = 0; face < own.size(); ++face) {
+            const auto &apps = s->faces[own[face]];
+            if (const auto at = std::ranges::find(apps, w); at != apps.end())
+                return {p.id, face, unsigned(at - apps.begin()), unsigned(own.size()), false};
+        }
+    }
+    return {};
+}
+void Controller::noteClose(PHLWINDOW w, const ClosePlace &place, bool dissolved) {
+    const auto now = Clock::now();
+    auto verdict = m_closes.closed(w->m_stableID, now, m_closeWatch);
+    if (verdict.reason != CloseReason::Requested && verdict.reason != CloseReason::Killed && !place.card)
+        return;
+    CloseRecord record;
+    record.address = reinterpret_cast<uintptr_t>(w.get());
+    record.stableId = w->m_stableID;
+    // Taken at the request where there was one: a Wayland app's pid reads -1 once it is gone.
+    if (verdict.pid && *verdict.pid > 0)
+        record.pid = verdict.pid;
+    else if (const auto pid = w->getPID(); pid > 0)
+        record.pid = pid;
+    // The class the app opened with, never its title or current class.
+    record.initialClass = w->m_initialClass;
+    if (const auto space = w->m_workspace) {
+        record.workspaceId = space->m_id;
+        record.workspaceName = space->m_name;
+        record.workspaceSpecial = space->m_isSpecialWorkspace;
+    }
+    record.place = place;
+    record.dissolved = dissolved;
+    record.verdict = std::move(verdict);
+    m_closes.append(std::move(record), now);
 }
 void Controller::onFocus(PHLWINDOW w) {
     if (m_mutating)
@@ -1452,6 +1523,10 @@ Result Controller::flip(std::optional<Transition> preview, Pair *target, std::op
             for (unsigned slot = 0; slot < captures; ++slot) {
                 const auto face = ring ? needed[slot] : m_turn->face(slot);
                 const auto index = ring ? face : slot;
+                if (index >= pose->faces.size()) {
+                    pose->error = "A face past the transition's slots";
+                    break;
+                }
                 select(*p, face, false);
                 pose->faces[index] = m_shader->captureFace(s->faces[face], monitor, pose->error);
                 if (!pose->faces[index]) break;
@@ -2305,7 +2380,7 @@ void Controller::onFrame(PHLMONITOR monitor) {
 //   <tiled|floating> <active> <unfolded> <x> <y> <w> <h>
 //   front <horizontal|vertical> <focused> <address:ratio>...
 //   back  <horizontal|vertical> <focused> <address:ratio>...
-//   [face <horizontal|vertical> <focused> <address:ratio>...]  a third face, then a fourth
+//   [face <horizontal|vertical> <focused> <address:ratio>...]  each further face, up to CONTAINER_MAX_FACES
 Result Controller::restore(const std::string &arguments) {
     std::istringstream input(arguments);
     std::string mode, token;
@@ -2749,7 +2824,10 @@ std::string Controller::status() {
            (Reveal::lastSlideWait() ? std::to_string(static_cast<long>(std::lround(*Reveal::lastSlideWait())))
                                     : "null") +
            ",\"container_max_panes\":" + std::to_string(CONTAINER_MAX_PANES) +
-           ",\"container_max_faces\":" + std::to_string(CONTAINER_MAX_FACES) + ",\"switcher\":" + m_switcher->status() +
+           ",\"container_max_faces\":" + std::to_string(CONTAINER_MAX_FACES) +
+           ",\"close_reasons\":" + std::string(m_closeWatch.complete() ? "true" : "false") +
+           ",\"closes\":" + m_closes.json(Clock::now(), m_closeWatch.complete(), m_closeWatch) +
+           ",\"switcher\":" + m_switcher->status() +
            ",\"switch_pending\":" + (m_switch && !m_switch->open ? "true" : "false") + "}";
 }
 } // namespace Hyprflip

@@ -1,4 +1,5 @@
 #include "FloatingCards.hpp"
+#include "FunctionHook.hpp"
 #include "SplitLayout.hpp"
 #include <algorithm>
 #include <cstring>
@@ -1276,23 +1277,12 @@ PHLWINDOW windowWithin(const Desktop::CViewHitTester *self, const Vector2D &pos,
         }
     return found;
 }
-CFunctionHook *hook(void *handle, const std::string &name, const std::string &owner, void *replacement) {
-    for (const auto &match : HyprlandAPI::findFunctionsByName(handle, name))
-        if (match.demangled.find(owner + "::" + name) != std::string::npos) {
-            auto result = HyprlandAPI::createFunctionHook(handle, match.address, replacement);
-            if (result && !result->hook()) {
-                HyprlandAPI::removeFunctionHook(handle, result);
-                result = nullptr;
-            }
-            return result;
-        }
-    return nullptr;
-}
 } // namespace
 void install(void *handle) {
     plugin = handle;
-    focusHook = hook(handle, "fullWindowFocus", "CFocusState", reinterpret_cast<void *>(&focusWithin));
-    hitHook = hook(handle, "windowAt", "CViewHitTester", reinterpret_cast<void *>(&windowWithin));
+    focusHook = hookFunction(handle, "fullWindowFocus", "Desktop::CFocusState::fullWindowFocus(",
+                             reinterpret_cast<void *>(&focusWithin));
+    hitHook = hookFunction(handle, "windowAt", "Desktop::CViewHitTester::windowAt(", reinterpret_cast<void *>(&windowWithin));
 }
 bool focusShared() { return focusHook && hitHook; }
 void fullscreened(PHLWINDOW w) {

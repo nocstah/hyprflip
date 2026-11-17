@@ -176,6 +176,16 @@ class SetupInstallTest(unittest.TestCase):
         with self.assertRaises(SystemExit): self.install()
         self.assertIn('require("hypr.hyprflip-mouse")', self.main.read_text())
 
+    def test_status_naming_lua_error_installs_and_plain_lua_error_refuses(self):
+        # A closed app's class stays in the status for 10 minutes; only a reply
+        # that is not JSON counts as Hyprland's own Lua error.
+        self.state['closes'] = {'list': [{'initial_class': 'Lua error: boom', 'reason': 'requested'}]}
+        with self.assertRaises(SystemExit) as result: self.install()
+        self.assertEqual(result.exception.code, 0)
+        self.assertTrue(self.module.exists())
+        self.state = 'Lua error: boom'
+        with self.assertRaisesRegex(RuntimeError, 'Lua error: boom'): self.install()
+
     def test_parse_failure_restores_exact_files_and_removes_new_files(self):
         self.fail_reload = True
         with self.assertRaisesRegex(RuntimeError, 'Injected parse failure'): self.install()

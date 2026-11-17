@@ -12,9 +12,14 @@ import workflow
 
 
 def ctl(*args):
-    result = subprocess.run(['hyprctl', *args], capture_output=True, text=True, timeout=8)
+    # The status carries app- and user-chosen text (closed apps' classes,
+    # workspace names), so this reads replies as workflow.Hyprctl.call does:
+    # bytes that are not UTF-8 are replaced, and "Lua error" counts only in a
+    # reply that is not JSON.
+    result = subprocess.run(['hyprctl', *args], capture_output=True, encoding='utf-8', errors='replace', timeout=8)
     reply = result.stdout.strip()
-    if result.returncode or reply.startswith('error') or 'Lua error' in reply:
+    if (result.returncode or reply.startswith('error') or
+            (not reply.startswith(('{', '[')) and 'Lua error' in reply)):
         raise RuntimeError(reply or result.stderr)
     return reply
 
