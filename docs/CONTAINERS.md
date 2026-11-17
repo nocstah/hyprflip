@@ -1,6 +1,6 @@
 # Multi-app cards
 
-A multi-app card holds one to five apps on each of its faces: two, or up to four. The Hyprflip
+A multi-app card holds one to five apps on each of its faces: two, or up to six. The Hyprflip
 core builds it on Omarchy's default **dwindle** layout, or as a floating card;
 no other layout plugin is involved. For installation, follow the
 [dwindle installation guide](INSTALL.md#dwindle-multi-app-cards), including the
@@ -12,7 +12,7 @@ acceptance checks.
 Flip one desktop tile between two views of a task. For example, Gmail on the
 front and up to five messaging applications sharing its reverse side.
 
-Two to four faces, at most five panes per face, one split per face. The card's workspace
+Two to six faces, at most five panes per face, one split per face. The card's workspace
 command moves its applications together. A flip restores the last focused application on
 the destination face. Closing an application never closes the other applications.
 Releasing a pane and disabling the effect must leave ordinary usable windows.
@@ -119,7 +119,7 @@ nothing. Scratchpad and drag bindings are not replaced by this module.
 
 A card starts with a front and a back. Mark an app and run `attach face`
 (`hl.plugin.hyprflip.attach("face")`, or **Add an app as a new face** in the
-card menu and OmaCards) to add it as Face 3, then Face 4; the card turns to the
+card menu and OmaCards) to add it as Face 3, Face 4, …, Face 6; the card turns to the
 new face. Each flip turns to the next face, and the last comes round to the
 front; `card <id> show <n>` turns straight to face `n`. Moving an app to the
 other side moves it to the next face. Taking the only app off a face removes
@@ -147,16 +147,19 @@ fingers, and 0 turns the swipe off; elsewhere on the screen the same swipe
 still does whatever Hyprland is set to do.
 
 **Super+Ctrl+Alt+1** to **4** go straight to that face, sliding past the
-faces between; `hyprctl hyprflip face <n>` does the same from scripts.
+faces between; `hyprctl hyprflip face <n>` does the same from scripts. Faces 5
+and 6 have no key of their own: flip, swipe or pick them in the switcher, or use
+`face 5`, `face 6` or `card <id> show <n>`.
 
 A program can also cover a card with a window of its own, such as the terminal
 it runs in: the window joins the card as an extra face after the last, and the
 card shows it. Flips and the switcher go round it like any face; the digits
-count only the card's own faces, and `face cover` turns to the cover. See
+count only the card's own faces, and `face cover` turns to the cover. The cover
+takes one of the six faces, so a covered card has room for five of its own. See
 [covering a card](SCRIPTING.md#cover-a-card-with-a-window).
 
-Faces can be named, say Mail or Code, in place of Front, Back, Face 3 and
-Face 4: **Name this face…** in Edit card names the face shown, and
+Faces can be named, say Mail or Code, in place of Front, Back, Face 3 and on
+to Face 6: **Name this face…** in Edit card names the face shown, and
 `card <id> name <n> [name]` names any face; leaving the name empty gives the
 default back. The name shows in the card header, the switcher and the drop
 target, and saved cards, updates and `restore` keep it.

@@ -224,7 +224,7 @@ Hold **Super + Ctrl + Alt** for the following keys:
 | **Return** | Fullscreen the whole dwindle or floating card; press again to leave | Guided helper |
 | **H** / **V** | Add the marked app beside or below the focused pane | Guided helper |
 | **E** | Take the focused app out of its card | Guided helper |
-| **N** | Add the marked app as a new face, up to four | Guided helper |
+| **N** | Add the marked app as a new face, up to six | Guided helper |
 | **1**–**4** | Go straight to that face of the focused card | Guided helper |
 
 Use **K** when you remember the app, and **L** when you want a saved arrangement.
@@ -321,7 +321,7 @@ to turn off these targets.
 
 - **Version pin:** Hyprland 0.56.2 only. Rebuild after compositor or ABI changes;
   other versions need adaptation and testing.
-- **Cards:** one workspace, two to four faces, at most five apps in a row or
+- **Cards:** one workspace, two to six faces, at most five apps in a row or
   column per face, tiled or floating. Nested flip cards and arbitrary pane trees
   are not implemented. Native dwindle and floating cards give unfolded faces
   unequal space when their apps need it, while preserving each face's pane

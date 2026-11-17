@@ -1,4 +1,5 @@
 #pragma once
+#include "ContainerABI.hpp"
 #include "Transition.hpp"
 #include <array>
 #include <hyprland/src/render/transformer/Transformer.hpp>
@@ -12,7 +13,7 @@ struct Pose {
     bool dirty = true;
     // Two snapshots, source then target. A card sliding along three or more faces keeps one per face,
     // in face order, and slides from face `from` by `travel` faces.
-    std::array<SP<Render::IFramebuffer>, 4> faces;
+    std::array<SP<Render::IFramebuffer>, CONTAINER_MAX_FACES> faces;
     unsigned count = 2;
     float from = 0, travel = 1;
     unsigned present = 0; // faces captured, as bits; others are never drawn
@@ -43,9 +44,11 @@ class FlipShader {
     GLint previewTarget = -1, previewSource = -1, previewTexture = -1, previewAlpha = -1, previewSize = -1,
           previewRadius = -1;
     GLuint program = 0, vao = 0;
-    GLint matrix = -1, composite = -1, rotation = -1, perspective = -1, texture = -1;
-    GLint thirdTexture = -1, fourthTexture = -1, faceCount = -1, from = -1, travel = -1, present = -1;
-    GLint secondTexture = -1, mode = -1, progress = -1, direction = -1, aspect = -1, backdrop = -1, useBackdrop = -1, pane = -1;
+    GLint matrix = -1, composite = -1, rotation = -1, perspective = -1;
+    // The sampler of each face, in face order; faceTexture[0] also samples a single texture.
+    std::array<GLint, CONTAINER_MAX_FACES> faceTexture{-1, -1, -1, -1, -1, -1};
+    GLint faceCount = -1, from = -1, travel = -1, present = -1;
+    GLint mode = -1, progress = -1, direction = -1, aspect = -1, backdrop = -1, useBackdrop = -1, pane = -1;
 };
 
 class FlipTransformer final : public Render::IWindowTransformer {

@@ -25,6 +25,11 @@ import urllib.parse
 import uuid
 
 
+# The most faces a saved recipe may have. A schema bound, deliberately above the core's own cap
+# (container_max_faces), so that a core holding more never makes an older library unreadable.
+RECIPE_MAX_FACES = 8
+
+
 class SetupError(RuntimeError):
     pass
 
@@ -64,7 +69,7 @@ def mark_address(ipc, address):
 
 
 def face_name(index):
-    """A card face as the core names it: Front, Back, Face 3, Face 4."""
+    """A card face as the core names it: Front, Back, then Face 3, Face 4 and so on."""
     return ('Front', 'Back')[index] if index in (0, 1) else f'Face {index + 1}'
 
 
@@ -1045,7 +1050,7 @@ class Setup:
                 for side, face in enumerate(arrangement['faces']):
                     first = face['windows'][0]
                     if side >= 2:
-                        # A third or fourth face joins the card as a face of its own,
+                        # A third face, and each one after it, joins the card as a face of its own,
                         # attached from the face just built, which is the one shown.
                         shown = arrangement['faces'][side - 1]
                         self.ipc.focused((first, 'mark'), (shown['windows'][shown['focus']], 'attach face'))
@@ -1094,7 +1099,8 @@ class Setup:
             raise SetupError('The card action is unavailable.')
         line = (f'restore quiet {"floating" if floating else "tiled"} {arrangement["active"]} 0 ' +
                 ' '.join(f'{v:.12g}' for v in box))
-        if not 2 <= len(arrangement['faces']) <= 4 or not 0 <= arrangement['active'] < len(arrangement['faces']):
+        # The core refuses more faces than it holds itself.
+        if not 2 <= len(arrangement['faces']) <= RECIPE_MAX_FACES or not 0 <= arrangement['active'] < len(arrangement['faces']):
             raise SetupError('The card action is unavailable.')
         for side, face in zip(restore_words(len(arrangement['faces'])), arrangement['faces']):
             if not all(re.fullmatch(r'0x[0-9a-fA-F]{1,16}', a) for a in face['windows']):
@@ -1323,7 +1329,8 @@ class Edit(Setup):
         whole = bool(card.get('fullscreen'))
         choices = ([Choice('add', 'Add an app to this side', 'Choose an open app from any workspace')]
                    if len(face) < limit else [])
-        if 'container_max_faces' in state and count < max_faces(state) and not whole:
+        # A cover takes a face of its own, though status leaves it out.
+        if 'container_max_faces' in state and count + bool(card.get('cover')) < max_faces(state) and not whole:
             choices.append(Choice('add_face', 'Add an app as a new face',
                                   f'Becomes {face_name(count)} · Choose an open app from any workspace'))
         if state.get('pane_replacement'):
@@ -1331,7 +1338,7 @@ class Edit(Setup):
                                   'Keep its position · Previous app stays open'))
         if len(face) == 1:
             if count > 2:
-                # The only app of a third or fourth face leaves with its face.
+                # The only app of a third or later face leaves with its face.
                 choices.append(Choice('release:' + anchor, f'Remove {name} from card',
                                       'Removes this face · Keep open'))
             if not whole:
@@ -1483,8 +1490,11 @@ class Edit(Setup):
         if plan.action == 'add_face':
             if 'container_max_faces' not in state:
                 raise SetupError('Update Hyprflip to add faces to a card.')
-            if len(plan.card['faces']) >= max_faces(state):
-                raise SetupError(f'This card already has {len(plan.card["faces"])} faces, the most it can hold.')
+            # A cover takes a face of its own, though status leaves it out; one may have come since the menu.
+            cover = next(c for c in state['containers'] if c['id'] == plan.card['id']).get('cover')
+            if len(plan.card['faces']) + bool(cover) >= max_faces(state):
+                raise SetupError(f'This card already has {len(plan.card["faces"])} faces' +
+                                 (' and a cover' if cover else '') + ', the most it can hold.')
             if plan.card.get('fullscreen'):
                 raise SetupError('Leave card fullscreen, then add the face.')
         if plan.action not in ('add', 'add_face'):
@@ -1776,8 +1786,9 @@ class RecipeStore:
         if not isinstance(recipe, dict) or type(recipe.get('active')) is not int: raise ValueError()
         if 'workspace' in recipe and (type(recipe['workspace']) is not int or not 1 <= recipe['workspace'] <= 2147483647): raise ValueError()
         if 'floating' in recipe and type(recipe['floating']) is not bool: raise ValueError()
-        # Two faces, front and back, or up to four with cores that hold more.
-        if not isinstance(recipe['faces'], list) or not 2 <= len(recipe['faces']) <= 4: raise ValueError()
+        # Two faces, front and back, or more with cores that hold more; the core's own cap,
+        # container_max_faces, decides what opens.
+        if not isinstance(recipe['faces'], list) or not 2 <= len(recipe['faces']) <= RECIPE_MAX_FACES: raise ValueError()
         if not 0 <= recipe['active'] < len(recipe['faces']): raise ValueError()
         for face in recipe['faces']:
             apps, ratios = face['apps'], face['ratios']
@@ -2657,6 +2668,7 @@ class Unfinished(Exception):
         'invalid_name': 'Use a card name between 1 and 64 characters.',
         'unavailable': 'Cards cannot open here. Load a Hyprflip core with native cards and card ungroup.',
         'unsupported_workspace': 'Cards open on numbered dwindle workspaces only.',
+        'too_many_faces': 'This card has more faces than the loaded Hyprflip core can hold.',
         'fullscreen': 'Leave fullscreen, then try again.',
         'incomplete': 'A side of the card has no app to show.',
         'in_card': 'That app already belongs to a card or group.',
@@ -2875,7 +2887,9 @@ class Unattended(Saved):
         panes = state.get('container_max_panes')
         return {'result': 'capabilities', 'actions': ['capabilities', 'list', 'delete', 'open', 'save'],
                 'core': state.get('native_cards') is True and state.get('card_ungroup') is True,
-                'max_panes': panes if type(panes) is int else 0}
+                'max_panes': panes if type(panes) is int else 0,
+                # The most faces a card may have, a cover included: 2 on cores that do not say.
+                'max_faces': max_faces(state)}
 
     def listing(self, name=None):
         cards = self.cards()
@@ -2951,6 +2965,7 @@ class Unattended(Saved):
                     token = self.token(stored)
                 # A workspace the definition names is ignored: the card opens on the requested one.
                 recipe = RecipeStore.untitled(request['recipe'] if name is None else stored)
+                if len(recipe['faces']) > max_faces(state): raise Unfinished('too_many_faces')
                 places = self.places(recipe)
                 apps = [app for face in recipe['faces'] for app in face['apps']]
                 chosen = [None] * len(apps)

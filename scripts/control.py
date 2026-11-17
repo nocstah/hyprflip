@@ -644,7 +644,7 @@ def unattended_request(payload, env):
             raise w.Unfinished('invalid_request')
         # Closed apps to keep, each by its place in the definition it replaces, which there must be.
         if (not isinstance(keep, list) or len(keep) > 10 or
-                not all(isinstance(k, dict) and set(k) == {'face', 'index'} and number(k['face'], 0, 3) and
+                not all(isinstance(k, dict) and set(k) == {'face', 'index'} and number(k['face'], 0, w.RECIPE_MAX_FACES - 1) and
                         number(k['index'], 0, 4) for k in keep) or
                 len({(k['face'], k['index']) for k in keep}) != len(keep) or keep and previous is None and 'base' not in payload):
             raise w.Unfinished('invalid_request')

@@ -11,7 +11,7 @@
 #include "ContainerABI.hpp"
 
 namespace Hyprflip {
-// What a face is called: Front and Back, then Face 3 and Face 4.
+// What a face is called: Front and Back, then Face 3, Face 4 and so on.
 inline std::string faceName(unsigned side) {
     return side == 0 ? "Front" : side == 1 ? "Back" : "Face " + std::to_string(side + 1);
 }

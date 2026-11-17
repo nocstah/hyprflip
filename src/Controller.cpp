@@ -2380,7 +2380,7 @@ void Controller::onFrame(PHLMONITOR monitor) {
 //   <tiled|floating> <active> <unfolded> <x> <y> <w> <h>
 //   front <horizontal|vertical> <focused> <address:ratio>...
 //   back  <horizontal|vertical> <focused> <address:ratio>...
-//   [face <horizontal|vertical> <focused> <address:ratio>...]  each further face, up to CONTAINER_MAX_FACES
+//   [face <horizontal|vertical> <focused> <address:ratio>...]  each further face, up to CONTAINER_MAX_FACES (six)
 Result Controller::restore(const std::string &arguments) {
     std::istringstream input(arguments);
     std::string mode, token;

@@ -1200,6 +1200,27 @@ class UnattendedTest(unittest.TestCase):
         self.assertNotIn('remembered', reply)
         self.assertEqual(list(self.store_dir.iterdir()), [])
 
+    def test_open_refuses_a_recipe_with_more_faces_than_the_core_holds_before_any_change(self):
+        self.park()
+        self.ipc.snapshot['container_max_faces'] = 6
+        recipe = self.acme()
+        recipe['faces'] += [{'apps': [self.app(f'extra{i}', f'Extra {i}') | {'desktop_id': 'terminal.desktop'}],
+                             'axis': 'horizontal', 'ratios': [1.], 'focus': 0} for i in range(5)]
+        self.keep('seven', recipe)
+        self.ipc.log.clear()
+        for fields in ({'recipe': recipe}, {'name': 'seven', 'store': self.store}):
+            with self.subTest(fields=list(fields)):
+                reply = self.send('open', workspace=2, bind=['0xb', '0xc'], **fields)
+                self.assertEqual((reply['code'], reply['message']),
+                                 ('too_many_faces', setup.Unfinished.MESSAGES['too_many_faces']))
+        self.assertEqual((self.launched, self.ipc.mutations, self.batches()), ([], [], []))
+        # Six faces fit that core; a core that does not say holds two.
+        del recipe['faces'][6]
+        self.assertNotEqual(self.send('open', recipe=recipe, workspace=2, bind=['0xb', '0xc'], launch=False).get('code'),
+                            'too_many_faces')
+        self.ipc.snapshot.pop('container_max_faces')
+        self.assertEqual(self.send('open', recipe=recipe, workspace=2, bind=['0xb', '0xc'])['code'], 'too_many_faces')
+
     def test_open_refuses_more_than_ten_bound_windows_and_carded_bound_windows(self):
         self.park(); self.keep('acme', self.acme())
         many = [hex(0x100 + i) for i in range(11)]
@@ -1533,11 +1554,31 @@ class UnattendedTest(unittest.TestCase):
         reply = self.send('save', **self.saving(members=members[:3], previous=first['token'], keep=[{'face': 2, 'index': 1}]))
         self.assertEqual((reply['result'], reply['dropped']), ('unchanged', []))
         self.assertEqual([[s['address'] for s in face] for face in reply['slots']], [['0xb'], ['0xc'], ['0xd', None]])
-        # Faces run from 0 to 3; a face the saved card lacks is a mistake.
+        # A face the saved card lacks is a mistake, whether or not a card could hold it.
         for keep in ([{'face': 4, 'index': 0}], [{'face': 3, 'index': 0}]):
             with self.subTest(keep=keep):
                 self.assertEqual(self.send('save', **self.saving(members=members[:3], previous=first['token'], keep=keep))['code'],
                                  'invalid_request')
+
+    def test_save_keeps_closed_apps_on_a_sixth_face(self):
+        clients = self.ipc.clients
+        faces = [['0xb'], ['0xc'], ['0xd'], ['0xe'], ['0xf'], ['0x10', '0x11']]
+        for index, address in enumerate(a for face in faces for a in face):
+            clients.setdefault(address, window(address, at=[index * 610, 0], size=[600, 700]))
+            clients[address].update({'class': f'app{index}', 'initialClass': f'app{index}', 'title': ''})
+        self.ipc.snapshot['container_max_faces'] = 6
+        self.ipc.add_card(faces)
+        members = [a for face in faces for a in face]
+        first = self.send('save', **self.saving(members=members))
+        self.assertEqual((first['result'], len(self.stored()['acme']['faces'])), ('saved', 6))
+        self.close('0x10')
+        reply = self.send('save', **self.saving(members=members[:5] + members[6:], previous=first['token'],
+                                                 keep=[{'face': 5, 'index': 0}]))
+        self.assertEqual((reply['result'], reply['dropped']), ('unchanged', []))
+        self.assertEqual([s['address'] for s in reply['slots'][5]], [None, '0x11'])
+        # Faces run from 0 to 7, the saved-card schema's bound; one past it is never read.
+        self.assertEqual(self.send('save', **self.saving(members=members[:5] + members[6:], previous=first['token'],
+                                                         keep=[{'face': 8, 'index': 0}]))['code'], 'invalid_request')
 
     def test_save_kept_shares_summing_to_one_leave_live_apps_a_floor(self):
         self.carded()
@@ -1764,14 +1805,17 @@ class UnattendedTest(unittest.TestCase):
 
     def test_capabilities_reports_actions_and_core(self):
         actions = ['capabilities', 'list', 'delete', 'open', 'save']
+        # A core that does not say how many faces a card holds holds two.
         self.assertEqual(self.send('capabilities'), {'protocol': 1, 'ok': True, 'result': 'capabilities', 'actions': actions,
-                                                    'core': True, 'max_panes': 5})
+                                                    'core': True, 'max_panes': 5, 'max_faces': 2})
+        self.ipc.snapshot['container_max_faces'] = 6
+        self.assertEqual(self.send('capabilities')['max_faces'], 6)
         self.ipc.snapshot.pop('card_ungroup')
         self.assertEqual(self.send('capabilities')['core'], False)
         # No core loaded is an answer as well.
         with patch.object(self.ipc, 'status', side_effect=setup.CoreUnavailable('Hyprflip is unavailable. Load the container plugin.')):
             self.assertEqual(self.send('capabilities'), {'protocol': 1, 'ok': True, 'result': 'capabilities', 'actions': actions,
-                                                        'core': False, 'max_panes': 0})
+                                                        'core': False, 'max_panes': 0, 'max_faces': 2})
         # Not reaching Hyprland is no answer: the caller tries again soon instead of waiting for another core.
         for failure in (setup.SetupError('Hyprland is not responding.'), OSError('hyprctl'),
                         subprocess.TimeoutExpired('hyprctl', 10)):

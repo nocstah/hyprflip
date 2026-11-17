@@ -32,7 +32,9 @@ hyprctl hyprflip restore [quiet] <tiled|floating> <active> <unfolded> <x> <y> <w
 ```
 
 `restore` turns open windows on one workspace into a native card. `active` is
-the side to show (0 or 1) and `unfolded` 0 or 1. The box is the card's frame for
+the face to show, from 0, and `unfolded` 0 or 1. A `face …` group follows the
+back for each further face, up to six faces in all (the status's
+`container_max_faces`). The box is the card's frame for
 a floating card; a tiled card takes its front app's tile, and the box only
 checks that every app's size limits fit. For each face, `axis` is `horizontal`
 or `vertical`, `focused` is the app that has that face's focus, and each app is
@@ -134,7 +136,7 @@ Covering:
 - The cover's face is named after the app, which the card header and the face
   switcher show. `names` leaves it out.
 - It is refused with a sentence when the card is a pair, already has a cover,
-  has four faces, or is unfolded, fullscreen or on a special workspace; and when
+  has six faces, or is unfolded, fullscreen or on a special workspace; and when
   the window is not mapped, is in a card, pair or group, is fullscreen, or is on
   another workspace than the card.
 
@@ -183,7 +185,7 @@ The cover's face takes no other app. Attaching an app to it, dropping one on
 it and the menus' edits are refused: "This face is the card's cover and holds
 only that window." An app can still join the card as a new face, after the
 cover, and moving an app to the next face skips the cover. A card with a cover
-has room for three faces of its own. Like any card with three faces, a card
+has room for five faces of its own. Like any card with three faces, a card
 with two faces and a cover turns with the sideways slide when the transition is
 flip, vertical or slide.
 
@@ -432,7 +434,7 @@ A request is a JSON object of at most 65536 bytes with `"protocol": 1`, an
 
 | Action | Fields (optional in brackets) | Reply |
 | --- | --- | --- |
-| `capabilities` | none | `actions`, `core`, `max_panes` |
+| `capabilities` | none | `actions`, `core`, `max_panes`, `max_faces` |
 | `list` | `store` [`name`] | `cards` |
 | `delete` | `store`, `name`, `token` [`lock_ms`] | `result`: `deleted` or `absent` |
 | `open` | `workspace`; `name` and `store`, or `recipe` [`bind`, `owned`, `focus`, `launch`, `timeout_ms`, `lock_ms`] | `result`: `opened`, and the card |
@@ -445,7 +447,9 @@ after its action, or after what happened.
 has native cards and `card <id> ungroup`. It says `"core": false` only when
 Hyprland answers without such a core; when Hyprland does not answer, the reply
 is the `hyprland` error. `max_panes` is the core's limit of apps per face, 0
-without a core.
+without a core. `max_faces` is the most faces the core lets a card hold, a
+cover included: the status's `container_max_faces`, and 2 for a core that does
+not say or no core.
 
 `list` gives each definition in the store, or only `name`, with its `token`,
 its `active` face, whether it is `floating` and its `faces`. Each app there has
@@ -586,7 +590,7 @@ touches the user's library.
   `conflict`. A new name is always written. An existing one is written only
   when the card differs from it (`saved`); otherwise the reply is `unchanged`.
 - `keep` lists closed apps to keep from the definition being replaced, each by
-  its `face` (0 or 1) and its `index` there. A face that lost only those apps
+  its `face` (from 0: 0 to 5 on a six-face card) and its `index` there. A face that lost only those apps
   and shares its room evenly, as Hyprflip leaves it after a close, is kept as
   it was. Otherwise each kept app goes back at its place with its saved share,
   shrunk if needed so the apps still open keep, between them, at least a tenth
@@ -628,9 +632,12 @@ it by these rules:
 
 - `active` is the face shown, from 0. `floating` (true or false) and `workspace`
   (1 to 2147483647) are optional.
-- `faces` holds two to four faces, front first. Each has `apps` (1 to 5),
+- `faces` holds two to six faces, front first. Each has `apps` (1 to 5),
   `ratios`, `axis` (`horizontal` or `vertical`) and `focus`, the index of the
-  app that has the face's focus.
+  app that has the face's focus. A store or request is read with up to eight,
+  so that a later core's definitions stay readable; `open` refuses a definition
+  with more faces than the loaded core holds (`max_faces` in `capabilities`) as
+  `too_many_faces`, before anything changes.
 - `ratios` has one number per app, each above 0 and at most 1, and together
   they sum to 1. That is stricter than `restore`, which takes any positive
   shares.
@@ -683,6 +690,7 @@ apps it started in `launched`; they stay open.
 | `unavailable` | Hyprland answered without a core that has native cards and `card <id> ungroup`, or the session variables are missing | Wait until such a core is loaded, or run the helper inside the Hyprland session |
 | `hyprland` | Hyprland did not answer, or refused one of the helper's own steps | Try again soon |
 | `unsupported_workspace` | The workspace is not an existing numbered dwindle workspace | Choose another one |
+| `too_many_faces` | The definition has more faces than the loaded core's `container_max_faces` (`max_faces` in `capabilities`); nothing changed | Open a definition with fewer faces, or update Hyprflip |
 | `fullscreen` | A window on that workspace, a bound window or the card to save is fullscreen | Try again after fullscreen ends |
 | `incomplete` | A face has no app to show; `slots` says why | Bind, allow or install the missing apps |
 | `in_card` | A bound window already belongs to a card, pair or group | Bind another window |
