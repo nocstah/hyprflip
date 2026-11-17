@@ -1,5 +1,35 @@
 # Validation
 
+## Release checks for 0.3.0-rc.23 (2026-11-18)
+
+0.3.0-rc.23 starts from feat/close-reason-six-faces (b77e29c: six faces,
+close reasons and covers). It merges in the movement shortcuts (b563443) and
+the check that a window opening beside a card stays outside it (8428c49). Only
+CHANGELOG.md and TESTING.md overlapped. Each nested suite ran on the merge in a
+fresh session, on Hyprland 0.56.2 with Aquamarine 0.15.1 and the render-node
+patch:
+- `make test`: all 3 CTest checks pass. All 462 Python unit tests pass.
+- `tests/key_suites.py` with Hyprglass: all six suites pass. That is
+  workflows 10, nearby 15, setup 7, edit 14, pane 12 and switch 5 checks.
+- `tests/cover_workflows.py`, started with `--notify-recorder` and run with
+  `--protocol`: all 15 of its checks pass, the drag check among them.
+- `tests/close_reason_workflows.py` with `--protocol`: 15 checks pass, and all
+  72 status replies parse as JSON.
+- `tests/multiface_workflows.py`: 18 checks pass.
+- `tests/outside_window_workflows.py`: 3 checks pass.
+- `tests/install_cards.py`: all 65 checks pass.
+- `tests/uninstall_session.py`: all 3 checks pass.
+- Updating in place: a build directory configured and built at 0.3.0-rc.22,
+  then reconfigured at the merge, builds against Lua 5.5.1, links
+  `liblua.so.5.5` and passes all three CTest checks.
+- OmaCards' panel at its 0.2.0-rc.28 candidate: `tests/run-native.py
+  --dwindle` passes 9 of 9. `tests/navigation-native.py` passes 5 of 5,
+  covering the offer, No thanks, Turn on and the Settings switch through this
+  release's guided setup.
+
+Not run on the merge: `tests/fullscreen_workflows.py`, which fails at line 236
+(KeyError 'address') on 79fdb37 as well; the other compositor suites.
+
 ## Close reasons and six faces together (2026-11-17)
 
 Both branches merged here. All three CTest checks and all 417 Python unit tests
@@ -215,7 +245,7 @@ render-node patch):
   check uninstalls with a covered card and a card that shows a face over its
   hidden cover. Every app and both covers come out as ordinary, visible tiles
   on their workspaces. `uninstall.py` needed no change.
-- `tests/cover_workflows.py`: all 18 checks passed. The plugin code is that of
+- `tests/cover_workflows.py`: all 15 checks passed. The plugin code is that of
   79fdb37, unchanged.
 
 Not covered: an unfolded covered card. The core refuses a cover on an unfolded
@@ -273,6 +303,42 @@ The last three were started with `--notify-recorder`:
 Not checked: a native Hyprland move of the card's group to a special workspace
 that bypasses Hyprflip (the cover goes along), and the menus' edits on the
 cover's face, which go through the same refusal as `attach`.
+## A window opening beside a focused card stays outside it (2026-11-17)
+
+Found on the pilot desktop: a chat link in a card's browser made another app
+open a window, which looked as if it shared the browser's face; once it closed,
+the browser showed a picture of its top half until it was restarted. The new
+`tests/outside_window_workflows.py` (3) uses the pilot settings:
+`group:auto_group` and `misc:focus_on_activate` on, the classic appearance, a
+12 px card gap, scale 1.5 and its animations. It passes in fresh nested
+sessions (Hyprland 0.56.2, Aquamarine 0.15.1 with the render-node patch) with
+the GTK fixture, Helium 0.21.3.1 and Chromium on the front face. It checks
+three things:
+
+- A window opening while the card has the keyboard is its own tile, and the
+  card's native group stays locked. This holds after show, hold, park, unpark,
+  reveal and a reload. Dwindle splits the card's tile, which is what looked
+  like a shared face.
+- Once that window closes, the front app is drawn at its full size again.
+- A pane that leaves a face leaves the other app drawn at its size again.
+
+Against a core that leaves card groups unlocked, the first check fails: the
+window joins the group and the card comes apart. The frozen picture did not
+reproduce in any of these setups:
+
+- the GTK fixture;
+- Helium on the AMD render node and on the NVIDIA GPU;
+- 2400x1600 and 3840x2160 at 1.5;
+- with and without OmaRelay's `no_anim` and `focus_on_activate` props;
+- the window tiled beside the card, or attached as a pane.
+
+Hyprflip touches no client buffer and no surface state. `docs/CONTAINERS.md`
+now says where new windows open.
+
+Both CTest checks and all 388 Python unit tests pass. Fresh nested sessions
+also passed `tests/unseen_draw_workflows.py` (3) and
+`tests/reveal_workflows.py` (19).
+
 ## Movement shortcuts on and off (2026-11-14)
 
 `scripts/navigation.py` holds what the guided setup and the panel helper share
@@ -463,42 +529,6 @@ edit:
   unloads the plugin with the reload, leaves both apps as ungrouped windows and
   restores hyprland.lua byte for byte;
 - a new install then loads again and uninstalls again.
-## A window opening beside a focused card stays outside it (2026-11-17)
-
-Found on the pilot desktop: a chat link in a card's browser made another app
-open a window, which looked as if it shared the browser's face; once it closed,
-the browser showed a picture of its top half until it was restarted. The new
-`tests/outside_window_workflows.py` (3) uses the pilot settings:
-`group:auto_group` and `misc:focus_on_activate` on, the classic appearance, a
-12 px card gap, scale 1.5 and its animations. It passes in fresh nested
-sessions (Hyprland 0.56.2, Aquamarine 0.15.1 with the render-node patch) with
-the GTK fixture, Helium 0.21.3.1 and Chromium on the front face. It checks
-three things:
-
-- A window opening while the card has the keyboard is its own tile, and the
-  card's native group stays locked. This holds after show, hold, park, unpark,
-  reveal and a reload. Dwindle splits the card's tile, which is what looked
-  like a shared face.
-- Once that window closes, the front app is drawn at its full size again.
-- A pane that leaves a face leaves the other app drawn at its size again.
-
-Against a core that leaves card groups unlocked, the first check fails: the
-window joins the group and the card comes apart. The frozen picture did not
-reproduce in any of these setups:
-
-- the GTK fixture;
-- Helium on the AMD render node and on the NVIDIA GPU;
-- 2400x1600 and 3840x2160 at 1.5;
-- with and without OmaRelay's `no_anim` and `focus_on_activate` props;
-- the window tiled beside the card, or attached as a pane.
-
-Hyprflip touches no client buffer and no surface state. `docs/CONTAINERS.md`
-now says where new windows open.
-
-Both CTest checks and all 388 Python unit tests pass. Fresh nested sessions
-also passed `tests/unseen_draw_workflows.py` (3) and
-`tests/reveal_workflows.py` (19).
-
 ## Change face with Tab; release checks for 0.3.0-rc.20 (2026-11-11)
 
 Both CTest checks and all 388 Python unit tests pass, one of them new: the

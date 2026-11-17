@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.0-rc.23 — 2026-11-18
 
 - Status reports why apps went away: `close_reasons` and `closes` (requested,
   killed, own, unknown; who asked: key, click, other). Hyprflip notes each
