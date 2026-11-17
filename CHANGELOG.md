@@ -8,8 +8,9 @@
   10 minutes, with the card, face and place each app had, so a program that
   rebuilds cards can leave out an app the person closed and bring back one that
   quit or crashed. See [Why an app closed](docs/SCRIPTING.md#why-an-app-closed).
-- Fix: helper status reads no longer fail on an app class containing
-  'Lua error' or invalid UTF-8.
+- Fix: the card helper and `scripts/install-setup.py` no longer fail to read
+  the status when an app class or workspace name contains 'Lua error' or
+  invalid UTF-8.
 - A program can cover a card with a window of its own:
   `hyprctl hyprflip card <id> cover <address>`. On a narrow screen, a workspace
   manager can put the terminal someone works in over a card instead of beside
