@@ -1,8 +1,13 @@
 #!/usr/bin/env python3
 """Card keys from a window in no card: with plugin:hyprflip:nearby_card (on by default) flip, face, unfold and
 fullscreen act on the one card shown on the focused window's workspace, and the focus stays where it is. Off, or
-with two cards there, they act on nothing. Only the Hyprflip core is loaded. Start the session with --notify-recorder."""
+with two cards there, they act on nothing. The move keys of examples/containers-navigation.lua and Super+J of
+examples/containers-setup.lua stay the focused window's own there, as Hyprland's keys, and act on a card only from
+inside it, through card_of(), or on a core without it through in_container(), face_size() and card_box(). The number
+keys take a window or a card to the workspace a hyprflip_workspace_id of the user's own names, else to Omarchy's
+per-monitor number (a stand-in here). Only the Hyprflip core is loaded. Start the session with --notify-recorder."""
 import argparse
+import json
 from pathlib import Path
 import shutil
 import subprocess
@@ -21,7 +26,7 @@ root = args.session.parent
 env = environment(args.session)
 if 'notify_log' not in env:
     raise SystemExit('Start the nested session with --notify-recorder')
-env.pop('notify_log')
+notify_log = Path(env.pop('notify_log'))
 ipc = w.Hyprctl(env)
 library = root / 'nearby-hyprflip.so'
 processes, checks, loaded = [], [], None
@@ -104,6 +109,181 @@ try:
     act('unfold'); settle()
     assert card(one)['unfolded'] is False
     passed('unfold from beside the card unfolds and folds it')
+
+    def card_of(address=None):
+        call = 'hl.plugin.hyprflip.card_of(' + (json.dumps(address) if address else '') + ')'
+        return ipc.call('repl', f'local id, apps = {call} return tostring(id) .. " " .. tostring(apps)')
+    focus(herdr)
+    assert card_of() == 'nil nil' and card_of(herdr) == 'nil nil', (card_of(), card_of(herdr))
+    assert card_of(front) == card_of(back) == f'{one} 1', (card_of(front), card_of(back))
+    assert card_of('0x1') == 'nil nil'
+    focus(back)
+    assert card_of() == f'{one} 1'
+    focus(herdr)
+    passed('card_of() names the card a window is in and its shown face\'s apps, and nothing for the window beside it')
+
+    # The shipped move keys and Super+J, each run as its bound function. They are the
+    # focused window's own: beside the card they do for that window what Hyprland does,
+    # and only from inside the card do they act on the card.
+    ipc.call('repl', '_G.nearby_keys = {}\n'
+                     'package.preload["hypr.hyprflip-preferences"] = function() return true end')
+    spy = ('local hl = setmetatable({bind = function(key, fn) _G.nearby_keys[key] = fn end,'
+           ' unbind = function() end}, {__index=hl})\n')
+    navigation = (project / 'examples/containers-navigation.lua').read_text()
+    for module in ('containers-navigation.lua', 'containers-setup.lua'):
+        ipc.call('repl', spy + (project / 'examples' / module).read_text())
+    # As Omarchy sets it: without it dwindle redraws each split from the tile's shape, and togglesplit shows nothing.
+    ipc.call('eval', 'hl.config({dwindle={preserve_split=true}})')
+
+    def key(name):
+        ipc.call('repl', '_G.nearby_keys[' + json.dumps(name) + ']()')
+        time.sleep(.3)
+
+    def client(address): return ipc.windows()[address]
+    def on(workspace, *windows): return all(client(x)['workspace']['id'] == workspace for x in windows)
+    def refusals():
+        # The card actions' own refusals; Hyprflip's other notices name neither phrase.
+        return [line for line in notify_log.read_text().splitlines() if 'as a unit' in line or 'Hyprflip container' in line]
+
+    faces = card(one)['faces']
+    focus(herdr)
+    herdr_x, card_x = client(herdr)['at'][0], card(one)['box'][0]
+    assert herdr_x != card_x, 'the window and the card stand side by side'
+    first = herdr_x < card_x
+    def left_of_card(): return client(herdr)['at'][0] < card(one)['box'][0]
+    # Hyprland swaps no window with a card's locked group: the key moves the window past it.
+    key('SUPER + SHIFT + ' + ('RIGHT' if first else 'LEFT'))
+    wait(lambda: left_of_card() != first); settle()
+    assert not refusals(), refusals()
+    assert card(one)['faces'] == faces and on(int(PLACE), herdr, front, back) and active() == herdr
+    key('SUPER + SHIFT + ' + ('LEFT' if first else 'RIGHT'))
+    wait(lambda: left_of_card() == first); settle()
+    assert card(one)['faces'] == faces and active() == herdr
+    passed('Super+Shift+arrow from beside the card takes that window past it and back; the card stays whole')
+
+    key('SUPER + SHIFT + ALT + code:12')
+    wait(lambda: on(3, herdr))
+    assert on(int(PLACE), front, back) and card(one)['faces'] == faces
+    ipc.call('dispatch', f'hl.dsp.window.move({{window="address:{herdr}",workspace="{PLACE}",follow=false}})')
+    wait(lambda: on(int(PLACE), herdr)); settle()
+    passed('Super+Shift+Alt+3 from beside the card moves that window alone, and the card stays')
+
+    def window_back():
+        ipc.call('dispatch', f'hl.dsp.window.move({{window="address:{herdr}",workspace="{PLACE}",follow=false}})')
+        wait(lambda: on(int(PLACE), herdr)); settle()
+
+    def card_back():
+        assert act(f'card {one} workspace {PLACE} silent').startswith('ok')
+        wait(lambda: on(int(PLACE), front, back)); settle()
+
+    # A numbering of the user's own, asked when the key is pressed: a window and a whole card go there.
+    ipc.call('repl', '_G.hyprflip_workspace_id = function(n) return tostring(n + 40) end')
+    focus(herdr); key('SUPER + SHIFT + ALT + code:12')
+    wait(lambda: on(43, herdr))
+    assert on(int(PLACE), front, back)
+    window_back()
+    focus(front); key('SUPER + SHIFT + ALT + code:12')
+    wait(lambda: on(43, front, back)); settle()
+    assert on(int(PLACE), herdr) and card(one)['faces'] == faces
+    card_back()
+    passed('Super+Shift+Alt+3 takes a window, or a whole card, to the workspace hyprflip_workspace_id names')
+
+    # Omarchy's per-monitor workspaces, as a stand-in whose own key goes elsewhere than its number for the slot, so
+    # that each shows which one was used: a window moves with Omarchy's key, a card to Omarchy's number.
+    ipc.call('repl', '_G.hyprflip_workspace_id = nil\n'
+                     '_G.o = {workspaces = {workspace_id = function(monitor, slot) return monitor and 50 + slot end,\n'
+                     '  move_window = function(slot, follow) return function()\n'
+                     '    local window = hl.get_active_window()\n'
+                     '    hl.dispatch(hl.dsp.window.move({workspace = tostring(60 + slot), follow = follow ~= false,\n'
+                     '                                    window = "address:" .. window.address}))\n'
+                     '  end end}}')
+    ipc.call('repl', spy + navigation)
+    focus(herdr); key('SUPER + SHIFT + ALT + code:12')
+    wait(lambda: on(63, herdr))
+    window_back()
+    focus(front); key('SUPER + SHIFT + ALT + code:12')
+    wait(lambda: on(53, front, back)); settle()
+    assert card(one)['faces'] == faces
+    card_back()
+    # the user's own numbering comes first
+    ipc.call('repl', '_G.hyprflip_workspace_id = function(n) return n + 40 end')
+    focus(herdr); key('SUPER + SHIFT + ALT + code:12')
+    wait(lambda: on(43, herdr))
+    window_back()
+    ipc.call('repl', '_G.hyprflip_workspace_id = nil\n_G.o = nil')
+    ipc.call('repl', spy + navigation)
+    focus(herdr)
+    passed("without it, Omarchy's numbering: a window moves with Omarchy's own key, a card to its number for the key")
+
+    companion = spawn('companion', '777700')
+    focus(companion); ipc.action('mark'); focus(front); ipc.action('attach horizontal'); settle()
+    faces = card(one)['faces']
+    assert len(faces[card(one)['active']]) == 2, faces
+    assert card_of(front) == f'{one} 2' and card_of(herdr) == 'nil nil'
+    focus(herdr)
+    size = client(herdr)['size']
+    key('SUPER + J')
+    wait(lambda: client(herdr)['size'] != size); settle()
+    assert card(one)['faces'] == faces and active() == herdr
+    passed('Super+J from beside a card with a two-app face turns that window\'s split, not the face')
+
+    focus(front)
+    def stacked(): return client(front)['at'][0] == client(companion)['at'][0]
+    was = stacked()
+    key('SUPER + J')
+    wait(lambda: stacked() != was); settle()
+    assert card(one)['faces'] == faces
+    passed('Super+J inside the card still turns its face between beside and stacked')
+
+    # A core from before card_of: the same keys tell a window beside the card from one in it through in_container(),
+    # face_size() and card_box().
+    older = ('local hl = setmetatable({bind = function(key, fn) _G.nearby_keys[key] = fn end, unbind = function() end,\n'
+             '  plugin = setmetatable({hyprflip = setmetatable({card_of = false}, {__index = hl.plugin.hyprflip})},\n'
+             '                        {__index = hl.plugin})}, {__index = hl})\n')
+    for module in ('containers-navigation.lua', 'containers-setup.lua'):
+        ipc.call('repl', older + (project / 'examples' / module).read_text())
+    focus(herdr); key('SUPER + SHIFT + ALT + code:12')
+    wait(lambda: on(3, herdr))
+    assert on(int(PLACE), front, back, companion) and not refusals(), refusals()
+    window_back()
+    focus(front); key('SUPER + SHIFT + ALT + code:12')
+    wait(lambda: on(3, front, back, companion)); settle()
+    assert on(int(PLACE), herdr) and card(one)['faces'] == faces
+    card_back()
+    focus(herdr)
+    size = client(herdr)['size']
+    key('SUPER + J')
+    wait(lambda: client(herdr)['size'] != size); settle()
+    assert card(one)['faces'] == faces and not refusals(), refusals()
+    focus(front)
+    was = stacked()
+    key('SUPER + J')
+    wait(lambda: stacked() != was); settle()
+    for module in ('containers-navigation.lua', 'containers-setup.lua'):
+        ipc.call('repl', spy + (project / 'examples' / module).read_text())
+    passed('on a core without card_of, Super+Shift+Alt+3 and Super+J still act on the window beside the card, '
+           'and on the card from inside it')
+
+    # Beside ordinary windows the key still swaps, as Hyprland's own binding does: the
+    # neighbour takes the window's tile exactly. A move would split a tile instead.
+    ipc.call('dispatch', 'hl.dsp.focus({workspace=31})')
+    alone = spawn('plain-left', '334455'); spawn('plain-top', '445566'); spawn('plain-below', '556677')
+    focus(alone)
+    def tiles(): return {a: (tuple(c['at']), tuple(c['size'])) for a, c in ipc.windows().items() if c['workspace']['id'] == 31}
+    before = tiles()
+    assert len(before) == 3 and len({b for b in before.values()}) == 3, before
+    # Dwindle places new windows by the pointer, so look for the side the others are on.
+    way = 'RIGHT' if before[alone][0][0] == min(at[0] for at, _ in before.values()) else 'LEFT'
+    key('SUPER + SHIFT + ' + way)
+    try:
+        wait(lambda: tiles()[alone] != before[alone]); settle()
+    except AssertionError:
+        raise AssertionError({'way': way, 'alone': alone, 'before': before, 'after': tiles()}) from None
+    after = tiles()
+    partner = next((a for a in after if a != alone and after[a] == before[alone]), None)
+    assert partner and after[alone] == before[partner], (before, after)
+    passed('Super+Shift+arrow beside ordinary windows still swaps with the neighbour')
+    focus(herdr)
 
     ipc.call('eval', 'hl.config({plugin={hyprflip={nearby_card=false}}})')
     assert ipc.status()['nearby_card'] is False

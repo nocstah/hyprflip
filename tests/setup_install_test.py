@@ -1,5 +1,6 @@
 """Check guided setup installation and rollback without touching user config."""
 import contextlib
+import hashlib
 import io
 import json
 import os
@@ -22,7 +23,8 @@ class SetupInstallTest(unittest.TestCase):
         self.root = Path(temporary.name)
         self.project, self.home = self.root / 'project', self.root / 'user'
         for relative in ('scripts/install-setup.py', 'scripts/setup.py', 'scripts/workflow.py',
-                         'scripts/control.py', 'scripts/shortcuts.py', 'examples/shortcuts.lua', 'examples/containers-setup.lua', 'examples/preferences.lua', 'examples/module-path.lua', 'examples/mouse.lua'):
+                         'scripts/control.py', 'scripts/shortcuts.py', 'scripts/navigation.py', 'examples/shortcuts.lua', 'examples/containers-setup.lua', 'examples/preferences.lua', 'examples/module-path.lua', 'examples/mouse.lua',
+                         'examples/containers-navigation.lua'):
             target = self.project / relative
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(ROOT / relative, target)
@@ -37,6 +39,13 @@ class SetupInstallTest(unittest.TestCase):
         self.available = {'python3', 'hyprctl', 'notify-send', 'gio', 'gdbus', 'omarchy-shell'}
         self.shell_running = True
         self.fail_reload, self.conflict = False, None
+        self.navigation = self.config / 'hyprflip-navigation.lua'
+        self.record = self.home / 'state/hyprflip/navigation.sha256'
+        self.choice = self.home / 'state/hyprflip/navigation-choice'
+        self.beside = self.home / '.local/lib/hyprflip/navigation.lua'
+        self.shipped = (ROOT / 'examples/containers-navigation.lua').read_bytes()
+        self.navigation_keys = True  # whether the movement shortcuts register when their module is loaded
+        self.navigation_keys_without_module = False  # whether they stay registered without it
         self.state = {'container_provider': True, 'peek_available': True,
                       'containers': [{'faces': [['0xa'], ['0xb', '0xc']]}], 'pairs': []}
 
@@ -75,6 +84,12 @@ class SetupInstallTest(unittest.TestCase):
                 if (self.config / 'hyprflip-mouse.lua').exists() or self.conflict == 'mouse:274':
                     reply.append({'modmask': 76, 'key': 'mouse:274', 'description':
                                   'Other action' if self.conflict == 'mouse:274' else 'Hyprflip: flip focused card with mouse'})
+                if self.navigation_keys_without_module or (
+                        self.navigation.exists() and 'require("hypr.hyprflip-navigation")' in self.main.read_text()):
+                    keys = [(65, f'code:{n + 9}', f'Move card or window to workspace {n}') for n in range(1, 11)]
+                    keys += [(73, f'code:{n + 9}', f'Move card or window silently to workspace {n}') for n in range(1, 11)]
+                    keys += [(65, key.upper(), f'Move card or window {key}') for key in ('left', 'right', 'up', 'down')]
+                    reply += [{'modmask': m, 'key': k, 'description': d} for m, k, d in keys[:None if self.navigation_keys else -1]]
             elif args == ['reload']:
                 self.reloads += 1
                 reply = 'ok'
@@ -84,13 +99,14 @@ class SetupInstallTest(unittest.TestCase):
         return subprocess.CompletedProcess(command, 0, reply, '')
 
     def install(self, *args):
+        self.output = io.StringIO()
         with patch.object(Path, 'home', return_value=self.home), \
                 patch.dict(os.environ, {'XDG_CONFIG_HOME': str(self.home / 'config'),
                                         'XDG_STATE_HOME': str(self.home / 'state')}), \
                 patch('shutil.which', side_effect=lambda name, **kw: '/usr/bin/' + name if name in self.available else None), \
                 patch('subprocess.run', side_effect=self.run_command), \
                 patch.object(sys, 'argv', ['install-setup.py', *args]), \
-                contextlib.redirect_stdout(io.StringIO()):
+                contextlib.redirect_stdout(self.output), contextlib.redirect_stderr(self.output):
             runpy.run_path(str(self.project / 'scripts/install-setup.py'), run_name='__main__')
 
     def test_dry_run_writes_nothing(self):
@@ -193,6 +209,141 @@ class SetupInstallTest(unittest.TestCase):
         self.assertFalse(self.helper.exists())
         self.assertFalse(self.module.exists())
         self.assertEqual(self.reloads, 2)
+
+    def installed(self, *args):
+        with self.assertRaises(SystemExit) as result: self.install(*args)
+        self.assertEqual(result.exception.code, 0, self.output.getvalue())
+
+    def test_navigation_comes_only_when_asked_for(self):
+        self.installed()
+        self.assertFalse(self.navigation.exists())
+        self.assertNotIn('hyprflip-navigation', self.main.read_text())
+        self.assertFalse(self.record.exists())
+        for _ in range(2):
+            self.installed('--navigation')
+        self.assertEqual(self.navigation.read_bytes(), self.shipped)
+        # after the user's own bindings and the other Hyprflip modules, once
+        self.assertEqual(self.main.read_text().count('require("hypr.hyprflip-navigation")'), 1)
+        self.assertTrue(self.main.read_text().endswith('\n\n-- Move whole Hyprflip cards with the normal movement '
+                                                       'shortcuts.\nrequire("hypr.hyprflip-navigation")\n'))
+        self.assertEqual(self.record.read_text().strip(), hashlib.sha256(self.shipped).hexdigest())
+        self.assertIn('move a whole card', self.output.getvalue())
+
+    def test_an_unchanged_released_copy_is_updated_without_asking(self):
+        released = subprocess.run(['git', '-C', str(ROOT), 'show', 'v0.3.0-rc.22:examples/containers-navigation.lua'],
+                                  capture_output=True)
+        if released.returncode:
+            self.skipTest('needs the v0.3.0-rc.22 tag')
+        self.navigation.write_bytes(released.stdout)
+        self.installed()
+        self.assertEqual(self.navigation.read_bytes(), self.shipped)
+        # it stays loaded the way the user loads it
+        self.assertNotIn('hyprflip-navigation', self.main.read_text())
+        self.assertEqual(self.record.read_text().strip(), hashlib.sha256(self.shipped).hexdigest())
+
+    def test_a_copy_an_earlier_install_put_in_place_is_updated(self):
+        earlier = b'-- the movement shortcuts as an earlier version had them\n'
+        self.navigation.write_bytes(earlier)
+        self.record.parent.mkdir(parents=True)
+        self.record.write_text(hashlib.sha256(earlier).hexdigest() + '\n')
+        self.main.write_text(self.main.read_text() + 'require("hypr.hyprflip-navigation")\n')
+        self.installed()
+        self.assertEqual(self.navigation.read_bytes(), self.shipped)
+        self.assertEqual(self.main.read_text().count('require("hypr.hyprflip-navigation")'), 1)
+        self.assertEqual(self.record.read_text().strip(), hashlib.sha256(self.shipped).hexdigest())
+
+    def test_a_copy_with_changes_of_its_own_stays_until_asked_for(self):
+        own = self.shipped + b'-- a workspace numbering of my own\n'
+        self.navigation.write_bytes(own)
+        self.installed()
+        self.assertEqual(self.navigation.read_bytes(), own)
+        self.assertIn('has changes of your own, so it stays as it is', self.output.getvalue())
+        self.assertFalse(self.record.exists())
+        self.installed('--navigation')
+        self.assertEqual(self.navigation.read_bytes(), self.shipped)
+        self.assertIn('your copy is kept with the backup', self.output.getvalue())
+        backups = [path for path in (self.home / 'state/hyprflip').glob('guided-setup-*/hyprflip-navigation.lua')]
+        self.assertEqual([path.read_bytes() for path in backups], [own])
+        self.assertEqual(self.record.read_text().strip(), hashlib.sha256(self.shipped).hexdigest())
+
+    def test_movement_shortcuts_that_do_not_register_put_everything_back(self):
+        self.navigation_keys = False
+        with self.assertRaisesRegex(RuntimeError, 'Move card or window down" did not register'): self.install('--navigation')
+        self.assertEqual(self.main.read_bytes(), self.original)
+        self.assertFalse(self.navigation.exists())
+        self.assertFalse(self.record.exists())
+        self.assertEqual(self.reloads, 2)
+
+    def test_navigation_dry_run_and_backend_only(self):
+        self.installed('--dry-run', '--navigation')
+        self.assertFalse(self.navigation.exists())
+        self.assertEqual(self.main.read_bytes(), self.original)
+        self.assertIn('move a whole card', self.output.getvalue())
+        with self.assertRaises(SystemExit) as result: self.install('--backend-only', '--navigation')
+        self.assertEqual(result.exception.code, 2)
+        self.assertEqual(self.reloads, 0)
+
+    def test_the_helper_gets_the_shipped_module_to_switch_from(self):
+        self.installed()
+        self.assertEqual(self.beside.read_bytes(), self.shipped)
+        self.assertEqual((self.helper.parent / 'navigation.py').read_bytes(), (ROOT / 'scripts/navigation.py').read_bytes())
+        # without card shortcuts there is nothing to switch on
+        self.installed('--backend-only')
+        self.assertFalse(self.beside.exists())
+        self.assertTrue((self.helper.parent / 'navigation.py').exists())
+        self.assertFalse(self.choice.exists())
+
+    def test_the_choice_is_recorded_only_when_made(self):
+        self.installed('--navigation')
+        self.assertEqual(self.choice.read_text(), 'on\n')
+        self.choice.unlink()
+        self.installed()
+        self.assertFalse(self.choice.exists())
+
+    def test_no_navigation_takes_the_module_and_its_line_out(self):
+        self.installed('--navigation')
+        self.installed('--no-navigation')
+        self.assertFalse(self.navigation.exists())
+        self.assertNotIn('hyprflip-navigation', self.main.read_text())
+        self.assertTrue(self.main.read_text().endswith('require("hypr.hyprflip-setup")\n'))
+        self.assertFalse(self.record.exists())
+        self.assertEqual(self.choice.read_text(), 'off\n')
+        self.assertIn('Movement shortcuts off', self.output.getvalue())
+        self.assertNotIn('changes of your own', self.output.getvalue())
+        # later runs leave them off
+        self.installed()
+        self.assertFalse(self.navigation.exists())
+        self.assertEqual(self.choice.read_text(), 'off\n')
+        # and --navigation turns them on again
+        self.installed('--navigation')
+        self.assertEqual(self.navigation.read_bytes(), self.shipped)
+        self.assertEqual(self.choice.read_text(), 'on\n')
+
+    def test_no_navigation_keeps_a_changed_copy_with_the_backup(self):
+        own = self.shipped + b'-- a workspace numbering of my own\n'
+        self.navigation.write_bytes(own)
+        self.main.write_text(self.main.read_text() + 'require("hypr.hyprflip-navigation")\n')
+        self.installed('--no-navigation')
+        self.assertFalse(self.navigation.exists())
+        self.assertIn('it is removed, and your copy is kept with the backup', self.output.getvalue())
+        backups = [path for path in (self.home / 'state/hyprflip').glob('guided-setup-*/hyprflip-navigation.lua')]
+        self.assertEqual([path.read_bytes() for path in backups], [own])
+
+    def test_movement_shortcuts_that_stay_after_no_navigation_put_everything_back(self):
+        self.installed('--navigation')
+        loaded = self.main.read_bytes()
+        self.choice.unlink()
+        self.navigation_keys_without_module = True
+        with self.assertRaisesRegex(RuntimeError, 'is still there'): self.install('--no-navigation')
+        self.assertEqual(self.main.read_bytes(), loaded)
+        self.assertEqual(self.navigation.read_bytes(), self.shipped)
+        self.assertTrue(self.record.exists())
+        self.assertFalse(self.choice.exists())
+
+    def test_navigation_options_exclude_each_other(self):
+        with self.assertRaises(SystemExit) as result: self.install('--navigation', '--no-navigation')
+        self.assertEqual(result.exception.code, 2)
+        self.assertEqual(self.reloads, 0)
 
 
 if __name__ == '__main__': unittest.main()

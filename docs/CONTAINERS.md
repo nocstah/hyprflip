@@ -100,9 +100,12 @@ lists the other suites and their options.
 ## Normal movement shortcuts
 
 [`examples/containers-navigation.lua`](../examples/containers-navigation.lua)
-optionally replaces Omarchy's existing movement bindings. Load it after the
-Hyprflip modules and other keybindings. It calls `hl.unbind` before
-replacing each binding:
+optionally replaces Omarchy's existing movement bindings.
+`python3 scripts/install-setup.py --navigation` installs it and loads it after the
+Hyprflip modules and other keybindings ([details](INSTALL.md#move-cards-with-normal-shortcuts)).
+It calls `hl.unbind` before replacing each binding. The number keys follow
+Omarchy's per-monitor workspaces, or a `hyprflip_workspace_id(number)` function
+of your own:
 
 | Shortcut | Behavior |
 | --- | --- |
@@ -111,7 +114,8 @@ replacing each binding:
 | Super+Shift+arrows | Reorder the whole card toward a neighboring tile |
 
 These keys previously moved or swapped the selected window. Ordinary windows
-retain workspace movement and the standard swap command. A failed card move
+retain workspace movement and the standard swap command; toward a card,
+Super+Shift+arrow takes the window past it. A failed card move
 leaves all panes in place. A directional card move at an outer edge does
 nothing. Scratchpad and drag bindings are not replaced by this module.
 
@@ -375,7 +379,11 @@ session from the parent desktop.
 Lua exposes `hl.plugin.hyprflip.attach("horizontal")`, `release()`,
 `workspace(2, follow)`, `move("left")`, `unfold()`, `floating()`,
 `fullscreen()` and `in_container()` alongside the existing direct action
-functions. `follow` defaults to true. The supplied modules bind M/P/F/U/Escape;
+functions. `follow` defaults to true. `card_of(address)` returns the id of the
+multi-app card a window is in (the focused window without an address) and the
+number of apps on its shown face, or nil for a window in none, even one beside a
+card: `in_container()` and `face_size()` also answer for that card while
+`plugin:hyprflip:nearby_card` is on. The supplied modules bind M/P/F/U/Escape;
 the guided setup module adds its keys plus H and V (`attach` beside or below)
 and E (`release`). Without guided setup, `examples/pane-keys.lua` binds H, V,
 E and a plain O unfold. Change any of them in OmaCards.
@@ -401,8 +409,8 @@ into ordinary windows; the supplied installer rebuilds them across an update.
   named and special workspaces by its id
   ([driving cards from other programs](SCRIPTING.md)). Floating cards support
   whole-card dragging and resizing.
-- The navigation module does not automatically replace existing movement
-  shortcuts; load it explicitly.
+- The navigation module does not replace existing movement shortcuts unless
+  installed (`install-setup.py --navigation`) or loaded explicitly.
 - Floating cards hide the native group bar. Popups do not rotate;
   unsuitable rendering conditions switch instantly.
 - The compositor does not restore sessions at login or add individual-pane

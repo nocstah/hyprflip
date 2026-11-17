@@ -124,6 +124,18 @@ class UninstallTest(unittest.TestCase):
         self.assertIn(['hyprflip', 'finish'], self.calls)
         self.assertIn('Hyprflip is removed.', self.output.getvalue())
 
+    def test_the_movement_shortcuts_come_out_too(self):
+        # as scripts/install-setup.py --navigation adds them, and the record of what it put in place
+        self.main.write_text(self.main.read_text() + '\n-- Move whole Hyprflip cards with the normal movement shortcuts.\n'
+                             'require("hypr.hyprflip-navigation")\n')
+        (self.config / 'hyprflip-navigation.lua').write_text('-- hyprflip-navigation.lua\n')
+        (self.state / 'navigation.sha256').write_text('b' * 64 + '\n')
+        (self.state / 'navigation-choice').write_text('on\n')  # a reinstall is a new setup
+        self.assertEqual(self.uninstall('--yes'), 0)
+        self.assertEqual(self.main.read_text(), ORIGINAL)
+        self.assertIn('hyprflip-navigation.lua', [p.name for p in self.kept().iterdir()])
+        self.assertEqual(sorted(p.name for p in self.state.iterdir() if p.is_file()), ['cards.json'])
+
     def test_a_plugin_the_reload_left_loaded_is_unloaded(self):
         self.sticky = True
         self.assertEqual(self.uninstall('--yes'), 0)

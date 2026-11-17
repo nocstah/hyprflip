@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import navigation as movement
 import shortcuts
 import workflow
 
@@ -24,22 +25,28 @@ def ctl(*args):
     return reply
 
 
-def memberships(state):
-    return sorted([tuple(tuple(face) for face in c['faces']) for c in state.get('containers', [])]
-                  + [((p['front'],), (p['back'],)) for p in state.get('pairs', [])])
-
-
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--dry-run', action='store_true')
     parser.add_argument('--backend-only', action='store_true', help='Install the OmaCards helper and motion preferences without container shortcuts')
     parser.add_argument('--mouse-flip', action='store_true', help='Enable Super+Ctrl+Alt+middle-click to flip the focused card')
+    parser.add_argument('--navigation', action='store_true',
+                        help='Install the movement shortcuts that move a whole card (hyprflip-navigation.lua); '
+                             'without it, an unchanged copy from before is still updated')
+    parser.add_argument('--no-navigation', action='store_true',
+                        help='Turn the movement shortcuts off: remove hyprflip-navigation.lua and its require line, '
+                             'keeping a copy with changes of your own with the backup')
     args = parser.parse_args()
+    if args.navigation and args.backend_only:
+        parser.error('--navigation installs card shortcuts, which --backend-only leaves out')
+    if args.navigation and args.no_navigation:
+        parser.error('choose --navigation or --no-navigation')
     project, home = Path(__file__).resolve().parent.parent, Path.home()
-    config = Path(os.environ.get('XDG_CONFIG_HOME', home / '.config')) / 'hypr'
-    main_config = config / 'hyprland.lua'
+    paths = movement.Paths()
+    config, main_config, navigation = paths.main.parent, paths.main, paths.module
     helper = home / '.local/lib/hyprflip/setup.py'
     module = config / ('hyprflip-preferences.lua' if args.backend_only else 'hyprflip-setup.lua')
+    shipped_navigation = (project / 'examples/containers-navigation.lua').read_bytes()
     if not main_config.is_file():
         raise SystemExit('An existing Hyprland Lua configuration is required.')
     for binary in ('python3', 'hyprctl', 'notify-send', 'gio', 'gdbus'):
@@ -81,14 +88,37 @@ def main():
     mouse_statement = 'require("hypr.hyprflip-mouse")'
     if args.mouse_flip and mouse_statement not in [line.strip() for line in content.splitlines()]:
         content = content.rstrip() + '\n' + mouse_statement + '\n'
+    # The movement shortcuts: installed when asked for, updated while they are as an install or release left them,
+    # and kept as they are when they have changes of their own, unless asked for again; or turned off.
+    navigation_plan, navigation_edited = None, False
+    if args.no_navigation:
+        content = movement.without_statement(content)
+        if navigation.is_file():
+            navigation_plan = 'remove'
+            navigation_edited = movement.edited(paths, navigation.read_bytes(), shipped_navigation)
+    elif not args.backend_only:
+        navigation_plan = movement.plan(paths, shipped_navigation, args.navigation)
+    if args.navigation:
+        content = movement.with_statement(content)
+    navigation_loaded = navigation_plan not in (None, 'kept', 'remove') and movement.loaded(content)
     replacements = {helper.parent / name: (project / 'scripts' / name).read_bytes()
-                    for name in ('setup.py', 'workflow.py', 'control.py', 'shortcuts.py')}
+                    for name in ('setup.py', 'workflow.py', 'control.py', 'shortcuts.py', 'navigation.py')}
+    # The shipped module beside the helper, from which control.py switches the shortcuts on. They need cards.
+    beside = helper.parent / 'navigation.lua'
+    if not args.backend_only:
+        replacements[beside] = shipped_navigation
+    elif beside.exists():
+        replacements[beside] = None
     replacements.update({config / 'hyprflip-preferences.lua': (project / 'examples/preferences.lua').read_bytes(),
                          config / 'hyprflip-shortcuts.lua': (project / 'examples/shortcuts.lua').read_bytes(),
                          main_config: content.encode()})
     mouse_module = config / 'hyprflip-mouse.lua'
     if args.mouse_flip and not mouse_module.exists():
         replacements[mouse_module] = (project / 'examples/mouse.lua').read_bytes()
+    if navigation_plan in ('install', 'update', 'replace'):
+        replacements[navigation] = shipped_navigation
+    elif navigation_plan == 'remove':
+        replacements[navigation] = None
     if not args.backend_only:
         replacements[module] = (project / 'examples/containers-setup.lua').read_bytes()
         # Keep user plugin settings/layout rules; route only these modules' existing binds.
@@ -108,12 +138,23 @@ def main():
         if state.get('peek_available'): print('Super+Ctrl+Alt+Space: hold to peek; release to return.')
         if fullscreen: print('Super+Ctrl+Alt+Return: fullscreen the whole card; press again to leave.')
     if args.mouse_flip: print('Super+Ctrl+Alt+middle-click: flip the focused card on release (optional).')
+    if navigation_loaded:
+        print('Super+Shift+1…0, Super+Shift+Alt+1…0 and Super+Shift+arrows: move a whole card; other windows move as before.')
+    if args.no_navigation:
+        print('Movement shortcuts off: Super+Shift+1…0, Super+Shift+Alt+1…0 and Super+Shift+arrows work as your '
+              'desktop sets them.')
+    if navigation_plan == 'replace':
+        print(f'{navigation} had changes of your own; it is replaced, and your copy is kept with the backup.')
+    elif navigation_edited:
+        print(f'{navigation} had changes of your own; it is removed, and your copy is kept with the backup.')
+    elif navigation_plan == 'kept':
+        print(f'{navigation} has changes of your own, so it stays as it is; --navigation replaces it and keeps your '
+              'copy with the backup. A workspace numbering of your own can go in hyprflip_workspace_id (docs/INSTALL.md).')
     if args.dry_run:
         return 0
     originals = {p: (p.read_bytes(), p.stat().st_mode & 0o777) if p.exists() else (None, 0o644)
                  for p in replacements}
-    state_root = Path(os.environ.get('XDG_STATE_HOME', home / '.local/state'))
-    backup = state_root / 'hyprflip' / ('guided-setup-' + datetime.now().strftime('%Y%m%d-%H%M%S-%f'))
+    backup = paths.state / ('guided-setup-' + datetime.now().strftime('%Y%m%d-%H%M%S-%f'))
     backup.mkdir(parents=True)
     for path, (data, _) in originals.items():
         if data is not None:
@@ -129,7 +170,10 @@ def main():
 
     try:
         for path, data in replacements.items():
-            atomic(path, data, originals[path][1])
+            if data is None:
+                path.unlink(missing_ok=True)
+            else:
+                atomic(path, data, originals[path][1])
         ctl('reload')
         if errors := ctl('configerrors'):
             raise RuntimeError(errors)
@@ -148,7 +192,15 @@ def main():
             matches = [b for b in binds if b['modmask'] == 76 and b['key'] == 'mouse:274']
             if len(matches) != 1 or matches[0]['description'] != 'Hyprflip: flip focused card with mouse':
                 raise RuntimeError('The mouse flip shortcut did not register exactly once.')
-        if memberships(json.loads(ctl('hyprflip', 'status'))) != memberships(state):
+        if navigation_loaded:
+            for description in movement.KEYS:
+                if sum(b.get('description') == description for b in binds) != 1:
+                    raise RuntimeError(f'The shortcut "{description}" did not register exactly once.')
+        if args.no_navigation:
+            for description in movement.KEYS:
+                if any(b.get('description') == description for b in binds):
+                    raise RuntimeError(f'The shortcut "{description}" is still there.')
+        if movement.memberships(json.loads(ctl('hyprflip', 'status'))) != movement.memberships(state):
             raise RuntimeError('Card membership changed during installation.')
     except BaseException:
         for path, (data, mode) in originals.items():
@@ -159,6 +211,12 @@ def main():
         ctl('reload')
         print('Previous files restored. Configuration errors:', ctl('configerrors'))
         raise
+    if navigation_plan in ('install', 'update', 'replace', 'current'):
+        movement.record(paths, shipped_navigation)
+    if args.no_navigation:
+        paths.record.unlink(missing_ok=True)
+    if args.navigation or args.no_navigation:
+        movement.choose(paths, args.navigation)
     print('Guided setup installed; no compositor libraries replaced. Backup:', backup)
     return 0
 

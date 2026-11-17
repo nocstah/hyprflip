@@ -39,7 +39,8 @@ class PanelControlTest(unittest.TestCase):
         settings = patch.object(control.shortcuts, 'snapshot', return_value={'available': False, 'rows': [], 'occupied': []})
         settings.start()
         self.addCleanup(settings.stop)
-        self.ipc.env = {'HYPRLAND_INSTANCE_SIGNATURE': 'test-instance', 'XDG_STATE_HOME': self.directory.name}
+        self.ipc.env = {'HYPRLAND_INSTANCE_SIGNATURE': 'test-instance', 'XDG_STATE_HOME': self.directory.name,
+                        'XDG_CONFIG_HOME': self.directory.name}
         original = self.ipc.data
         self.ipc.data = lambda *args: {'int': 420 if args[-1].endswith('duration_ms') else 1} if 'getoption' in args else original(*args)
         self.ipc.snapshot.update(transition='flip', transition_modes=['flip', 'instant'], layout_controls=True)
@@ -367,6 +368,85 @@ class PanelControlTest(unittest.TestCase):
             with self.assertRaisesRegex(setup.SetupError, 'Leave card fullscreen'):
                 control.edit_prefix(intent, None, 1, card, {})
         self.assertEqual(control.edit_prefix('add', None, 1, card, {}), ['add'])
+
+
+class NavigationTest(unittest.TestCase):
+    """The movement-shortcut switch: reported by the snapshot, switched quietly by its action."""
+    run_action = PanelControlTest.run_action
+
+    def setUp(self):
+        PanelControlTest.setUp(self)
+        self.ipc.call = lambda *args: ''  # hyprctl, which the switch is given
+        self.paths = control.navigation.Paths(self.ipc.env)
+        self.paths.main.parent.mkdir(parents=True)
+        self.paths.main.write_text('require("hypr.hyprflip-setup")\n')
+        self.shipped = Path(self.directory.name) / 'lib/navigation.lua'
+        self.shipped.parent.mkdir()
+        self.shipped.write_bytes(b'-- the shipped movement module\n')
+        beside = patch.object(control, 'SHIPPED_NAVIGATION', self.shipped)
+        beside.start()
+        self.addCleanup(beside.stop)
+        self.switched = []
+        def switch(enabled, call, paths, shipped):
+            self.switched.append((enabled, call, paths.main, paths.state, shipped))
+            if self.refuse: raise control.navigation.Refused(self.refuse)
+            return self.kept
+        self.refuse, self.kept = None, None
+        stub = patch.object(control.navigation, 'switch', switch)
+        stub.start()
+        self.addCleanup(stub.stop)
+
+    def test_snapshot_reports_the_state_the_choice_and_the_capability(self):
+        result = control.snapshot(self.ipc)
+        self.assertTrue(result['capabilities']['navigation'])
+        self.assertEqual((result['navigation'], result['navigation_choice']), ('off', None))
+        self.paths.module.write_bytes(self.shipped.read_bytes())
+        self.paths.main.write_text(control.navigation.with_statement(self.paths.main.read_text()))
+        control.navigation.choose(self.paths, True)
+        result = control.snapshot(self.ipc)
+        self.assertEqual((result['navigation'], result['navigation_choice']), ('on', 'on'))
+        self.paths.module.write_bytes(b'-- changed\n')
+        self.assertEqual(control.snapshot(self.ipc)['navigation'], 'edited')
+        self.shipped.unlink()
+        self.assertFalse(control.snapshot(self.ipc)['capabilities']['navigation'])
+        self.assertEqual(self.ipc.mutations, [])
+
+    def test_the_files_answer_even_when_hyprland_does_not(self):
+        self.ipc.windows = lambda: (_ for _ in ()).throw(setup.SetupError('Hyprland is not responding.'))
+        control.navigation.choose(self.paths, False)
+        result = control.snapshot(self.ipc)
+        self.assertEqual((result['available'], result['navigation'], result['navigation_choice']), (False, 'off', 'off'))
+
+    def test_the_action_switches_quietly_without_a_handoff(self):
+        channel = Channel()
+        message = control.run_operation(self.ipc, dict(protocol=1, action='navigation', enabled=True, context=self.ctx),
+                                        control.PanelMenu(channel, Request()))
+        self.assertEqual(message, 'Movement shortcuts on: Super+Shift moves a whole card.')
+        self.assertEqual(channel.handoffs, 0)
+        [(enabled, call, main, state, shipped)] = self.switched
+        self.assertEqual((enabled, main, state, shipped), (True, self.paths.main, self.paths.state, self.shipped.read_bytes()))
+        self.assertEqual(call, self.ipc.call)
+        self.kept = Path(self.directory.name) / 'hyprflip/navigation-20261114-150000-000000'
+        message = self.run_action(dict(protocol=1, action='navigation', enabled=False, context=self.ctx))
+        self.assertEqual(message, 'Movement shortcuts off: Super+Shift keys work as your desktop sets them. '
+                                  f'Your changed copy of the module is kept in {self.kept}.')
+        self.assertEqual(self.ipc.mutations, [])
+
+    def test_the_action_refuses_before_switching(self):
+        for enabled in (None, 1, 'true'):
+            with self.subTest(enabled=enabled), self.assertRaisesRegex(setup.SetupError, 'Choose whether'):
+                self.run_action(dict(protocol=1, action='navigation', enabled=enabled, context=self.ctx))
+        with self.assertRaisesRegex(setup.SetupError, 'Open Cards again'):
+            self.run_action(dict(protocol=1, action='navigation', enabled=True))
+        self.shipped.unlink()
+        with self.assertRaisesRegex(setup.SetupError, 'Update Hyprflip'):
+            self.run_action(dict(protocol=1, action='navigation', enabled=True, context=self.ctx))
+        self.assertEqual(self.switched, [])
+
+    def test_a_refused_switch_is_the_panels_error(self):
+        self.refuse = 'Hyprland reported: x. The shortcuts are as they were.'
+        with self.assertRaisesRegex(setup.SetupError, '^Hyprland reported: x. The shortcuts are as they were.$'):
+            self.run_action(dict(protocol=1, action='navigation', enabled=True, context=self.ctx))
 
 
 class ChannelTest(unittest.TestCase):

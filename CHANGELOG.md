@@ -52,6 +52,67 @@
   one face of its own comes apart into ordinary tiles, for the program that
   built it to rebuild. The recovery file and a failed update's way back keep
   the covers too.
+- The move keys and Super+J act on the focused window again when it is beside
+  a card. Since 0.3.0-rc.18, with `nearby_card` on, `in_container()` and
+  `face_size()` also answer for the one card beside a window in no card, so the
+  card keys reach that card. The shipped movement module took that answer to
+  mean the window was in the card. Super+Shift+<number>,
+  Super+Shift+Alt+<number> and Super+Shift+arrows on such a window, such as a
+  new app opened beside a card, asked the card to move. The card refused with
+  "Focus a multi-app card to move it as a unit." and nothing moved. Super+J
+  from the guided setup likewise asked the card's two-app face to turn and was
+  refused. Both now act on a card only when the focused window is in it
+  (`card_box()` answers only for a card's own windows). Otherwise they move or
+  split that window as Hyprland does. Flip, the face keys, peek, unfold and
+  card fullscreen still reach the card from beside it.
+- Super+Shift+arrow from a window in no card toward a card beside it moves
+  the window past the card, which stays whole. Hyprland swaps no window with
+  a card's locked group, so the key did nothing there. It now uses Hyprland's
+  window move when the nearest tile in that direction is a card. Every other
+  neighbour is swapped as before, since Hyprland's window move would also
+  cross to the next monitor at a screen edge.
+- The number keys of the movement module follow Omarchy's per-monitor
+  workspaces where Omarchy has them. Omarchy 4.5 gives each monitor its own
+  1…10, so on a second monitor Super+Shift+3 means that monitor's third
+  workspace, as Omarchy's own key does; the module took a card or window to
+  workspace 3 instead. A window in no card now moves with Omarchy's own key.
+  A configuration can define `hyprflip_workspace_id(number)` for a numbering
+  of its own, which the module asks when a number key is pressed
+  (docs/INSTALL.md).
+- `scripts/install-setup.py --navigation` installs the movement module as
+  `hyprflip-navigation.lua` and loads it, and later runs keep it current.
+  Without `--navigation` it is updated only while it is as an install or a
+  release left it: a copy with changes of its own stays as it is, and
+  `--navigation` replaces it, keeping that copy with the backup. Before, the
+  module was copied by hand and no installer updated it. `scripts/bootstrap.py
+  --navigation` passes the option on.
+- The movement shortcuts can be switched off again.
+  `scripts/install-setup.py --no-navigation` removes `hyprflip-navigation.lua`
+  and its require line, keeping a copy with changes of its own with the backup,
+  and later runs leave the shortcuts off. Panels switch them through the
+  helper: snapshots report `capabilities.navigation`, `navigation` (`on`,
+  `edited` or `off`) and `navigation_choice`, and the `navigation` action turns
+  them on or off and reloads Hyprland, so the keys change at once, without a
+  handoff. For that the guided setup puts the shipped module beside the helper,
+  as `~/.local/lib/hyprflip/navigation.lua`. The user's choice is kept in
+  `~/.local/state/hyprflip/navigation-choice`: `--navigation`,
+  `--no-navigation` and the action write it, and `scripts/uninstall.py` removes
+  it, so that a later install counts as a new setup.
+- `hl.plugin.hyprflip.card_of(address)` returns the id of the multi-app card
+  a window is in (the focused window without an address) and the number of
+  apps on its shown face, or nil. Unlike `in_container()` and `face_size()`,
+  it never answers for the card beside a window. The shipped key modules use
+  it, and fall back to `in_container()`, `face_size()` and `card_box()` on an
+  older core.
+- `tests/key_suites.py` runs every compositor suite that loads the shipped key
+  modules, each in its own nested session; CONTRIBUTING.md now has a release
+  checklist that runs it. `tests/workflows.py` already caught the bug above,
+  but it had not been run since 0.3.0-rc.18.
+- On an existing install, the next guided-setup install brings all of this:
+  it rewrites `hyprflip-setup.lua`, and it updates `hyprflip-navigation.lua`
+  when that is the unchanged copy from docs/INSTALL.md. A copy you have
+  edited stays as it is; move your changes into your own configuration (a
+  numbering into `hyprflip_workspace_id`) and run it with `--navigation`.
 
 ## 0.3.0-rc.22 — 2026-11-13
 

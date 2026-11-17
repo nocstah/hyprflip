@@ -273,6 +273,138 @@ The last three were started with `--notify-recorder`:
 Not checked: a native Hyprland move of the card's group to a special workspace
 that bypasses Hyprflip (the cover goes along), and the menus' edits on the
 cover's face, which go through the same refusal as `attach`.
+## Movement shortcuts on and off (2026-11-14)
+
+`scripts/navigation.py` holds what the guided setup and the panel helper share
+about the movement module: whether it is on, the user's choice, and the switch.
+`tests/navigation_test.py` has 18 unit tests against a stand-in Hyprland in a
+disposable home: the require line comes and goes with its comment; `on`,
+`edited` and `off` need both the file and its line, and only changes of the
+user's own count as edited; on installs, loads, records and checks all 24 keys;
+off removes the module, its line and the record; a changed copy is kept in the
+backup either way; nothing reloads when the shortcuts already are as asked; and
+keys that do not come or do not go, a new configuration error, a card that
+changed or Hyprland failing mid-switch each put every file back, with its mode,
+and leave no backup. A configuration error from before does not count, so the
+shortcuts can go off when their module is what fails. The installer gains six
+tests (`--no-navigation`, the choice, the shipped copy beside the helper and its
+removal by `--backend-only`), the panel helper five (the snapshot fields, also
+without Hyprland, and the action: no handoff, its checks, its errors) and the
+uninstaller one check. 22 planted faults across the four scripts were each
+caught; the 440 Python unit tests pass.
+
+`tests/navigation_switch_workflows.py` runs it in a nested session with
+`--native-cards`, in a home inside the session folder: `install-setup.py
+--navigation` loads all 24 keys over the configuration's own Super+Shift+1; the
+panel action through the installed `control.py` turns them off at once without a
+handoff (the own key is back, the card unchanged) and on again; an edited copy
+goes off with the backup the action names; `--no-navigation` turns them off and
+a later plain install leaves them off. Its 5 checks pass. `tests/key_suites.py`
+runs it as `switch`.
+
+## card_of; the key-module suites in one run (2026-11-14)
+
+`hl.plugin.hyprflip.card_of(address)` is new in the core. `tests/nearby_card_workflows.py`
+gains two checks, 15 in all:
+- `card_of()` names the card a window is in, by address or for the focused
+  window, with the apps on its shown face (1, then 2 once a companion is
+  attached); it gives nothing for the window beside the card, nor for an unknown
+  address;
+- on a core without `card_of`, simulated by hiding it from the modules, Super+Shift+Alt+3 and
+  Super+J still act on the window beside the card, and on the card from inside
+  it.
+
+Five planted faults were each caught. One is in the core: `card_of` also
+answering for the card beside a window, built and run like the fix. Four are in
+the modules: the move keys or Super+J taking any answer from `card_of` for a
+card, and on an older core the move keys asking `in_container()` alone or
+Super+J asking `face_size()` alone.
+
+`python tests/key_suites.py --hyprglass … --aquamarine …` then ran the five
+suites that load the key modules, each in a fresh session: `workflows.py` 10,
+`nearby_card_workflows.py` 15, `setup_workflows.py` 7, `edit_workflows.py` 14
+and `pane_workflows.py` 12, all passing. A runner stopped mid-suite closed its
+session and left no session directory. CTest passes its three checks, and the
+410 Python unit tests pass.
+
+## Movement module installed; Omarchy's workspace numbers (2026-11-14)
+
+`scripts/install-setup.py --navigation` installs `hyprflip-navigation.lua`,
+and later runs update it while it is unchanged. Seven new unit tests run the
+installer against a stand-in Hyprland in a disposable home:
+- the module comes only with `--navigation`, once, loaded last in
+  `hyprland.lua`;
+- an unchanged copy of the one module every release before had is updated
+  without asking, and it stays loaded the user's way (this test needs the
+  `v0.3.0-rc.22` tag and skips without it);
+- a copy an earlier install recorded is updated;
+- a copy with changes of its own is kept until `--navigation` replaces it, and
+  the backup holds that copy;
+- movement shortcuts that do not register each exactly once put every file
+  back;
+- a dry run writes nothing, and `--backend-only` refuses `--navigation`.
+
+A new uninstall test removes the module, its lines and the installer's record.
+
+`tests/nearby_card_workflows.py` gains two checks, 13 in all. A
+`hyprflip_workspace_id` of the user's own decides where Super+Shift+Alt+3 takes
+a window or a whole card. Without one, a stand-in for Omarchy 4.5's per-monitor
+workspaces applies: a window moves with Omarchy's own key and a card goes to
+Omarchy's number for that key. The stand-in's key and number differ on purpose,
+so each check shows which one was used. The user's own function wins over
+Omarchy's.
+
+Ten planted faults were each caught: four in the module by the nested suite
+(the user's function never asked; Omarchy's key never used; a card ignoring
+Omarchy's number; Omarchy's key winning over the user's function) and six in
+the installers by the unit tests (an edited copy replaced anyway; no require
+line; the shortcuts unchecked after the reload; the released copy unknown;
+nothing recorded; uninstall leaving the record). All 410 Python unit tests pass.
+The setup, edit and pane suites, which load the setup module, pass 7, 14 and
+12 checks with this branch.
+
+## Move keys and Super+J beside a card (2026-11-14)
+
+Found on the pilot desktop: with `nearby_card` on, Super+Shift+<number> on a
+new app opened beside a card showed "Focus a multi-app card to move it as a
+unit." and moved nothing. It reproduces in fresh nested sessions (Hyprland
+0.56.2, Aquamarine 0.15.1 with the render-node patch, on the AMD GPU) with
+0.3.0-rc.22's plugin and key modules. `tests/workflows.py` stops at "ordinary
+window shortcuts still work", and the session records that warning; this file
+lists no run of that suite since 0.3.0-rc.18.
+
+`tests/nearby_card_workflows.py` gains five checks. Each runs the shipped
+modules' own bound function. From the window beside the card:
+- Super+Shift+arrow toward the card takes the window past it and back, and
+  the card stays whole;
+- Super+Shift+Alt+3 moves that window alone;
+- Super+J turns that window's split instead of being refused for the card's
+  two-app face.
+
+From inside the card, Super+J still turns the face. Beside ordinary windows,
+Super+Shift+arrow still swaps: the neighbour takes the window's tile exactly.
+The session sets `dwindle:preserve_split` as Omarchy does; without it,
+dwindle redraws each split from the tile's shape and togglesplit shows
+nothing. Dwindle places new windows by the pointer, so the swap check looks
+for the side the neighbours are on.
+
+Hyprland swaps no window with a card's locked group, which is why the arrow
+toward a card uses Hyprland's window move. That move puts the window past
+the card, as a throwaway session showed before the check was written.
+
+With the fixed modules, `tests/nearby_card_workflows.py` passes 11 checks
+and `tests/workflows.py` passes 10. Seven planted faults were each caught by
+the check written for it:
+- the move keys asking `in_container()` alone, as rc.22 does;
+- only the number keys doing so;
+- Super+J asking `face_size()` alone, as rc.22 does;
+- Super+J never acting on a card;
+- the move keys never acting on a card, caught by `tests/workflows.py`;
+- a card ahead never seen;
+- every neighbour taken for a card.
+
+The plugin is unchanged. CTest passes its three checks, and the 403 Python
+unit tests pass.
 
 ## Updating a build directory in place; release checks for 0.3.0-rc.22 (2026-11-13)
 
@@ -1750,6 +1882,12 @@ With an older local build available, these optional regression checks compare ve
 ```sh
 python tests/motion.py /tmp/hf-test/session.json --baseline /path/to/old/hyprflip.so
 python tests/config_upgrade.py /tmp/hf-test/session.json --baseline /path/to/0.1.0/hyprflip.so
+```
+
+Before a release, `tests/key_suites.py` starts its own sessions and runs every suite that loads the shipped key modules, each in a fresh one (CONTRIBUTING.md, Releases):
+
+```sh
+python tests/key_suites.py --hyprglass /path/to/hyprglass.so
 ```
 
 ## Motion measurements
