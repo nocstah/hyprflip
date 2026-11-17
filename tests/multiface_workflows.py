@@ -63,7 +63,10 @@ def flip(c):
     reply = ipc.action(f"card {c['id']} flip"); assert reply.startswith("ok"), reply
     wait(lambda: card()['active'] != before, 'the flip')
     return card()
-def by_id(id): return next(c for c in ipc.status()['containers'] if c['id'] == id)
+def by_id(id):
+    found = [c for c in ipc.status()['containers'] if c['id'] == id]
+    assert found, f'card {id} is gone'
+    return found[0]
 def setting(**values): ipc.call('eval', 'hl.config({plugin={hyprflip={' + ','.join(f'{k}={v}' for k, v in values.items()) + '}}})')
 def rgb(colour): return tuple(int(colour[i:i + 2], 16) for i in (0, 2, 4))
 def near(a, b, tolerance=40): return all(abs(x - y) <= tolerance for x, y in zip(a, b))
@@ -112,7 +115,9 @@ try:
     # Windows and workspaces do not animate: no turn falls back while an app is still on its way.
     config.write_text(original + f'\nhl.monitor({{output="{output}",mode="1920x1080@60",position="4000x0",scale=1}})\n'
                       'hl.workspace_rule({workspace="52",monitor="' + output + '"})\n'
-                      'hl.animation({leaf="windows",enabled=false})\nhl.animation({leaf="workspaces",enabled=false})\n')
+                      'hl.animation({leaf="windows",enabled=false})\nhl.animation({leaf="workspaces",enabled=false})\n'
+                      # The synthetic wtype keyboard has its own keymap: bindings match it by symbol, here only.
+                      'hl.config({input={resolve_binds_by_sym=true}})\n')
     ipc.call('reload'); assert not ipc.call('configerrors')
     ipc.call('eval', 'hl.config({animations={enabled=false},plugin={hyprflip={duration_ms=0,notifications=false}}})')
     ipc.call('dispatch', f'hl.dsp.focus({{monitor="{output}"}})')
@@ -278,14 +283,30 @@ try:
     assert swipe(*[(-120, 40)] * 6) == 5 and swipe(*[(-120, 40)] * 6) == 0
     passed('three-finger swipes go from face 5 to 6, back, and from 6 round to 1')
 
-    # Super+Ctrl+Alt+1 to 4 stay the face keys: examples/containers-setup.lua binds them to the plugin's Lua
-    # face(n), which reaches faces 5 and 6 too. Simulated keys do not reach bindings in a nested session.
-    for n, goal in ((4, 3), (1, 0), (5, 4), (6, 5)):
+    # Super+Ctrl+Alt+1 to 4 stay the face keys. Bind them with the block examples/containers-setup.lua ships,
+    # which calls the plugin's Lua face(n), and press them with wtype. Wtype's keys reach bindings in a nested
+    # session only with resolve_binds_by_sym, which the config above sets.
+    shipped = (project / 'examples/containers-setup.lua').read_text()
+    block = shipped[shipped.index('if hl.plugin.hyprflip and hl.plugin.hyprflip.attach then'):]
+    assert 'for n = 1, 4 do' in block and 'run("face", n)' in block, block
+    ipc.call('repl', 'local shortcuts = hl\n' + block)
+    face_keys = sorted(x['key'] for x in ipc.data('-j', 'binds') if x['modmask'] == 76 and x['key'] in '123456')
+    assert face_keys == ['1', '2', '3', '4'], face_keys
+    def to_face(goal, what, press):
         ipc.call('dispatch', f'hl.dsp.focus({{window="address:{by_id(sid)["current"]}"}})')
-        ipc.call('eval', f'hl.plugin.hyprflip.face({n})')
-        wait(lambda: by_id(sid)['active'] == goal and not ipc.status()['animating'], f'face({n})')
-        assert ipc.status()['last_fallback'] == '', ipc.status()['last_fallback']
-    passed("the face keys' Lua face(n) turns a six-face card to faces 4 and 1, and face(5) and face(6) to the others")
+        assert by_id(sid)['active'] != goal, (what, by_id(sid)['active'])
+        press()
+        wait(lambda: by_id(sid)['active'] == goal and not ipc.status()['animating'], what)
+        assert ipc.status()['last_fallback'] == '', (what, ipc.status()['last_fallback'])
+    for n, goal in ((4, 3), (1, 0)):
+        to_face(goal, f'Super+Ctrl+Alt+{n}', lambda: subprocess.run(
+            ['wtype', '-M', 'logo', '-M', 'ctrl', '-M', 'alt', '-k', str(n), '-m', 'alt', '-m', 'ctrl', '-m', 'logo'],
+            env=env, check=True, timeout=5))
+    passed('the face keys Super+Ctrl+Alt+4 and 1, bound as examples/containers-setup.lua binds them and pressed '
+           'with wtype, turn a six-face card to faces 4 and 1')
+    for n, goal in ((5, 4), (6, 5)):
+        to_face(goal, f'face({n})', lambda: ipc.call('eval', f'hl.plugin.hyprflip.face({n})'))
+    passed('the Lua face(n) those keys call turns the card to faces 5 and 6, which have no key')
 
     # The slides bound textures to units 5 and 6; another card's plain flip still draws its own faces.
     setting(duration_ms=2400, transition='"flip"')

@@ -18,7 +18,7 @@ tests are new:
 
 Each nested suite ran in its own fresh session (Hyprland 0.56.2, Aquamarine
 with the render-node patch, `--notify-recorder`):
-- `multiface_workflows.py` (17): faces 5 and 6 by `attach face`, a seventh
+- `multiface_workflows.py` (18): faces 5 and 6 by `attach face`, a seventh
   refused with "already has 6 faces", `show 5`/`show 6` and `show 7` refused
   "from 1 to 6", a six-face description round trip, and the slide case: with
   `duration_ms=400` and `transition="slide"` a six-face card of solid-colour
@@ -27,11 +27,15 @@ with the render-node patch, `--notify-recorder`):
   face 3 (three faces each), each with no fallback, ending on its face, with
   Hyprland answering; at 2400 ms a frame mid-slide shows face 5 beside face 6,
   and one shows face 6 beside face 1; three-finger swipes go 5 to 6, back, and
-  6 round to 1; the Lua `face(n)` the face keys call turns it to faces 4 and 1,
-  and to 5 and 6; then a plain flip of a two-face card beside it draws its own
-  front mid-turn and ends on its back. Control: the same suite against a build
-  whose slide shader still stops at four faces passed the status-only turn
-  check and failed the frame check (no face 5 or 6 colour drawn).
+  6 round to 1; Super+Ctrl+Alt+4 and 1, bound by the block
+  `examples/containers-setup.lua` ships and pressed with `wtype`, turn it to
+  faces 4 and 1, and the Lua `face(n)` those keys call turns it to 5 and 6;
+  then a plain flip of a two-face card beside it draws its own front mid-turn
+  and ends on its back. Control: the same suite against a build whose slide
+  shader still stops at four faces passed the status-only turn check and failed
+  the frame check (no face 5 or 6 colour drawn). A second control, the suite
+  without `resolve_binds_by_sym` in its nested config, failed at the key
+  check: the key reached the face's app, which closed, instead of the binding.
 - `cover_workflows.py` (15, with `--protocol`): a card with six faces of its
   own refuses a cover with "already has 6 faces"; one with five takes a cover,
   status lists five faces and the cover, and `attach face` is then refused with
@@ -48,8 +52,16 @@ The cover, switcher, unattended and saved runs used the build before a
 comment-only change in `Controller.cpp`; multiface ran on the final build.
 
 Keys Super+Ctrl+Alt+1 to 4 are unchanged (`examples/containers-setup.lua` and
-`examples/shortcuts.lua` were not touched); keys pressed with `wtype` did not
-reach any binding in a nested session here, so no suite presses them.
+`examples/shortcuts.lua` were not touched). Keys pressed with `wtype` reach
+bindings in a nested session only when its config sets
+`input.resolve_binds_by_sym=true`, because wtype brings a keymap of its own;
+the multiface suite sets it, as the edit, peek and portable suites do. The
+switcher's digit keys are not bindings: they read evdev KEY_1 to KEY_9, which
+wtype's own keymap does not promise to send, so the switcher suite picks the
+sixth face with `switcher pick 6` and presses no digit. After the
+review, multiface (18, with the keys) and switcher (12, its pass message now
+naming `switcher pick 6`) passed again, each in a fresh session on the final
+build.
 `fullscreen_workflows.py` and the other suites were not run for this change.
 The GLState restore of units 5 and 6 has no visible symptom to test for; the
 plain flip after the slides is the only check near it.

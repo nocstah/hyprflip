@@ -132,14 +132,16 @@ try:
     except w.SetupError: pass
     ok('faces take names, keep them through the description updates restore from, and clear them')
 
-    # Six faces: the switcher's tiles still fit the screen, and a digit picks the sixth.
+    # Six faces: the switcher's tiles still fit the screen, and picking the sixth turns to it.
     e, f = spawn('e'), spawn('f')
     ipc.focused((e, 'mark'), (apps[0], 'attach face')); wait(lambda: len(card()['faces']) == 5, 'face 5')
     ipc.focused((f, 'mark'), (e, 'attach face')); wait(lambda: len(card()['faces']) == 6, 'face 6')
     assert card()['faces'][4:] == [[e], [f]] and card()['active'] == 5, card()
     assert ipc.action('face 1').startswith('ok'); wait(lambda: card()['active'] == 0, 'face 1')
     assert ipc.action('switcher open').startswith('ok')
-    # It opens on the face shown last, the sixth; a step moves off it before the digit picks it.
+    # It opens on the face shown last, the sixth; a step moves off it before `switcher pick 6` picks it.
+    # That is the IPC pick. The switcher's digit keys read evdev KEY_1 to KEY_9, and wtype numbers its keys in a
+    # keymap of its own, so no suite presses them.
     s = st()['switcher']; assert s['open'] and s['faces'] == 6 and s['previews'] == 6 and s['selected'] == 5, s
     ipc.action('switcher step'); assert st()['switcher']['selected'] == 0, st()['switcher']
     x, y, width, height = s['panel']
@@ -151,6 +153,6 @@ try:
         ipc.action(f"card {card()['id']} show 7"); raise AssertionError('show 7 was accepted')
     except w.SetupError as error:
         assert 'from 1 to 6' in str(error), error
-    ok('a six-face switcher opens with six previews inside the screen, and digit 6 picks the sixth face')
+    ok('a six-face switcher opens with six previews inside the screen, and switcher pick 6 turns to the sixth face')
 finally:
     for p in procs: p.terminate()
