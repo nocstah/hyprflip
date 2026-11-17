@@ -26,6 +26,13 @@
   card lists one face.
 - The panel API reports `covered` for each card, and its `face`, `edit`,
   `flip` and `add_face` requests take the cover into account.
+- `scripts/install.py` keeps covers through an update. It takes each cover
+  off before the unload and puts it back once the card is back in its tile,
+  covered or showing the face it showed. Before, the card came back without its
+  cover, and the cover was left as a stray tile beside it. A covered card with
+  one face of its own comes apart into ordinary tiles, for the program that
+  built it to rebuild. The recovery file and a failed update's way back keep
+  the covers too.
 
 ## 0.3.0-rc.22 — 2026-11-13
 

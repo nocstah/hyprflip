@@ -37,6 +37,77 @@ def describe(card):
 
 
 
+def own_apps(card):
+    """A card's own apps, sorted: status lists a card without its cover."""
+    return sorted(address for face in card["faces"] for address in face)
+
+
+def alone(card):
+    """A card with one face of its own under a cover: without the cover it is no card, so it comes apart."""
+    return bool(card.get("cover")) and len(card["faces"]) < 2
+
+
+def uncover(answer, cards):
+    """Takes the cover off each card that has one, so that its description names every app it has.
+
+    An unload leaves a cover a face of its card that no description names, and
+    the card cannot be restored with it. A card with two or more faces of its own
+    stays a card. One with a single face comes apart into ordinary tiles, as it
+    is no card without its cover, and the program that built it builds it again.
+    Returns what puts the covers back on the cards that stay, and how many came
+    apart. A refusal, or no answer, puts back the covers already taken off and
+    raises: RuntimeError with the core's reply for a refusal.
+    """
+    covers, apart = [], 0
+    try:
+        for card in cards:
+            if not card.get("cover"):
+                continue
+            reply = answer("hyprflip", f"card {int(card['id'])} uncover")
+            if not reply.startswith("ok"):
+                raise RuntimeError(reply.removeprefix("error: "))
+            if alone(card):
+                apart += 1
+            else:
+                covers.append({"cover": window_address(card["cover"]), "covered": bool(card.get("covered")),
+                               "active": int(card["active"]), "apps": own_apps(card)})
+    except Exception:
+        cover_again(answer, covers)
+        raise
+    return covers, apart
+
+
+def cover_again(answer, covers):
+    """Puts each cover back on its card, found by the card's own apps, and shows the face the card showed. Never raises.
+
+    The card shows its cover again if it did, else the face that was shown.
+    Returns a sentence for each cover that stays off, as when its card was not
+    kept or its window closed. A core with no covers gets no request.
+    """
+    notes = []
+    for item in covers:
+        try:
+            state = json.loads(answer("hyprflip", "status"))
+            if not state.get("card_cover"):
+                return notes
+            card = next((c for c in state.get("containers", []) if own_apps(c) == sorted(item["apps"])), None)
+            if card is None:
+                notes.append("its card was not kept.")
+                continue
+            if card.get("cover") != item["cover"]:
+                reply = answer("hyprflip", f"card {int(card['id'])} cover {window_address(item['cover'])}")
+                if not reply.startswith("ok"):
+                    notes.append(reply.removeprefix("error: "))
+                    continue
+            face = "cover" if item["covered"] else str(int(item["active"]) + 1)
+            reply = answer("hyprflip", f"card {int(card['id'])} show {face}")
+            if not reply.startswith("ok"):
+                notes.append(reply.removeprefix("error: "))
+        except Exception as error:
+            notes.append(f"Hyprland did not answer ({error}).".replace("\n", " "))
+    return notes
+
+
 def active(ctl):
     """The address of the window that has the keyboard, or None."""
     return json.loads(ctl("-j", "activewindow")).get("address")

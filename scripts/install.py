@@ -27,7 +27,8 @@ if not source.is_file() or not main.is_file():
 
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from card_restore import FullscreenWindow, apps, as_it_was, describe, remember, return_keyboard, settle  # noqa: E402
+from card_restore import (FullscreenWindow, alone, apps, as_it_was, cover_again, describe, remember,  # noqa: E402
+                          return_keyboard, settle, uncover)
 
 
 def ctl(*args):
@@ -74,16 +75,29 @@ if any(not card.get("native_group") for card in cards):
 if any(card.get("fullscreen") for card in cards):
     raise SystemExit("Leave fullscreen on every card before updating; open cards are kept through the update.")
 saved_pairs = installed_state.get("pairs", [])
-saved_cards = [describe(card) for card in cards]
+# A window a program put over a card comes off it for the update and goes back
+# on after, as the card's description names only the card's own apps. A card
+# with one face of its own under its cover is no card without it.
+covering = installed_state.get("card_cover")
+apart = [card for card in cards if covering and alone(card)]
+saved_cards = [describe(card) for card in cards if card not in apart]
+saved_covers = []
 if not saved_pairs and not containers and recovery.is_file():
     pending = json.loads(recovery.read_text())
     if pending.get("instance") == os.environ.get("HYPRLAND_INSTANCE_SIGNATURE"):
         saved_pairs = pending.get("pairs", [])
         saved_cards = pending.get("cards", [])
+        saved_covers = pending.get("covers", [])
 if saved_pairs:
     print(f"Preserving {len(saved_pairs)} existing pair(s) through this update.")
 if saved_cards:
     print(f"Keeping {len(saved_cards)} open card(s) through this update.")
+covers = len(saved_covers) or sum(1 for card in cards if covering and card.get("cover") and card not in apart)
+if covers:
+    print(f"Taking the cover off {covers} card(s) for this update, and putting it back after.")
+if apart:
+    print(f"Leaving {len(apart)} covered card(s) with one face of their own as separate windows; "
+          "the program that built them rebuilds them.")
 if len(cards) < len(containers):
     print(f"Leaving {len(containers) - len(cards)} hidden card(s) as separate windows; "
           "the program that parked them rebuilds them.")
@@ -122,10 +136,20 @@ try:
         current = json.loads(ctl("hyprflip", "status"))
         saved_pairs = current["pairs"] or saved_pairs
         if current.get("containers"):
-            saved_cards = [describe(card) for card in shown(current["containers"])]
+            if current.get("card_cover"):
+                # Before the unload: it would leave each cover a face that no description names.
+                try:
+                    saved_covers, _ = uncover(answer, shown(current["containers"]))
+                except Exception as refused:
+                    raise SystemExit(f"A covered card kept its cover, so nothing was updated: {refused} "
+                                     "Then update again.") from None
+                current = json.loads(ctl("hyprflip", "status"))
+            saved_cards = [describe(card) for card in shown(current["containers"]) if not alone(card)]
     if saved_pairs or saved_cards:
-        atomic(recovery, json.dumps({"instance": os.environ.get("HYPRLAND_INSTANCE_SIGNATURE"),
-                                     "pairs": saved_pairs, "cards": saved_cards}).encode())
+        record = {"instance": os.environ.get("HYPRLAND_INSTANCE_SIGNATURE"), "pairs": saved_pairs, "cards": saved_cards}
+        if saved_covers:
+            record["covers"] = saved_covers
+        atomic(recovery, json.dumps(record).encode())
     # Unloading the core drops the keyboard from most apps of a multi-app face.
     place = remember(ctl)
     if installed:
@@ -183,8 +207,9 @@ try:
     # A quiet restore leaves the keyboard where the unload left it, which can be
     # nowhere. It goes back before any correction, as each of those gives it back
     # where it found it, and a monitor put back there can hand it to someone else.
-    return_keyboard(ctl, place, {a for line in saved_cards for a in apps(line)} |
-                    {a for pair in saved_pairs for a in (pair["front"], pair["back"])})
+    ours = ({a for line in saved_cards for a in apps(line)} | {item["cover"] for item in saved_covers} |
+            {a for pair in saved_pairs for a in (pair["front"], pair["back"])})
+    return_keyboard(ctl, place, ours)
     for line in kept:
         try:
             settle(line)
@@ -192,6 +217,11 @@ try:
             print("A card was kept, but a fullscreen window on its workspace kept its tile from being checked or returned.")
         except (RuntimeError, KeyError, StopIteration, TypeError, ValueError):
             print("A card was kept, but its tile could not be checked or returned to the same place.")
+    # Back in its tile, each card takes its cover again, which fills the card's place.
+    if saved_covers:
+        for note in cover_again(answer, saved_covers):
+            print("A card was kept, but its cover could not be put back on it:", note)
+        return_keyboard(ctl, place, ours)
     # Giving these back never fails an update, so this is the only word of it.
     if (saved_pairs or saved_cards) and not as_it_was(ctl, place):
         print("The keyboard or what a monitor shows is not as it was before the update, or Hyprland did not say.")
@@ -217,6 +247,7 @@ except Exception:
         # recovery file keeps them for the next successful update.
         for line in saved_cards:
             keep(line)
+        cover_again(answer, saved_covers)
     except Exception:
         pass
     raise

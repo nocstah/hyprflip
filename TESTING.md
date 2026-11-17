@@ -1,5 +1,44 @@
 # Validation
 
+## Covers through an update (2026-11-17)
+
+Found live: updating from f005fe2 to 79fdb37 brought a covered card back
+without its cover. The cover window was left as a stray tile, and the tile
+check failed. A covered card with one face of its own could not be described
+at all.
+
+All three CTest checks and all 416 Python unit tests pass. Eight of the unit
+tests are new, in `tests/install_test.py`. They check that:
+- the cover comes off before the unload and goes back on after, and the card
+  shows its cover or the face it showed;
+- a card with one face of its own comes apart, and the update says so;
+- a refused uncover puts back the covers already off and changes nothing;
+- a cover that closed meanwhile is named, and the update goes on;
+- the rollback and a recovery run put covers back;
+- a core without covers gets no new request.
+Taking out the uncover step or the rollback's re-cover makes them fail.
+
+In fresh nested sessions (Hyprland 0.56.2, Aquamarine 0.15.1 with the
+render-node patch):
+- `tests/install_cards.py`: all 65 checks passed, one of them new. The new check
+  updates twice: once with the keyboard on a covered card's cover, once on an
+  app of a card showing one of its faces under its cover. Both cards come back
+  with the same cover, covered state, faces, layouts and box. The cover fills
+  the card's place in the same tile as before. The keyboard, the pointer and
+  the monitors stay where they were. A covered card with one face of its own
+  comes apart, its window and cover ordinary tiles on their workspace. Run
+  alone against 79fdb37's `install.py`, the same check fails as the live
+  update did.
+- `tests/uninstall_session.py`: all 3 checks passed, one of them new. The new
+  check uninstalls with a covered card and a card that shows a face over its
+  hidden cover. Every app and both covers come out as ordinary, visible tiles
+  on their workspaces. `uninstall.py` needed no change.
+- `tests/cover_workflows.py`: all 18 checks passed. The plugin code is that of
+  79fdb37, unchanged.
+
+Not covered: an unfolded covered card. The core refuses a cover on an unfolded
+card, so the update leaves it without its cover and prints the core's reason.
+
 ## Cover a card with a window (2026-11-17)
 
 All three CTest checks and all 408 Python unit tests pass. Five of the unit
