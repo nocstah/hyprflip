@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.0-rc.24 — 2026-11-18
 
 - Another module can take one of Hyprflip's keys. It claims the key in the
   global table `hyprflip_claimed_keys` (chord to owner) and binds it itself.

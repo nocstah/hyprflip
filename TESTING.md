@@ -1,6 +1,6 @@
 # Validation
 
-## A module claims one of Hyprflip's keys (2026-11-18)
+## A module claims one of Hyprflip's keys; release checks for 0.3.0-rc.24 (2026-11-18)
 
 Found on the pilot desktop: OmaRelay's card key module binds Super+Ctrl+Alt+O
 itself. Every guided-setup install stopped there, first with "is assigned to
@@ -41,6 +41,12 @@ render-node patch):
   OmaRelay module now claims O on the 0.3.0-rc.23 registry, passes its checks
   and says "Super+Ctrl+Alt+O: left to OmaRelay, which claims it." It wrote
   nothing.
+- OmaCards' panel at its 0.2.0-rc.29 candidate, on this guided setup:
+  `tests/run-native.py --dwindle` passes 9 of 9 and `tests/navigation-native.py`
+  5 of 5.
+
+The plugin's code is unchanged from 0.3.0-rc.23, and so is CMakeLists.txt, so
+the core's own nested suites were not rerun; see that release's checks below.
 
 ## Release checks for 0.3.0-rc.23 (2026-11-18)
 
