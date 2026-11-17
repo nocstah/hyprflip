@@ -712,6 +712,86 @@ def a_recovery_run():
     assert [ipc.windows()[a]['acceptsInput'] for a in (shows, other)] == [True, False]
 
 
+def close(address):
+    """Closes one window the suite opened, by its process."""
+    pid = ipc.windows()[address]['pid']
+    next(p for p in processes if p.pid == pid).terminate()
+    wait(lambda: address not in ipc.windows())
+
+
+def covered_cards():
+    """Cards a program covered with a window of its own, as OmaRelay covers a space's card with Herdr's window.
+
+    A covered card of two faces beside a neighbour, a card that shows one of its
+    two faces under its cover, and a card with one face of its own under a cover.
+    Two updates, with the keyboard on the first card's cover, then on an app of
+    the second: the first two come back with their covers, as they were, and the
+    third comes apart into ordinary tiles, as it is no card without its cover.
+    """
+    to_monitor(output)
+    made = {}
+    for workspace, tag in ((86, 'covered'), (87, 'shows')):
+        to_workspace(workspace)
+        if tag == 'covered':
+            neighbour = spawn('covered-neighbour')
+        front, back, cover = (spawn(f'{tag}-{name}') for name in ('front', 'back', 'cover'))
+        ipc.focused((front, 'mark'), (back, 'card'))
+        ipc.action(f"card {card_of(front)['id']} cover {cover}")
+        made[tag] = front, cover
+    ipc.action(f"card {card_of(made['shows'][0])['id']} show 2")
+    to_workspace(88)
+    alone = [spawn(f'alone-{name}') for name in ('front', 'back', 'cover')]
+    ipc.focused((alone[0], 'mark'), (alone[1], 'card'))
+    ipc.action(f"card {card_of(alone[0])['id']} cover {alone[2]}")
+    # The back's only app closes: the card keeps its one face of its own under the cover.
+    close(alone[1])
+    wait(lambda: len(card_of(alone[0])['faces']) == 1 and card_of(alone[0])['cover'] == alone[2])
+
+    def covers():
+        return {tag: (shape(card_of(front)), card_of(front)['box'], card_of(front)['cover'], card_of(front)['covered'])
+                for tag, (front, _) in made.items()}
+
+    def fills(cover, box):
+        """The cover fills the card's place: its whole box but the frame's header above."""
+        x, y, width, height = tile(cover)
+        assert (box[0] - 1 <= x and x + width <= box[0] + box[2] + 1 and box[1] - 1 <= y and y + height <= box[1] + box[3] + 1
+                and width >= box[2] - 10 and height >= box[3] - 60), (tile(cover), box)
+        return tile(cover)
+
+    before = covers()
+    assert [before[tag][2:] for tag in made] == [(made['covered'][1], True), (made['shows'][1], False)], before
+    assert before['shows'][0]['active'] == 1, before
+    cover_tile = fills(made['covered'][1], before['covered'][1])
+
+    def update(keyboard, first):
+        give_keyboard(keyboard)
+        rest(keyboard)
+        at, monitors = pointer(), shown()
+        out = install()
+        time.sleep(.3)
+        print('covered update: pointer', at, pointer(), 'monitors', monitors, shown(), 'keyboard', keyboard, active(), flush=True)
+        assert 'Keeping 2 open card(s)' in out and 'Taking the cover off 2 card(s)' in out, out
+        assert ('Leaving 1 covered card(s) with one face of their own as separate windows' in out) == first, out
+        for word in ('could not be put back', 'A card was kept', 'Could not keep', 'not as it was'):
+            assert word not in out, out
+        assert (pointer(), shown(), active()) == (at, monitors, keyboard), (at, pointer(), monitors, shown(), keyboard, active())
+        after = covers()
+        for tag in made:
+            assert (after[tag][0], after[tag][2:]) == (before[tag][0], before[tag][2:]), (tag, before[tag], after[tag])
+            assert all(abs(p - q) <= 4 for p, q in zip(after[tag][1], before[tag][1])), (tag, before[tag][1], after[tag][1])
+        assert all(abs(p - q) <= 4 for p, q in zip(fills(made['covered'][1], after['covered'][1]), cover_tile)), (cover_tile, tile(made['covered'][1]))
+        windows = ipc.windows()
+        for address in (alone[0], alone[2]):
+            window = windows[address]
+            assert (window['workspace']['id'], window['grouped'], window['floating'], window['acceptsInput'],
+                    window.get('hidden', False)) == (88, [], False, True, False), window
+        assert not any(alone[0] in sum(card['faces'], []) for card in ipc.status()['containers'])
+
+    to_workspace(86)
+    update(made['covered'][1], True)
+    update(card_of(made['shows'][0])['current'], False)
+
+
 try:
     assert not ipc.data('-j', 'plugin', 'list'), 'Use a fresh nested session without a demo flag'
     # They stay on the session's first workspace, out of the layout this suite measures.
@@ -726,7 +806,7 @@ try:
     output = next(m['name'] for m in ipc.data('-j', 'monitors') if m['name'] not in names)
     settings = original + f'''
 hl.monitor({{output="{output}",mode="3840x2160@60",position="2000x0",scale=1.5}})
-''' + ''.join(f'hl.workspace_rule({{workspace="{n}",monitor="{output}"}})\n' for n in (90, 91, 92, 93, 94, 95, 97, 98)) + f'''
+''' + ''.join(f'hl.workspace_rule({{workspace="{n}",monitor="{output}"}})\n' for n in (86, 87, 88, 90, 91, 92, 93, 94, 95, 97, 98)) + f'''
 hl.config({{animations={{enabled=false}},general={{gaps_in=14,gaps_out=24}},input={{follow_mouse=1}},
     dwindle={{smart_split=true,preserve_split=true,force_split=2}},cursor={{warp_on_change_workspace=1}},
     binds={{hide_special_on_workspace_change=true}}}})
@@ -759,6 +839,9 @@ hl.config({{animations={{enabled=false}},general={{gaps_in=14,gaps_out=24}},inpu
     beside_another_monitor(first)
     clear(mark)
     check('a recovery run after a crash keeps the saved side, and a keyboard left on the other side does not turn the card', a_recovery_run)
+    check('an update keeps a covered card and one that shows a face under its cover with their covers, faces and tiles, '
+          'the cover filling the card\'s place, the keyboard and the pointer where they were; a covered card with one '
+          'face of its own comes apart into ordinary tiles', covered_cards)
     assert not open_cards(), open_cards()
     to_monitor(output)
 

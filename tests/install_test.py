@@ -94,6 +94,9 @@ class InstallerTest(unittest.TestCase):
         self.moved_card = self.back_card = None
         # Workspaces with a fullscreen window, and a change at the desk during the corrections.
         self.fullscreen, self.after_steps = set(), None
+        # A core that takes covers, the cards whose uncover it refuses, the card each restore
+        # line rebuilds, and windows that are open beside the apps of every test.
+        self.card_cover, self.refuse_uncover, self.rebuilt, self.extra_clients = False, set(), {}, ()
 
     def hyprctl(self, command, **kwargs):
         self.assertEqual(command[0], "hyprctl")
@@ -107,6 +110,8 @@ class InstallerTest(unittest.TestCase):
             self.assertTrue(self.loaded)
             version = VERSION if self.library.read_bytes() == b"new plugin" else "0.1.0"
             reply = {"version": version, "pairs": self.pairs, "containers": self.containers}
+            if self.card_cover:
+                reply["card_cover"] = True
         elif args == ["hyprflip", "finish"]:
             # Another program may park a card while the update settles.
             if self.park_at_finish:
@@ -134,7 +139,8 @@ class InstallerTest(unittest.TestCase):
             reply = ""
         elif args == ["-j", "clients"]:
             reply = [{"address": address, "grouped": list(PAIR.values()), "acceptsInput": address not in self.hidden_after_restore}
-                     for address in (*PAIR.values(), "0xc", "0xd", "0xe", "0xf") if address != self.closed_after_restore]
+                     for address in (*PAIR.values(), "0xc", "0xd", "0xe", "0xf", *self.extra_clients)
+                     if address != self.closed_after_restore]
         elif args == ["-j", "activewindow"]:
             # Where the keyboard goes back to, after an unload and after a card's tile correction.
             if self.read_failure == "activewindow":
@@ -174,6 +180,8 @@ class InstallerTest(unittest.TestCase):
             else:
                 self.restored.append(restore)
                 reply = "ok: restored"
+                if restore in self.rebuilt:
+                    self.containers.append(json.loads(json.dumps(self.rebuilt[restore])))
                 if self.moved_card:
                     self.containers = [self.moved_card]
                 # Someone at the desk, while the update runs.
@@ -181,6 +189,24 @@ class InstallerTest(unittest.TestCase):
                     self.keyboard = self.taken_after_restore
                 if self.moved_after_restore:
                     self.monitors = self.moved_after_restore
+        elif len(args) == 2 and args[0] == "hyprflip" and args[1].startswith("card "):
+            _, number, verb, *rest = args[1].split()
+            found = next(c for c in self.containers if c.get("id") == int(number))
+            reply = "ok: ok"
+            if verb == "uncover" and int(number) in self.refuse_uncover:
+                reply = "error: Finish the active grab or drag before uncovering the card."
+            elif verb == "uncover" and len(found["faces"]) < 2:
+                self.containers.remove(found)
+            elif verb == "uncover":
+                found.update(cover=None, covered=False)
+            elif verb == "cover" and rest[0] == self.closed_after_restore:
+                reply = f"error: No window has address {rest[0]}."
+            elif verb == "cover":
+                found.update(cover=rest[0], covered=True)
+            elif verb == "show":
+                found["covered"] = rest == ["cover"]
+            else:
+                self.fail(f"Unexpected card action: {args}")
         elif args == ["hyprflip", "adopt", PAIR["front"], PAIR["back"]]:
             if self.library.read_bytes() == b"old plugin":
                 reply = "unknown request"
@@ -636,6 +662,97 @@ class InstallerTest(unittest.TestCase):
                 for path, content in self.originals.items():
                     self.assertEqual(path.read_bytes(), content)
                 self.assertEqual(json.loads(self.recovery.read_text())["cards"], [line("0xc", "0xd"), line("0xe", "0xf")])
+
+    def covered(self, covered=True, active=0, faces=2):
+        """A card under a cover on a core that takes covers, which a restore of its line rebuilds as card 9."""
+        self.card_cover, self.extra_clients = True, ("0x1f",)
+        made = card("0xc", "0xd", SHOWN, id=7, cover="0x1f", covered=covered, active=active)
+        if faces == 1:
+            made.update(faces=[["0xc"]], layouts=made["layouts"][:1])
+        self.containers = [made]
+        uncovered = dict(made, cover=None, covered=False)
+        self.rebuilt = {line("0xc", "0xd").replace("tiled 0 ", f"tiled {active} ", 1): dict(uncovered, id=9)}
+        return made
+
+    def card_calls(self):
+        return [call[1] for call in self.calls if len(call) == 2 and call[0] == "hyprflip" and call[1].startswith("card ")]
+
+    def test_a_cover_comes_off_before_the_unload_and_goes_back_on_after(self):
+        self.covered()
+        self.run_installer()
+        self.assertLess(self.calls.index(["hyprflip", "card 7 uncover"]), self.calls.index(["plugin", "unload", str(self.library)]))
+        self.assertEqual(self.recovery_at_unload["covers"], [{"cover": "0x1f", "covered": True, "active": 0, "apps": ["0xc", "0xd"]}])
+        self.assertEqual(self.restored, [line("0xc", "0xd")])
+        self.assertEqual(self.card_calls(), ["card 7 uncover", "card 9 cover 0x1f", "card 9 show cover"])
+        self.assertEqual(self.containers[-1]["cover"], "0x1f")
+        self.assertIn("Taking the cover off 1 card(s) for this update, and putting it back after.", self.output.getvalue())
+        self.assertNotIn("could not be put back", self.output.getvalue())
+        self.assertEqual(self.library.read_bytes(), b"new plugin")
+        self.assertFalse(self.recovery.exists())
+
+    def test_a_covered_card_that_showed_one_of_its_faces_shows_it_again(self):
+        self.covered(covered=False, active=1)
+        self.run_installer()
+        self.assertEqual(self.card_calls(), ["card 7 uncover", "card 9 cover 0x1f", "card 9 show 2"])
+
+    def test_a_covered_card_with_one_face_of_its_own_comes_apart_and_says_so(self):
+        self.covered(faces=1)
+        self.containers.append(card("0xe", "0xf", SHOWN, id=8))
+        self.run_installer()
+        self.assertEqual(self.card_calls(), ["card 7 uncover"])
+        self.assertEqual(self.restored, [line("0xe", "0xf")])
+        self.assertNotIn("covers", self.recovery_at_unload)
+        self.assertIn("Keeping 1 open card(s) through this update.\n"
+                      "Leaving 1 covered card(s) with one face of their own as separate windows; "
+                      "the program that built them rebuilds them.\n", self.output.getvalue())
+        self.assertEqual(self.library.read_bytes(), b"new plugin")
+
+    def test_a_refused_uncover_puts_back_the_covers_taken_off_and_changes_nothing(self):
+        self.covered()
+        self.containers.append(card("0xe", "0xf", SHOWN, id=8, cover="0x2f", covered=True))
+        self.refuse_uncover = {8}
+        with self.assertRaisesRegex(SystemExit, "A covered card kept its cover, so nothing was updated: Finish the active grab"):
+            self.run_installer()
+        self.assertEqual(self.card_calls(), ["card 7 uncover", "card 8 uncover", "card 7 cover 0x1f", "card 7 show cover"])
+        self.assertTrue(self.loaded)
+        self.assertNotIn(["plugin", "unload", str(self.library)], self.calls)
+        for path, content in self.originals.items():
+            self.assertEqual(path.read_bytes(), content)
+        self.assertFalse(self.recovery.exists())
+
+    def test_a_cover_that_closed_meanwhile_is_named_and_the_update_goes_on(self):
+        self.covered()
+        self.closed_after_restore = "0x1f"
+        self.run_installer()
+        self.assertIn("A card was kept, but its cover could not be put back on it: No window has address 0x1f.",
+                      self.output.getvalue())
+        self.assertEqual(self.library.read_bytes(), b"new plugin")
+        self.assertFalse(self.recovery.exists())
+
+    def test_a_rollback_puts_the_cover_back_and_the_recovery_file_keeps_it(self):
+        self.covered()
+        self.fail_adoption = True
+        with self.assertRaisesRegex(RuntimeError, "Could not restore pair"):
+            self.run_installer()
+        self.assertEqual(self.card_calls()[-2:], ["card 9 cover 0x1f", "card 9 show cover"])
+        self.assertEqual(json.loads(self.recovery.read_text())["covers"],
+                         [{"cover": "0x1f", "covered": True, "active": 0, "apps": ["0xc", "0xd"]}])
+
+    def test_a_recovery_run_puts_the_covers_back(self):
+        self.covered()
+        self.containers, self.loaded, self.pairs = [], False, []
+        self.recovery.write_text(json.dumps({"instance": "test-instance", "pairs": [], "cards": [line("0xc", "0xd")],
+                                             "covers": [{"cover": "0x1f", "covered": True, "active": 0, "apps": ["0xc", "0xd"]}]}))
+        self.run_installer()
+        self.assertEqual(self.card_calls(), ["card 9 cover 0x1f", "card 9 show cover"])
+        self.assertIn("Taking the cover off 1 card(s)", self.output.getvalue())
+        self.assertFalse(self.recovery.exists())
+
+    def test_a_core_without_covers_gets_no_cover_request(self):
+        self.containers = [card("0xc", "0xd", SHOWN, id=7)]
+        self.run_installer()
+        self.assertEqual(self.card_calls(), [])
+        self.assertNotIn("cover", self.output.getvalue())
 
     def test_active_hy3_containers_reject_native_upgrade_before_mutation(self):
         self.containers = [{"faces": [["0xc"], ["0xd", "0xe"]]}]

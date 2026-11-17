@@ -177,9 +177,16 @@ The cover can also leave without the program:
 - A card with one face of its own and its cover comes apart when it is moved
   to a special workspace, since a card keeps two faces: its apps go there as
   ordinary windows and the cover stays where the card was.
-- `card <id> ungroup`, an update and unloading the plugin leave the cover as an
-  ordinary window, like the card's apps. An update rebuilds the card without
-  its cover.
+- `card <id> ungroup` and unloading the plugin leave the cover as an ordinary
+  window, like the card's apps. So does uninstalling, the cover shown or not.
+- An update with `scripts/install.py` takes each cover off before it unloads
+  the plugin. Once the card is back in its tile, the update puts the cover back
+  on, and the card shows what it showed: its cover, or the same face. A card
+  with one face of its own is no card without its cover. It comes apart into
+  ordinary tiles, and the program that built it builds it again. If the cover
+  closed meanwhile, or the core refuses it, the update says so, leaves the card
+  without it, and goes on. Should a covered card refuse to give up its cover,
+  for example during a drag, the update stops before it changes anything.
 
 The cover's face takes no other app. Attaching an app to it, dropping one on
 it and the menus' edits are refused: "This face is the card's cover and holds

@@ -112,6 +112,32 @@ try:
     check('an uninstall unloads the plugin with a reload, leaves the card\'s apps as ordinary windows and the '
           'configuration as it was', a_card_comes_apart)
 
+    def covers_come_out():
+        """A covered card, and one that shows a face of its own over its hidden cover: every window comes out as an
+        ordinary tile on its workspace, a hidden cover too."""
+        installed()
+        windows = []
+        for workspace, shows in ((62, 'cover'), (63, '1')):
+            ipc.call('dispatch', f'hl.dsp.focus({{ workspace = "{workspace}" }})')
+            front, back, cover = (spawn(f'{name}-{workspace}') for name in ('front', 'back', 'cover'))
+            ipc.focused((front, 'mark'), (back, 'card'))
+            card = next(c for c in ipc.status()['containers'] if front in sum(c['faces'], []))
+            ipc.action(f"card {card['id']} cover {cover}")
+            ipc.action(f"card {card['id']} show {shows}")
+            card = next(c for c in ipc.status()['containers'] if front in sum(c['faces'], []))
+            assert (card['cover'], card['covered']) == (cover, shows == 'cover'), card
+            windows += [(address, workspace) for address in (front, back, cover)]
+        out = run('uninstall.py', '--yes')
+        assert 'Hyprflip is removed.' in out and 'hyprflip' not in plugins(), (out, plugins())
+        clients = ipc.windows()
+        for address, workspace in windows:
+            window = clients[address]
+            assert (window['workspace']['id'], window['grouped'], window['floating'], window['acceptsInput'],
+                    window.get('hidden', False)) == (workspace, [], False, True, False), window
+            assert min(window['size']) > 100, window
+    check('an uninstall leaves a covered card\'s apps and its cover, shown or hidden behind a face, as ordinary tiles',
+          covers_come_out)
+
     def again():
         installed()
         out = run('uninstall.py', '--yes')
