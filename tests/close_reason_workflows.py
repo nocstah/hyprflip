@@ -382,6 +382,38 @@ hl.config({animations={enabled=false},plugin={hyprflip={duration_ms=0,notificati
         passed(f'an app on face {most} of a {most}-face card (the core\'s limit) closed by key reads face {most - 1}, '
                f'faces {most}')
 
+        # Faces past the old four-face limit. Uncovered, a face emptying takes the card apart; the record
+        # still names face 5 of 6, which is what a program rebuilding the card needs.
+        if most >= 6:
+            ipc.call('dispatch', 'hl.dsp.focus({workspace=77})')
+            apps = [[spawn(f'six{i}')] for i in range(1, 7)]
+            c = restore(apps)
+            clients = ipc.windows()
+            ipc.action(f'card {c} show 5')
+            start = mark()
+            close_key(apps[4][0])
+            [r] = records(start, 1)
+            about(r, apps[4][0], clients[apps[4][0]]); place(r, c, 4, 0, 6, dissolved=True); why(r, 'requested', 'key')
+            wait(lambda: gone(c))
+            passed('closing by key the only app on face 5 of a six-face card reads face 4 of 6, dissolved')
+
+            # Covered at the limit (five faces of its own and the cover), face 5 can go on its own.
+            ipc.call('dispatch', 'hl.dsp.focus({workspace=78})')
+            apps = [[spawn(f'cov{i}')] for i in range(1, 6)]
+            cover = spawn('cov-cover')
+            c = restore(apps)
+            assert ipc.action(f'card {c} cover {cover}') == 'ok: ok' and card(c)['cover'] == cover
+            clients = ipc.windows()
+            ipc.action(f'card {c} show 5')
+            start = mark()
+            close_key(apps[4][0])
+            [r] = records(start, 1)
+            about(r, apps[4][0], clients[apps[4][0]]); place(r, c, 4, 0, 5); why(r, 'requested', 'key')
+            wait(lambda: len(card(c)['faces']) == 4)
+            assert card(c)['faces'] == apps[:4] and card(c)['cover'] == cover, card(c)
+            passed('on a covered card at six faces (five of its own), closing the only app on face 5 reads face 4 '
+                   'of 5, not dissolved, and the card keeps its other four faces and the cover')
+
         # App-chosen text in a record: the status stays JSON and the helper still reads it.
         odd = 'hyprflip-close-Lua error "q" \\ \t end'
         strange = spawn('odd', app=odd)

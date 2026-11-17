@@ -1,5 +1,34 @@
 # Validation
 
+## Close reasons and six faces together (2026-11-17)
+
+Both branches merged here. All three CTest checks and all 417 Python unit tests
+pass. `close_reason_workflows.py` now reads `container_max_faces` 6, so its
+last-face check closes an app on face 6 of a six-face card (face 5, faces 6),
+and it gains two checks with both features together:
+- closing by key the only app on face 5 of a six-face card reads face 4 of 6,
+  `dissolved` true, since an uncovered card comes apart when a face empties;
+- on a covered card at six faces (five of its own and the cover), the same close
+  reads face 4 of 5, not dissolved, and the card keeps its other four faces and
+  the cover.
+
+Each nested suite ran in its own fresh session (Hyprland 0.56.2, Aquamarine with
+the render-node patch, `--notify-recorder`) on the merged build:
+- `close_reason_workflows.py` (15, with `--protocol`), 72 status replies all JSON;
+- `close_reason_workflows.py --hooks-off` (4) in a session started with
+  `HYPRFLIP_CLOSE_HOOKS=0`;
+- `multiface_workflows.py` (18), `cover_workflows.py` (15, with `--protocol`),
+  `card_id_workflows.py` (13), `switcher_workflows.py` (12),
+  `unattended_workflows.py` (13), `dwindle_workflows.py` (7),
+  `floating_workflows.py` (10);
+- `saved_workflows.py`, `--phase save` (1) then `--phase restore` (5) in a
+  second session with the same `--state-dir`;
+- OmaRelay's `ovis.py cards-nested` (17, cleanup complete), run from its
+  face-limit reader branch against this checkout.
+
+`fullscreen_workflows.py` passed 7 checks and then failed where it fails on
+79fdb37 (`KeyError: 'address'` at line 236), as recorded below.
+
 ## Why an app closed (2026-11-17)
 
 All three CTest checks pass. `core` now also checks the close ledger on fake
