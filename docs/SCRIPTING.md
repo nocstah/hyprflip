@@ -307,6 +307,106 @@ kept. If `hyprctl` cannot reach Hyprland, the update is rolled back and the
 installer keeps its recovery file; the next update in the same Hyprland session
 rebuilds the pairs and cards from it when no card or pair is open.
 
+## Why an app closed
+
+Hyprland closes every window the same way and keeps no reason. Hyprflip notes
+each close request and kill as Hyprland sends it, and when a window goes it
+records why, with the place the window had in its card. A program that rebuilds
+cards, such as a workspace manager, can read these records to tell an app the
+person closed from one that quit or crashed by itself, and so decide whether to
+leave the app out of the card or bring it back.
+
+Cores that have it add two top-level fields to `status`:
+
+```json
+"close_reasons": true,
+"closes": {
+  "instance": "9f2c1e7a40b35d18",
+  "next": 43,
+  "oldest": 41,
+  "watch": {"close": true, "kill": true},
+  "list": [
+    {"seq": 41, "age_ms": 5120, "address": "0x55d0a1b2c3d0", "stable_id": "3f", "pid": null,
+     "initial_class": "org.gnome.Nautilus", "workspace": {"id": 3, "name": "3", "special": false},
+     "card": 12, "face": 2, "index": 0, "faces": 3, "cover": false, "dissolved": false,
+     "reason": "own", "via": null, "asked_ms": null},
+    {"seq": 42, "age_ms": 830, "address": "0x55d0a1b2c3e0", "stable_id": "40", "pid": 41234,
+     "initial_class": "org.gnome.TextEditor", "workspace": {"id": 3, "name": "3", "special": false},
+     "card": 12, "face": 1, "index": 0, "faces": 3, "cover": false, "dissolved": false,
+     "reason": "requested", "via": "key", "asked_ms": 140}
+  ]
+}
+```
+
+| `reason` | Meaning |
+| --- | --- |
+| `requested` | Hyprland asked the app to close this window, at most 120 s before it went. A repeated request starts the 120 s again |
+| `killed` | Hyprland killed this window's process, at most 10 s before it went. A kill counts before a close request |
+| `own` | Nothing in Hyprland asked: the app quit or crashed, was killed from outside Hyprland, or went along with another window of its process that was killed |
+| `unknown` | Nothing asked that Hyprflip could see, but it could not watch every way of asking (`close_reasons` false), so it does not claim `own` |
+
+| `via` | Who asked |
+| --- | --- |
+| `key` | A key bind, Lua-function binds included, such as Omarchy's Super+W with `hl.dsp.window.close()` |
+| `click` | A click in `hyprctl kill`'s mode |
+| `other` | Anything else: `hyprctl dispatch` (Omarchy's title-bar ×, its close-all at logout, reboot and shutdown, a workspace manager's own closes), a trackpad gesture, a taskbar, or XWayland being switched off |
+
+`via` is null exactly when `reason` is `own` or `unknown`. Read a `via` you do
+not know as `other`.
+
+Each record has:
+
+| Field | Meaning |
+| --- | --- |
+| `seq` | Its number: 1 for the first record after the plugin loads, then one more each |
+| `age_ms` | How long ago the window went |
+| `address` | The window's address, as `faces` gave it |
+| `stable_id` | Hyprland's id for the window, lower-case hex without `0x`, as `hyprctl clients -j` gives `stableId`. Unlike an address, a later window never gets it again |
+| `pid` | The process, taken when the request came where there was one, or null |
+| `initial_class` | The class the app opened with: valid UTF-8, at most 256 bytes. A title is never recorded |
+| `workspace` | `id`, `name` and `special`, or null |
+| `card` | The card's id, or null for a window in no card |
+| `face`, `index`, `faces` | The window's face and its place on it, and how many faces the card had, numbered as `containers` numbers the card's own faces, taken before the close; null for the cover and for a window in no card |
+| `cover` | True when the window was the card's cover (`card` set, `face` null) |
+| `dissolved` | True when the card no longer exists after this close, as when the last app of one of its two faces went |
+| `asked_ms` | The time from the latest request to the close, or null |
+
+Every requested or killed close gets a record, and so does any close of a
+card's app or cover, whatever the reason. Other windows that go by themselves
+get none.
+
+`close_reasons` is true when Hyprflip can see both close requests and kills;
+`watch` says which of the two it sees (`close` and `kill`). Without both, a
+close with nothing pending reads `unknown`, and `requested` and `killed` records
+can still be trusted. Hooks into Hyprland's functions work only on x86_64, so on
+an aarch64 machine both are false; a click in `hyprctl kill`'s mode still reads
+`killed`. Setting `HYPRFLIP_CLOSE_HOOKS=0` in Hyprland's environment leaves the
+hooks out, as on such a machine, to try that case.
+
+The list is oldest first, at most 64 records, each at most 10 minutes old.
+`instance` is 16 lower-case hex digits, new each time the plugin loads; `seq`
+starts at 1 again with it, as card ids do. `next` is the number the next record
+will get, and `oldest` is the first listed one, or `next` when none is listed.
+
+To read them, keep the instance and the last `seq` you took, and at each status
+read take the records after it. When the instance changed, or `oldest - 1` is
+above your last `seq`, records were missed. A record is made in the same turn
+of Hyprland's main loop that takes the window out of its card, so a status that
+no longer lists a closed app already lists its record; Hyprland's own
+`closewindow>>` event on its socket is the moment to read again.
+
+Heal by default: bring the app back on `own`, on `unknown`, when a card app is
+gone with no record, and when records were missed. Only a `requested` or
+`killed` close is the person's doing, and only `via` `key` or `click` says they
+meant this window: Omarchy's close-all at shutdown asks every window to close
+through `hyprctl dispatch`, which reads `via` `other`. A program that closes
+windows itself sees its own closes as `requested` with `via` `other` too.
+
+Some closes the person chose still read `own`: a browser closing on its own
+Ctrl+W after its last tab, a key bound to `hl.dsp.window.signal`, the Terminate
+button of Hyprland's not-responding dialog, and `kill` or `pkill` from a
+terminal.
+
 ## Open and save cards unattended
 
 A program that builds cards while the user works elsewhere, such as a workspace
@@ -623,6 +723,7 @@ and checked names only, and its replies and its store carry no title either.
 
 `tests/card_id_workflows.py` checks the calls by id,
 `tests/cover_workflows.py` covers,
+`tests/close_reason_workflows.py` why apps closed,
 `tests/reveal_workflows.py` the swap with an animation and
 `tests/unattended_workflows.py` the helper, each in a nested session with only
 the core loaded. The refusal during a move the app asks for itself has been

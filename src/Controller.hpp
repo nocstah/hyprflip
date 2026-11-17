@@ -1,6 +1,7 @@
 #pragma once
 #include "ContainerABI.hpp"
 #include "CardFrames.hpp"
+#include "CloseLedger.hpp"
 #include "CardDrop.hpp"
 #include "FaceSwitcher.hpp"
 #include "FlipTransformer.hpp"
@@ -74,7 +75,7 @@ class Controller {
         unsigned count = 2;
         unsigned active = 0;
         unsigned next() const { return (active + 1) % count; }
-        // A face's own name, or Front, Back, Face 3 and Face 4.
+        // A face's own name, or Front, Back, then Face N.
         std::array<std::string, CONTAINER_MAX_FACES> names;
         std::string name(unsigned face) const { return faceName(face, names[face]); }
         bool unfolded = false;
@@ -198,6 +199,12 @@ class Controller {
     std::string animationFallback(PHLWINDOW a, PHLWINDOW b) const;
     static bool glassy(PHLWINDOW w);
     void onClose(PHLWINDOW window);
+    // Where a window sits in a card, in status's own-face numbering: a cover has a
+    // card and no face; a window in no card has neither.
+    ClosePlace placeOf(PHLWINDOW window);
+    // Records why a window closed, for a requested or killed close or for any
+    // card member or cover; taken before the card changes.
+    void noteClose(PHLWINDOW window, const ClosePlace &place, bool dissolved);
     void onFocus(PHLWINDOW window);
     void settleInput();
     HANDLE m_handle;
@@ -252,5 +259,8 @@ class Controller {
     };
     std::map<std::string, Reservation> m_reservations;
     std::optional<uint32_t> m_movingWorkspace;
+    // Close requests and kills as they happen, and the recent closes status reports.
+    CloseLedger m_closes;
+    CloseWatch m_closeWatch;
 };
 } // namespace Hyprflip

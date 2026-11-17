@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Status reports why apps went away: `close_reasons` and `closes` (requested,
+  killed, own, unknown; who asked: key, click, other). Hyprflip notes each
+  close request and kill as Hyprland sends it and keeps the last 64 closes for
+  10 minutes, with the card, face and place each app had, so a program that
+  rebuilds cards can leave out an app the person closed and bring back one that
+  quit or crashed. See [Why an app closed](docs/SCRIPTING.md#why-an-app-closed).
 - Fix: helper status reads no longer fail on an app class containing
   'Lua error' or invalid UTF-8.
 - A program can cover a card with a window of its own:

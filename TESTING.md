@@ -1,5 +1,92 @@
 # Validation
 
+## Why an app closed (2026-11-17)
+
+All three CTest checks pass. `core` now also checks the close ledger on fake
+times:
+- a close request read as `requested` up to 120 s and a kill as `killed` up to
+  10 s, then `own` with both hooks and `unknown` without;
+- a live kill winning over a live close, and an expired kill leaving the close
+  to decide;
+- a repeated request restarting the clock, with the latest `via`;
+- a close using its request up, and a pid of 0 or less stored as none;
+- the 128 pending windows, dropping those asked longest ago, and requests past
+  their time pruned;
+- the 64 records and 10 minutes, with `oldest` and `next`;
+- invalid UTF-8 replaced, text cut to 256 bytes at a code-point boundary, and
+  the exact JSON of a record in a card, a cover and a window in no card.
+
+`own_symbols` passes with the new `CloseReasons.cpp`, and `lua_library` passes.
+
+All 411 Python unit tests pass. Three are new, in `tests/hyprctl_call_test.py`.
+Through a stand-in `hyprctl` on PATH they check that:
+- a JSON reply naming "Lua error" in a class parses;
+- a plain `Lua error: boom` reply still raises;
+- invalid UTF-8 inside a JSON string reads as U+FFFD.
+
+Two of the three fail against the previous `Hyprctl.call`.
+
+The new `tests/close_reason_workflows.py` passed all 13 of its checks in a fresh
+nested session (Hyprland 0.56.2, Aquamarine with the render-node patch), started
+with `--notify-recorder` and run with `--protocol` pointing to
+`wlr-virtual-pointer-unstable-v1.xml`. Its keys are Super+F9
+(`hl.dsp.window.close()`) and Super+F10 (`hl.dsp.window.kill()`), pressed with
+wtype; the session resolves binds by key symbol, since wtype sends its own
+keymap. The checks cover:
+- the status at load: `close_reasons` true, both hooks in `watch`, a 16-digit
+  instance, no records, and `fullscreen_focus` still true with the fullscreen
+  hooks now found by their full names;
+- a key close on face 2 of a 3-face card: `requested` by `key`, with the card,
+  face, index, faces, pid, initial class, stable id and workspace;
+- `hyprctl dispatch hl.dsp.window.close`: `requested` by `other`;
+- an app quitting by itself and one killed from outside Hyprland (SIGKILL):
+  `own`, the second taking the card apart (`dissolved`);
+- a window in no card: no record when it quits by itself, `card` null when
+  closed by key;
+- a key kill of one of two windows of one `foot --server`: `killed` by `key`
+  with the server's pid; the other window reads `own`;
+- `hyprctl kill` and a click on a card app: `killed` by `click`;
+- the cover closed by key: `cover` true, no face;
+- the last app of a face of a 2-face card closed by key: `dissolved`, with the
+  face it had;
+- the last face of a card at `container_max_faces` (four on this branch);
+- a class holding "Lua error", quotes, a backslash and a tab, read back exactly
+  by the helper's `Hyprctl`;
+- a plugin reload: the hooks install again, with a new instance and records
+  from 1;
+- all 57 status replies parsing as JSON.
+
+Run with `--hooks-off`, in a fresh session whose Hyprland was started with
+`HYPRFLIP_CLOSE_HOOKS=0`, it passed all 4 of its checks, which cover:
+- `close_reasons` false and both hooks false in `watch`;
+- a key close and an app quitting by itself read `unknown`;
+- a key close of a window in no card leaves no record;
+- a click kill still reads `killed` by `click`;
+- every status reply parses.
+
+These suites also passed against this core, each in its own fresh session
+started with `--notify-recorder`:
+- `cover_workflows.py` (15, with `--protocol`);
+- `card_id_workflows.py` (13);
+- `dwindle_workflows.py` (7).
+
+`fullscreen_workflows.py` passed its first 7 checks and then failed where it
+failed before (no window has the focus after an app leaves a fullscreen card,
+`KeyError: 'address'`). It failed in the same place and the same way against a
+build of 79fdb37, the commit this change starts from. So the fullscreen hooks,
+now installed through `hookFunction`, are not the cause, and status reported
+`fullscreen_focus` true in the new suite.
+
+Not checked:
+- aarch64 (omac), where no hook can install; only its stand-in,
+  `HYPRFLIP_CLOSE_HOOKS=0`, was tried here;
+- a sixth face: this branch keeps four faces, and the suite closes an app on
+  the face at `container_max_faces`, so with six faces it checks face 6 of 6;
+- XWayland apps, the trackpad close gesture, a taskbar's close and the group
+  bar's middle-click, all of which go through the same hooked function;
+- `kill -SEGV`: the suite kills from outside with SIGKILL instead, so that no
+  core dump or crash notice reaches the desktop.
+
 ## Cover a card with a window (2026-11-17)
 
 All three CTest checks and all 408 Python unit tests pass. Five of the unit
