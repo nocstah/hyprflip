@@ -167,6 +167,14 @@ The cover can also leave without the program:
   (`"cover": null`) and shows the face it showed before.
 - Releasing the last app of one of the card's two own faces takes the card
   apart, as it does without a cover.
+- Closing the last app of one of the card's own faces takes only that face
+  while the card keeps two faces with its cover, so a cover over one face is
+  still a card that turns between the two. The card shows the face that comes
+  into the closed one's place, the cover when that was the last own face.
+  Without a cover, a face's last app closing takes the card apart.
+- A card with one face of its own and its cover comes apart when it is moved
+  to a special workspace, since a card keeps two faces: its apps go there as
+  ordinary windows and the cover stays where the card was.
 - `card <id> ungroup`, an update and unloading the plugin leave the cover as an
   ordinary window, like the card's apps. An update rebuilds the card without
   its cover.

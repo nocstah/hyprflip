@@ -674,9 +674,29 @@ void Controller::onClose(PHLWINDOW w) {
         if (p.containerID && p.cover.lock() == w)
             covered = &p;
     const auto back = covered ? covered->uncoverTo : PHLWINDOWREF{};
+    // A face of a covered card that closes with its last app takes only its own face too, while the card keeps two
+    // faces with its cover: a program's window over one browser stays a card, and turning goes on between them.
+    // Released apps still take a card of two own faces apart, as without a cover.
+    Pair *coverStays = nullptr;
+    std::optional<unsigned> dropped;
+    for (auto &p : m_pairs)
+        if (!covered && p.containerID && p.cover.lock() && p.cover.lock() != w)
+            if (const auto s = state(p); s && s->contains(w)) {
+                coverStays = &p;
+                for (unsigned side = 0; side < s->count; ++side)
+                    if (std::ranges::find(s->faces[side], w) != s->faces[side].end() && s->faces[side].size() == 1 && s->count > 2)
+                        dropped = side;
+            }
     const bool mutating = m_mutating;
     m_mutating = true;
-    const bool shown = FloatingCards::closing(w, covered != nullptr);
+    const bool shown = FloatingCards::closing(w, covered != nullptr || coverStays != nullptr);
+    // the face shown before, which a flip from a key goes back to, moves down with the faces after the one that went
+    if (coverStays && dropped && coverStays->lastFace) {
+        if (*coverStays->lastFace == *dropped)
+            coverStays->lastFace.reset();
+        else if (*coverStays->lastFace > *dropped)
+            --*coverStays->lastFace;
+    }
     if (covered) {
         covered->cover.reset();
         covered->uncoverTo.reset();
@@ -1657,9 +1677,24 @@ Result Controller::moveCard(Pair &card, const std::string &destination, bool fol
         if (Fullscreen::controller()->isFullscreen(w.lock()))
             return {false, "Leave fullscreen before moving this container."};
     // Out of sight, a card never takes its cover along: the cover stays where the card was.
-    if (destination.starts_with("special") && coverFace(card, *s))
+    if (const auto coverAt = destination.starts_with("special") ? coverFace(card, *s) : std::nullopt) {
+        // A cover over the card's one face of its own: a card keeps two faces, so the card comes apart, its apps
+        // go where it was sent as ordinary windows, and the cover stays where the card was.
+        if (s->count == 2) {
+            const auto own = s->faces[*coverAt == 0 ? 1 : 0];
+            if (const auto result = uncover(card); !result.ok)
+                return result;
+            bool ok = true;
+            m_mutating = true;
+            for (const auto &w : own)
+                ok = FloatingCards::moveWindowTo(w, destination) && ok;
+            m_mutating = false;
+            reconcile();
+            return {ok, ok ? "ok" : "The card's app could not move to that workspace."};
+        }
         if (const auto result = uncover(card); !result.ok)
             return result;
+    }
     auto api = provider(card.providerEpoch);
     const auto id = card.id;
     if (number) m_movingWorkspace = number;
@@ -1701,7 +1736,7 @@ Result Controller::show(Pair &p, unsigned side) {
 }
 std::optional<unsigned> Controller::coverFace(const Pair &p, const State &s) const {
     const auto w = p.cover.lock();
-    if (!w || !p.containerID || s.count < 3)
+    if (!w || !p.containerID || s.count < 2)
         return std::nullopt;
     for (unsigned face = 0; face < s.count; ++face)
         if (s.faces[face].size() == 1 && s.faces[face][0] == w)

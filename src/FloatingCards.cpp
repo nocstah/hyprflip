@@ -955,17 +955,34 @@ const ContainerAPI API{CONTAINER_ABI_VERSION,
                        replace,
                        animating};
 } // namespace
+namespace {
+// The workspace a destination names, made on the origin's monitor when it is not there yet.
+PHLWORKSPACE destinationWorkspace(const std::string &destination, const PHLWORKSPACE &origin) {
+    const auto named = getWorkspaceIDNameFromString(destination);
+    if (named.id == WORKSPACE_INVALID || !origin)
+        return nullptr;
+    auto target = State::workspaceState()->query().id(named.id).run();
+    if (!target)
+        target = State::workspaceState()->create(named.id, origin->monitorID(), named.name);
+    return target;
+}
+} // namespace
+bool moveWindowTo(PHLWINDOW w, const std::string &destination) {
+    if (!w || !w->m_isMapped || !w->m_target || w->m_group)
+        return false;
+    const auto target = destinationWorkspace(destination, w->m_workspace);
+    if (!target)
+        return false;
+    if (target != w->m_workspace)
+        w->m_target->assignToSpace(target->m_space);
+    return true;
+}
 bool moveTo(uint64_t id, const std::string &destination, bool follow) {
     auto c = get(id);
     if (!c || !c->valid())
         return false;
-    const auto named = getWorkspaceIDNameFromString(destination);
-    if (named.id == WORKSPACE_INVALID)
-        return false;
     auto origin = c->group->m_target->workspace();
-    auto target = State::workspaceState()->query().id(named.id).run();
-    if (!target)
-        target = State::workspaceState()->create(named.id, origin->monitorID(), named.name);
+    auto target = destinationWorkspace(destination, origin);
     if (!target)
         return false;
     const auto focused = Desktop::focusState()->window();
@@ -1173,12 +1190,13 @@ uint64_t create(const ContainerSnapshot &snapshot, bool floating, bool focus) {
     c->refresh();
     return id;
 }
-bool closing(PHLWINDOW w, bool ownFace) {
+bool closing(PHLWINDOW w, bool spare) {
     for (auto &[id, c] : cards)
         if (auto s = c->side(w)) {
             // The last app of a face releases the others, unless its face is one
-            // the card can do without: then only that face goes.
-            const bool drop = ownFace && c->faces[*s].size() == 1 && c->count > 2;
+            // the card can do without (the cover's, or any face of a covered
+            // card that keeps two faces): then only that face goes.
+            const bool drop = spare && c->faces[*s].size() == 1 && c->count > 2;
             if (c->faces[*s].size() == 1 && !drop) {
                 dissolve(id);
                 return false;

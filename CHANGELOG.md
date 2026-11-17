@@ -18,6 +18,12 @@
   cover's face takes no other app. If the person releases or closes the cover,
   the card stays, with no cover. See
   [covering a card](docs/SCRIPTING.md#cover-a-card-with-a-window).
+- Closing the last app of one of a covered card's own faces takes only that
+  face, down to one face of its own and the cover, so turning goes on between
+  what is left. Before, the card came apart and the cover had nothing to turn
+  to. Parked on a special workspace, a card with one face of its own comes
+  apart there, its apps out of sight and the cover in place. In `status` such a
+  card lists one face.
 - The panel API reports `covered` for each card, and its `face`, `edit`,
   `flip` and `add_face` requests take the cover into account.
 

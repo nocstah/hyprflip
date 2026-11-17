@@ -598,6 +598,56 @@ hl.config({animations={enabled=false},plugin={hyprflip={duration_ms=0,notificati
     passed('a cover released by the user or closed leaves the card with no cover, showing the face it showed; '
            'releasing the last app of one of the card\'s two own faces takes the card apart as it does without one')
 
+    # A face of a covered card that closes with its last app takes only that face while the card keeps two faces with
+    # its cover: a program's window over one browser stays a card, and turning goes on between them. Without a cover a
+    # face's last app closing still takes the card apart.
+    ipc.focus(herdr)
+    third = spawn('third')
+    loose(third, '61')
+    b = restore([b1, b2, third], herdr)
+    still(f'card {b} cover {herdr}', herdr)
+    assert card(b)['faces'] == [[b1], [b2], [third]] and card(b)['covered'], card(b)
+    close(third)
+    wait(lambda: not gone(b) and card(b)['faces'] == [[b1], [b2]])
+    c = card(b)
+    assert (c['cover'], c['covered']) == (herdr, True), c
+    visible(b, herdr)
+    still(f'card {b} show 2', herdr)
+    assert not card(b)['covered'] and card(b)['active'] == 1, card(b)
+    close(b2)
+    wait(lambda: not gone(b) and card(b)['faces'] == [[b1]])
+    c = card(b)
+    assert (c['cover'], c['covered']) == (herdr, True), c
+    visible(b, herdr)
+    ipc.action(f'card {b} flip')
+    wait(lambda: not card(b)['covered'] and not ipc.status()['animating'])
+    assert card(b)['active'] == 0, card(b)
+    visible(b, herdr)
+    ipc.action(f'card {b} flip')
+    wait(lambda: card(b)['covered'] and not ipc.status()['animating'])
+    visible(b, herdr)
+    # Parked, a card of one face of its own comes apart (a card keeps two faces): its app goes out of sight as an
+    # ordinary window and the cover stays where the card was, with the keyboard.
+    assert ipc.action(f'card {b} workspace special:park silent') == 'ok: ok'
+    wait(lambda: gone(b))
+    loose(herdr, '61')
+    loose(b1, 'special:park')
+    assert active() == herdr, active()
+    ipc.call('dispatch', f'hl.dsp.window.move({{window="address:{b1}",workspace="61",follow=false}})')
+    wait(lambda: ipc.windows()[b1]['workspace']['name'] == '61')
+    b2 = spawn('back-again')
+    for window in (b1, b2, herdr): loose(window, '61')
+    lone = spawn('lone')
+    b = restore([b1, b2, lone], herdr)
+    assert card(b)['cover'] is None
+    close(lone)
+    wait(lambda: gone(b))
+    for window in (b1, b2): loose(window, '61')
+    passed('a face of a covered card that closes with its last app takes only its face while two faces stay with the '
+           'cover, down to one of its own and the cover, which a flip still turns between and which parked comes '
+           'apart, its app out of sight and the cover in place; a card with no cover still comes apart when a face\'s '
+           'last app closes')
+
     # Ungroup and unload leave a cover as an ordinary window, like any app.
     ipc.focus(herdr)
     b = restore([b1, b2], herdr)

@@ -21,9 +21,10 @@ std::string fitProblem(const ContainerSnapshot &snapshot, bool floating);
 // An app's name for messages: its class, never its title, shortened.
 std::string appName(const PHLWINDOW &w);
 // A window is closing. The last app of a face takes the card apart, unless
-// ownFace: an app alone on a face the card can lose (a cover) takes only that
-// face. True when the face that went was the one shown.
-bool closing(PHLWINDOW window, bool ownFace = false);
+// spare: an app alone on a face the card can lose (a cover, or any face of a
+// covered card that keeps two faces) takes only that face. Returns whether
+// that face was the one shown.
+bool closing(PHLWINDOW window, bool spare = false);
 // Adds a window as a new face after the last and shows it. The keyboard goes
 // to it only with focus.
 bool attachFace(uint64_t id, uintptr_t window, bool focus);
@@ -46,4 +47,6 @@ bool place(uint64_t id, Hyprutils::Math::CBox box);
 // special or special:<name>. Focus goes along only when it follows; a silent
 // move takes the focus off the card only when it was there.
 bool moveTo(uint64_t id, const std::string &destination, bool follow);
+// An ordinary window (in no card or group) to the workspace a destination names, as a card's move takes it.
+bool moveWindowTo(PHLWINDOW window, const std::string &destination);
 } // namespace Hyprflip::FloatingCards
