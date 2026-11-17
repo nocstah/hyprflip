@@ -1452,6 +1452,10 @@ Result Controller::flip(std::optional<Transition> preview, Pair *target, std::op
             for (unsigned slot = 0; slot < captures; ++slot) {
                 const auto face = ring ? needed[slot] : m_turn->face(slot);
                 const auto index = ring ? face : slot;
+                if (index >= pose->faces.size()) {
+                    pose->error = "A face past the transition's slots";
+                    break;
+                }
                 select(*p, face, false);
                 pose->faces[index] = m_shader->captureFace(s->faces[face], monitor, pose->error);
                 if (!pose->faces[index]) break;
@@ -2305,7 +2309,7 @@ void Controller::onFrame(PHLMONITOR monitor) {
 //   <tiled|floating> <active> <unfolded> <x> <y> <w> <h>
 //   front <horizontal|vertical> <focused> <address:ratio>...
 //   back  <horizontal|vertical> <focused> <address:ratio>...
-//   [face <horizontal|vertical> <focused> <address:ratio>...]  a third face, then a fourth
+//   [face <horizontal|vertical> <focused> <address:ratio>...]  one per face after the back, up to six faces
 Result Controller::restore(const std::string &arguments) {
     std::istringstream input(arguments);
     std::string mode, token;

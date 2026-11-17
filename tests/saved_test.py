@@ -281,7 +281,7 @@ class SavedTest(unittest.TestCase):
 
 
 class MultiFaceSavedTest(unittest.TestCase):
-    """Cards with three or four faces, saved and opened again; two-face cards as they always were."""
+    """Cards with three to six faces, saved and opened again; two-face cards as they always were."""
     setUp, saved = SavedTest.setUp, SavedTest.saved
 
     def three_faces(self):
@@ -304,10 +304,19 @@ class MultiFaceSavedTest(unittest.TestCase):
         arrangement['faces'].append({'windows': ['0xe'], 'axis': 'horizontal', 'ratios': [1], 'focus': 0})
         self.assertTrue(setup.Setup.restore_line(arrangement, [0, 0, 1, 1], True).endswith(
             'face horizontal 0xd 0xd:1 face horizontal 0xe 0xe:1'))
-        for broken in ({'active': 4}, {'faces': arrangement['faces'][:1], 'active': 0},
-                       {'faces': arrangement['faces'] * 2, 'active': 0}):
+        # Nine faces is past even the saved-card schema's bound; the core refuses what it cannot hold.
+        nine = [{'windows': [f'0x{i:x}'], 'axis': 'horizontal', 'ratios': [1], 'focus': 0} for i in range(0xa, 0xa + 9)]
+        for broken in ({'active': 4}, {'faces': arrangement['faces'][:1], 'active': 0}, {'faces': nine, 'active': 0}):
             with self.subTest(broken=broken), self.assertRaises(setup.SetupError):
                 setup.Setup.restore_line(arrangement | broken, [0, 0, 1, 1], False)
+
+    def test_restore_line_writes_six_faces(self):
+        arrangement = {'active': 5, 'faces': [
+            {'windows': [f'0x{i:x}'], 'axis': 'horizontal', 'ratios': [1], 'focus': 0} for i in range(0xa, 0x10)]}
+        self.assertEqual(setup.Setup.restore_line(arrangement, [0, 0, 1200, 700], False),
+                         'restore quiet tiled 5 0 0 0 1200 700 front horizontal 0xa 0xa:1 back horizontal 0xb 0xb:1 '
+                         'face horizontal 0xc 0xc:1 face horizontal 0xd 0xd:1 face horizontal 0xe 0xe:1 '
+                         'face horizontal 0xf 0xf:1')
 
     def test_a_three_face_card_saves_and_reads_back_as_it_was(self):
         card = self.three_faces()
@@ -372,10 +381,19 @@ class MultiFaceSavedTest(unittest.TestCase):
 
     def test_face_counts_and_active_faces_out_of_range_are_rejected(self):
         face = self.recipe['faces'][0]
-        for faces, active in (([face], 0), ([face] * 5, 0), ([face] * 3, 3), ([face] * 2, 2), ([face] * 4, -1)):
+        for faces, active in (([face], 0), ([face] * 9, 0), ([face] * 3, 3), ([face] * 2, 2), ([face] * 4, -1)):
             with self.subTest(faces=len(faces), active=active):
                 with self.assertRaises(ValueError): setup.RecipeStore.validate({'faces': faces, 'active': active})
-        for count in (2, 3, 4):
+        # The schema's bound sits above the core's cap, so a later core's cards stay readable.
+        self.assertEqual(setup.RECIPE_MAX_FACES, 8)
+        for count in range(2, 9):
             setup.RecipeStore.validate({'faces': [face] * count, 'active': count - 1})
+
+    def test_a_store_holding_a_six_face_card_reads(self):
+        face = self.recipe['faces'][0]
+        six = {'faces': [deepcopy(face) for _ in range(6)], 'active': 5}
+        for index, f in enumerate(six['faces'][2:], 3): f['name'] = f'Face {index}'
+        self.store.update('Six', six, None)
+        self.assertEqual(self.store.read(), {'Six': six})
 
 if __name__ == '__main__': unittest.main()

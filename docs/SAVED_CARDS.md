@@ -2,7 +2,12 @@
 
 The optional guided card menu saves arrangements for later reuse. It prefers
 Omarchy’s running shell and automatically falls back to Fuzzel, Rofi or Wofi. A card
-has two to four faces, with one to five apps in a row or column on each face.
+has two to six faces, with one to five apps in a row or column on each face.
+
+Going back to a Hyprflip from before six-face cards: its helper refuses a whole
+library that holds a card with five or six faces ("Saved cards could not be
+read"), and its core leaves the apps of such open cards apart after the
+reinstall. Cut those cards to four faces or fewer, or delete them, first.
 
 ## Save and open
 

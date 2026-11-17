@@ -26,6 +26,16 @@
   card lists one face.
 - The panel API reports `covered` for each card, and its `face`, `edit`,
   `flip` and `add_face` requests take the cover into account.
+- Cards hold up to six faces (a cover counts as one); keys 1-4 stay, faces
+  5-6 by flip, swipe or the face switcher.
+- Saved-card schema accepts up to 8 faces; unattended open refuses a recipe
+  the core cannot hold (`too_many_faces`); capabilities report `max_faces`.
+- The edit menu's "Add an app as a new face" counts a card's cover, as the
+  panel already did, so a covered card at the most faces no longer offers it.
+- Downgrade: an older helper refuses a library with a 5- or 6-face card, and an
+  older core leaves such cards' apps apart after reinstall; cut them to four
+  faces first.
+- Internal: ContainerABI 10.
 
 ## 0.3.0-rc.22 — 2026-11-13
 

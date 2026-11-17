@@ -263,10 +263,24 @@ hl.config({animations={enabled=false},plugin={hyprflip={duration_ms=0,notificati
     # Refusals: each replies with a sentence and changes no card.
     lone = spawn('lone')
     ipc.focus(lone)
-    four = restore([lone, spawn('four-b'), spawn('four-c'), spawn('four-d')], herdr)
-    assert 'already has 4 faces' in refused(f'card {four} cover {herdr}')
-    assert still(f'card {four} ungroup', herdr) == 'ok: ok'
-    for window in [lone] + [x for x in ipc.windows() if ipc.windows()[x]['class'].startswith('hyprflip-cover-four')]:
+    six = restore([lone] + [spawn(f'six-{n}') for n in 'bcdef'], herdr)
+    assert len(card(six)['faces']) == 6, card(six)
+    assert 'already has 6 faces' in refused(f'card {six} cover {herdr}')
+    assert still(f'card {six} ungroup', herdr) == 'ok: ok'
+    for window in [lone] + [x for x in ipc.windows() if ipc.windows()[x]['class'].startswith('hyprflip-cover-six')]:
+        close(window)
+    # A cover takes the sixth face: a card with five faces of its own takes one, and then no new face.
+    lone = spawn('lone')
+    ipc.focus(lone)
+    five = restore([lone] + [spawn(f'five-{n}') for n in 'bcde'], herdr)
+    lid, spare = spawn('five-lid'), spawn('five-spare')
+    assert still(f'card {five} cover {lid}', herdr) == 'ok: ok'
+    c = card(five)
+    assert len(c['faces']) == 5 and (c['cover'], c['covered']) == (lid, True) and len(c['names']) == 5, c
+    assert 'already has 6 faces' in lua_refused((spare, 'mark'), (lid, 'attach face'))
+    assert still(f'card {five} uncover', herdr) == 'ok: ok' and card(five)['cover'] is None
+    assert still(f'card {five} ungroup', herdr) == 'ok: ok'
+    for window in [lone] + [x for x in ipc.windows() if ipc.windows()[x]['class'].startswith('hyprflip-cover-five')]:
         close(window)
     chat, mail = spawn('chat'), spawn('mail')
     ipc.focused((chat, 'mark'), (mail, 'pair'))
@@ -312,7 +326,8 @@ hl.config({animations={enabled=false},plugin={hyprflip={duration_ms=0,notificati
     ipc.focus(herdr)
     before = card(a)
     assert still(f'card {a} uncover', herdr) == 'ok: ok' and card(a) == before
-    passed('cover refuses a pair, a card of four faces, a window in a card or pair, on another workspace or '
+    passed('a card with five faces of its own takes a cover, which then counts as its sixth face; cover refuses a '
+           'pair, a card of six faces, a window in a card or pair, on another workspace or '
            'fullscreen, a fullscreen or unfolded card, malformed input and a popup grab ("Finish the active"), '
            'changing no card; uncover with no cover replies ok and changes nothing')
 

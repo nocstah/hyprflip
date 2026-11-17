@@ -231,7 +231,7 @@ class MultiFaceEditTest(unittest.TestCase):
         return ipc
 
     def test_face_names_follow_the_core(self):
-        self.assertEqual([setup.face_name(i) for i in range(4)], ['Front', 'Back', 'Face 3', 'Face 4'])
+        self.assertEqual([setup.face_name(i) for i in range(6)], ['Front', 'Back', 'Face 3', 'Face 4', 'Face 5', 'Face 6'])
 
     def test_moving_an_app_goes_to_the_next_face(self):
         ipc = self.three_faces()
@@ -284,6 +284,33 @@ class MultiFaceEditTest(unittest.TestCase):
         picker = Picker(None)
         with self.assertRaises(setup.Cancelled): setup.Edit(CardIPC(), picker).prepare('0xb')
         self.assertNotIn('release:0xb', [c.value for c in picker.prompts[0][1]])
+
+    def five_faces(self, cover):
+        """A card with five faces of its own on a core that holds six, Back showing two apps; 0x11 is free to add."""
+        ipc = CardIPC(full=True)
+        for address in ('0xe', '0xf', '0x10', '0x11'): ipc.clients[address] = window(address)
+        for index, w in enumerate(ipc.clients.values()): w['at'] = [index * 600, 0]
+        ipc.snapshot['containers'][0]['faces'] += [['0xd'], ['0xe'], ['0xf']]
+        ipc.snapshot['containers'][0]['cover'] = '0x10' if cover else None
+        ipc.snapshot.update(layout_controls=True, container_max_faces=6)
+        return ipc
+
+    def test_a_cover_counts_toward_the_faces_a_card_holds(self):
+        for cover, offered in ((False, True), (True, False)):
+            with self.subTest(cover=cover):
+                ipc, picker = self.five_faces(cover), Picker(None)
+                with self.assertRaises(setup.Cancelled): setup.Edit(ipc, picker).prepare('0xb')
+                choices = {c.value: c for c in picker.prompts[0][1]}
+                self.assertEqual('add_face' in choices, offered)
+                if offered: self.assertIn('Face 6', choices['add_face'].detail)
+        # A cover that comes while the menu is open still counts.
+        ipc = self.five_faces(False)
+        flow = setup.Edit(ipc, Picker('add_face', '0x11'))
+        plan = flow.prepare('0xb')
+        ipc.snapshot['containers'][0]['cover'] = '0x10'
+        with self.assertRaisesRegex(setup.SetupError, 'already has 5 faces and a cover, the most it can hold'):
+            flow.apply(plan)
+        self.assertNotIn(('action', 'attach face'), ipc.mutations)
 
     def test_a_new_face_is_offered_only_by_cores_with_room_for_one(self):
         for max_faces, offered in ((None, False), (3, False), (4, True)):

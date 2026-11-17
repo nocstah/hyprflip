@@ -228,9 +228,21 @@ hl.config({general={gaps_in=14,gaps_out=24},animations={enabled=false},
     assert [p['name'] for p in ipc.data('-j', 'plugin', 'list')] == ['hyprflip']
     keyboard, baseline = Keyboard(), len(notes())
     reply, _ = helper({'action': 'capabilities'})
+    state = ipc.status()
+    assert state['container_max_faces'] == 6, state['container_max_faces']
     assert reply == {'protocol': 1, 'ok': True, 'result': 'capabilities', 'actions': ['capabilities', 'list', 'delete', 'open', 'save'],
-                     'core': True, 'max_panes': ipc.status()['container_max_panes']}, reply
-    passed('the helper finds a core with native cards and ungroup by id')
+                     'core': True, 'max_panes': state['container_max_panes'], 'max_faces': 6}, reply
+    passed('the helper finds a core with native cards and ungroup by id, and reports the six faces a card may have')
+
+    # A definition with more faces than the core holds is refused before anything changes.
+    seven = definition([app('seven-0', 'Seven')], [app('seven-1', 'Seven')])
+    seven['faces'] += [dict(seven['faces'][0], apps=[app(f'seven-{n}', 'Seven')]) for n in range(2, 7)]
+    before = ipc.status()['containers']
+    reply, sent = helper({'action': 'open', 'recipe': seven, 'workspace': 81})
+    assert (reply['ok'], reply['code'], reply['launched']) == (False, 'too_many_faces', []), reply
+    assert changes(sent) == [] and ipc.status()['containers'] == before, sent
+    assert not any(win['class'].startswith('hyprflip-unattended-seven') for win in ipc.windows().values())
+    passed('an open of a seven-face definition is too_many_faces, and nothing was launched or changed')
 
     # The tile someone works in, as Herdr is.
     herdr = spawn('herdr')

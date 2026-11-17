@@ -1,5 +1,6 @@
 #include "FlipTransformer.hpp"
 #include "Timeline.hpp"
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <hyprland/src/desktop/Workspace.hpp>
@@ -33,6 +34,8 @@ uniform sampler2D source;
 uniform sampler2D secondSource;
 uniform sampler2D thirdSource;
 uniform sampler2D fourthSource;
+uniform sampler2D fifthSource;
+uniform sampler2D sixthSource;
 uniform int faceCount;
 uniform float spinFrom;
 uniform float travel;
@@ -60,11 +63,14 @@ float field(vec2 p) {
     return mix(mix(hash(cell), hash(cell + vec2(1.0, 0.0)), f.x),
                mix(hash(cell + vec2(0.0, 1.0)), hash(cell + vec2(1.0, 1.0)), f.x), f.y);
 }
+// GLSL ES 3.00 indexes sampler arrays only with constants, so the faces are a chain.
 vec4 faceAt(int i, vec2 p) {
     if (i == 0) return sampleFace(source, p);
     if (i == 1) return sampleFace(secondSource, p);
     if (i == 2) return sampleFace(thirdSource, p);
-    return sampleFace(fourthSource, p);
+    if (i == 3) return sampleFace(fourthSource, p);
+    if (i == 4) return sampleFace(fifthSource, p);
+    return sampleFace(sixthSource, p);
 }
 // The faces stand in a row with a small gap, and the card slides along it:
 // the next face comes in from the right, the one before from the left. A
@@ -75,7 +81,7 @@ vec4 strip(float e) {
     float n = float(faceCount);
     float position = spinFrom + e * travel;
     vec4 result = vec4(0.0);
-    for (int i = 0; i < 4; ++i) {
+    for (int i = 0; i < 6; ++i) {
         if (i >= faceCount) break;
         if ((present & (1 << i)) == 0) continue;
         float offset = mod(float(i) - position + n * 0.5, n) - n * 0.5;
@@ -183,6 +189,17 @@ void main() {
     color = texture(face, clamp(uv, 0.0, 1.0)) * (alpha * mask);
 }
 )glsl";
+// The flip shader's sampler for each face, and the texture unit it reads.
+constexpr std::array<const char *, 6> FACE_SAMPLERS{"source",      "secondSource", "thirdSource",
+                                                    "fourthSource", "fifthSource",  "sixthSource"};
+constexpr std::array<GLenum, 6> FACE_UNITS{0, 1, 3, 4, 5, 6}; // unit 2 stays the glass backdrop
+static_assert(FACE_SAMPLERS.size() == CONTAINER_MAX_FACES && FACE_UNITS.size() == CONTAINER_MAX_FACES,
+              "the flip shader samples exactly CONTAINER_MAX_FACES faces: extend FRAGMENT, FACE_SAMPLERS and FACE_UNITS");
+// Every unit GLState saves and restores: the faces' and the backdrop's.
+constexpr unsigned SAVED_UNITS = 7;
+static_assert(FACE_UNITS[0] == 0 && std::ranges::max(FACE_UNITS) < SAVED_UNITS && SAVED_UNITS > 2,
+              "face 0 reads unit 0, and GLState restores every unit a face or the backdrop uses");
+
 GLuint compile(GLenum type, const char *source, std::string &error) {
     GLuint s = glCreateShader(type);
     glShaderSource(s, 1, &source, nullptr);
@@ -201,7 +218,7 @@ GLuint compile(GLenum type, const char *source, std::string &error) {
 
 // Restore real GL state, including bindings, so Hyprland's state caches remain valid.
 struct GLState {
-    GLint program, vao, activeTexture, texture[5], sampler[5], readFramebuffer;
+    GLint program, vao, activeTexture, texture[SAVED_UNITS], sampler[SAVED_UNITS], readFramebuffer;
     GLint blendSrcRGB, blendDstRGB, blendSrcAlpha, blendDstAlpha, blendEqRGB, blendEqAlpha;
     GLboolean blend, scissor, depth, stencil, cull, depthMask, colorMask[4];
     GLState() {
@@ -210,7 +227,7 @@ struct GLState {
         glGetBooleanv(GL_DEPTH_WRITEMASK, &depthMask);
         glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &vao);
         glGetIntegerv(GL_ACTIVE_TEXTURE, &activeTexture);
-        for (unsigned i = 0; i < 5; ++i) {
+        for (unsigned i = 0; i < SAVED_UNITS; ++i) {
             glActiveTexture(GL_TEXTURE0 + i);
             glGetIntegerv(GL_TEXTURE_BINDING_2D, &texture[i]);
             glGetIntegerv(GL_SAMPLER_BINDING, &sampler[i]);
@@ -233,7 +250,7 @@ struct GLState {
         glBindFramebuffer(GL_READ_FRAMEBUFFER, readFramebuffer);
         glDepthMask(depthMask);
         glBindVertexArray(vao);
-        for (unsigned i = 0; i < 5; ++i) {
+        for (unsigned i = 0; i < SAVED_UNITS; ++i) {
             glActiveTexture(GL_TEXTURE0 + i);
             glBindTexture(GL_TEXTURE_2D, texture[i]);
             glBindSampler(i, sampler[i]);
@@ -321,10 +338,8 @@ bool FlipShader::initialize(std::string &error) {
     composite = glGetUniformLocation(p, "outputToClip");
     rotation = glGetUniformLocation(p, "rotation");
     perspective = glGetUniformLocation(p, "perspective");
-    texture = glGetUniformLocation(p, "source");
-    secondTexture = glGetUniformLocation(p, "secondSource");
-    thirdTexture = glGetUniformLocation(p, "thirdSource");
-    fourthTexture = glGetUniformLocation(p, "fourthSource");
+    for (unsigned i = 0; i < FACE_SAMPLERS.size(); ++i)
+        faceTexture[i] = glGetUniformLocation(p, FACE_SAMPLERS[i]);
     faceCount = glGetUniformLocation(p, "faceCount");
     from = glGetUniformLocation(p, "spinFrom");
     travel = glGetUniformLocation(p, "travel");
@@ -370,7 +385,7 @@ SP<Render::IFramebuffer> FlipShader::captureFace(const std::vector<PHLWINDOW> &w
             glActiveTexture(GL_TEXTURE0);
             glBindTexture(GL_TEXTURE_2D, pane->getTexture()->m_texID);
             glBindSampler(0, 0);
-            glUniform1i(texture, 0);
+            glUniform1i(faceTexture[0], 0);
             glUniform1i(mode, -1);
             glDrawArrays(GL_TRIANGLES, 0, 3);
         }
@@ -449,7 +464,7 @@ SP<Render::IFramebuffer> FlipTransformer::matte() {
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, m_pose->composite->getTexture()->m_texID);
     glBindSampler(0, 0);
-    glUniform1i(m_shader->texture, 0);
+    glUniform1i(m_shader->faceTexture[0], 0);
     glUniform1i(m_shader->mode, -2);
     const std::array<float, 9> identity{1, 0, 0, 0, 1, 0, 0, 0, 1};
     glUniformMatrix3fv(m_shader->matrix, 1, GL_FALSE, identity.data());
@@ -530,17 +545,16 @@ SP<Render::IFramebuffer> FlipTransformer::transform(SP<Render::IFramebuffer> in)
     }
     glBindTexture(GL_TEXTURE_2D, (snapshot ? (m_pose->faces[0] ? m_pose->faces[0] : any) : in)->getTexture()->m_texID);
     glBindSampler(0, 0);
-    glUniform1i(m_shader->texture, 0);
+    glUniform1i(m_shader->faceTexture[0], 0);
     if (snapshot) {
-        // Units 0, 1, 3 and 4 hold faces; unit 2 is the glass backdrop.
-        const std::array<std::pair<GLint, unsigned>, 3> more{
-            std::pair{m_shader->secondTexture, 1U}, {m_shader->thirdTexture, 3U}, {m_shader->fourthTexture, 4U}};
-        for (unsigned i = 0; i < more.size(); ++i) {
-            const auto &face = m_pose->faces[i + 1] ? m_pose->faces[i + 1] : any;
-            glActiveTexture(GL_TEXTURE0 + more[i].second);
+        // Units 0, 1, 3, 4, 5 and 6 hold faces; unit 2 is the glass backdrop.
+        for (unsigned i = 1; i < FACE_UNITS.size(); ++i) {
+            const auto &face = m_pose->faces[i] ? m_pose->faces[i] : any;
+            const GLenum unit = FACE_UNITS[i];
+            glActiveTexture(GL_TEXTURE0 + unit);
             glBindTexture(GL_TEXTURE_2D, face->getTexture()->m_texID);
-            glBindSampler(more[i].second, 0);
-            glUniform1i(more[i].first, more[i].second);
+            glBindSampler(unit, 0);
+            glUniform1i(m_shader->faceTexture[i], GLint(unit));
         }
     }
     glUniform1i(m_shader->faceCount, m_pose->count);

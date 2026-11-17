@@ -23,7 +23,7 @@ def wait(fn, what, t=8):
     x = ipc.status()
     raise AssertionError('timed out: ' + what + ' ' + str(x.get('switcher')) + ' pending=' + str(x.get('switch_pending')) + ' active=' + str(x['containers'][0]['active']))
 def ok(m): print('PASS', m, flush=True)
-colours = {'a': 'c0392b', 'b': '27ae60', 'c': '2980b9', 'd': '8e44ad'}
+colours = {'a': 'c0392b', 'b': '27ae60', 'c': '2980b9', 'd': '8e44ad', 'e': 'd35400', 'f': '16a085'}
 def spawn(n):
     app = 'sw-' + n
     procs.append(subprocess.Popen(['foot', '--config', '/dev/null', '-o', f'colors-dark.background={colours[n]}', '-o', 'font=monospace:size=28',
@@ -114,7 +114,7 @@ try:
     try:
         ipc.action('face 7'); raise AssertionError('face 7 was accepted')
     except w.SetupError as error:
-        assert 'from 1 to 4' in str(error), error
+        assert 'from 1 to 6' in str(error), error
     ok('face <n> and the Lua face(n) go straight to a face, and refuse one out of range')
 
     tricky = 'Mail & Chat 50%'
@@ -131,5 +131,26 @@ try:
         ipc.action('name ' + 'x' * 60); raise AssertionError('a long name was accepted')
     except w.SetupError: pass
     ok('faces take names, keep them through the description updates restore from, and clear them')
+
+    # Six faces: the switcher's tiles still fit the screen, and a digit picks the sixth.
+    e, f = spawn('e'), spawn('f')
+    ipc.focused((e, 'mark'), (apps[0], 'attach face')); wait(lambda: len(card()['faces']) == 5, 'face 5')
+    ipc.focused((f, 'mark'), (e, 'attach face')); wait(lambda: len(card()['faces']) == 6, 'face 6')
+    assert card()['faces'][4:] == [[e], [f]] and card()['active'] == 5, card()
+    assert ipc.action('face 1').startswith('ok'); wait(lambda: card()['active'] == 0, 'face 1')
+    assert ipc.action('switcher open').startswith('ok')
+    # It opens on the face shown last, the sixth; a step moves off it before the digit picks it.
+    s = st()['switcher']; assert s['open'] and s['faces'] == 6 and s['previews'] == 6 and s['selected'] == 5, s
+    ipc.action('switcher step'); assert st()['switcher']['selected'] == 0, st()['switcher']
+    x, y, width, height = s['panel']
+    assert m['x'] <= x and x + width <= m['x'] + m['width'] and m['y'] <= y and y + height <= m['y'] + m['height'], (s, m)
+    time.sleep(.2); shot('six.png', output)
+    assert ipc.action('switcher pick 6').startswith('ok')
+    wait(lambda: card()['active'] == 5, 'pick 6'); assert not st()['switcher']['open']
+    try:
+        ipc.action(f"card {card()['id']} show 7"); raise AssertionError('show 7 was accepted')
+    except w.SetupError as error:
+        assert 'from 1 to 6' in str(error), error
+    ok('a six-face switcher opens with six previews inside the screen, and digit 6 picks the sixth face')
 finally:
     for p in procs: p.terminate()

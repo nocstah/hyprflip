@@ -74,7 +74,7 @@ class Controller {
         unsigned count = 2;
         unsigned active = 0;
         unsigned next() const { return (active + 1) % count; }
-        // A face's own name, or Front, Back, Face 3 and Face 4.
+        // A face's own name, or Front, Back, then Face 3 and on up to the last face.
         std::array<std::string, CONTAINER_MAX_FACES> names;
         std::string name(unsigned face) const { return faceName(face, names[face]); }
         bool unfolded = false;
