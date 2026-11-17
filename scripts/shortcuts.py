@@ -36,6 +36,16 @@ DESCRIPTIONS['Hyprflip: unfold or fold both faces'] = 'create'
 # The face key's earlier name, in configs installed before it moved to Tab.
 DESCRIPTIONS['Hyprflip: turn window over'] = 'flip'
 MODS = ((64, 'Super'), (4, 'Ctrl'), (8, 'Alt'), (1, 'Shift'))
+MOD_NAMES = {'SUPER': 64, 'WIN': 64, 'LOGO': 64, 'MOD4': 64, 'CTRL': 4, 'CONTROL': 4, 'ALT': 8, 'MOD1': 8, 'SHIFT': 1}
+# A module that binds one of Hyprflip's keys itself claims it in the global table hyprflip_claimed_keys, chord to
+# owner, so guided setup and the shortcut editor leave that key to it (docs/INSTALL.md, Leave a Hyprflip key to
+# another module).
+# Hyprland makes a new Lua state at each reload, so a claim lasts exactly as long as its module is loaded.
+CLAIMS_QUERY = ('local c, out = rawget(_G, "hyprflip_claimed_keys"), {"claims"} '
+                'if type(c) == "table" then for chord, owner in pairs(c) do '
+                'if type(chord) == "string" and type(owner) == "string" then '
+                'out[#out + 1] = (chord:gsub("%c", " ")) .. "\\t" .. (owner:gsub("%c", " ")) end end end '
+                'return table.concat(out, "\\n")')
 
 
 def normalize(mask, key):
@@ -55,6 +65,37 @@ def normalize(mask, key):
 
 def label(mask, key):
     return '+'.join([name for bit, name in MODS if mask & bit] + [key.capitalize() if key.lower() == 'space' else key])
+
+
+def parse_chord(text):
+    """(mask, key) for a chord written as hl.bind takes it, such as "SUPER + CTRL + ALT + O", or None."""
+    parts = [part.strip() for part in text.split('+')]
+    if len(parts) < 2 or not all(parts): return None
+    mask = 0
+    for name in parts[:-1]:
+        bit = MOD_NAMES.get(name.upper())
+        if bit is None or mask & bit: return None
+        mask |= bit
+    key = parts[-1]
+    if not re.fullmatch(r'[A-Za-z0-9_:]{1,40}', key): return None
+    return mask, key.upper() if len(key) == 1 else key
+
+
+def claims(call):
+    """The keys other modules claim, {(mask, lowercase key): owner}. call(lua) evaluates Lua in the compositor and
+    returns its reply. A reply without the header, from a compositor that cannot answer, means no claims."""
+    try:
+        reply = call(CLAIMS_QUERY)
+    except Exception:
+        return {}
+    lines = (reply or '').splitlines()
+    if not lines or lines[0].strip() != 'claims': return {}
+    result = {}
+    for line in lines[1:]:
+        chord, _, owner = line.partition('\t')
+        parsed, owner = parse_chord(chord), ' '.join(owner.split())[:40]
+        if parsed and owner: result[(parsed[0], parsed[1].lower())] = owner
+    return result
 
 
 def path(ipc):
@@ -88,14 +129,23 @@ def snapshot(ipc):
                  'id': DESCRIPTIONS.get(b.get('description')), 'label': b.get('description') or 'Another desktop action'}
                 for b in binds]
     available = ipc.call('repl', 'local m=package.loaded["hypr.hyprflip-shortcuts"]; return m and m.version == 1 or false') == 'true'
+    claimed = claims(lambda source: ipc.call('repl', source))
+    try: preferences = read(ipc)
+    except SetupError: preferences = {}
     rows = []
     for ident, title, default, description in DEFINITIONS:
         matches = [b for b in binds if DESCRIPTIONS.get(b.get('description')) == ident and not b.get('submap')]
         current = matches[0] if len(matches) == 1 else None
-        rows.append({'id': ident, 'label': title, 'mask': current['modmask'] if current else 76,
-                     'key': current['key'] if current else '', 'default_mask': 76, 'default_key': default,
-                     'shortcut': label(current['modmask'], current['key']) if current else 'Not assigned' if not matches else 'Multiple bindings',
-                     'editable': available and current is not None and bool(current.get('key')) and not current.get('keycode')})
+        row = {'id': ident, 'label': title, 'mask': current['modmask'] if current else 76,
+               'key': current['key'] if current else '', 'default_mask': 76, 'default_key': default,
+               'shortcut': label(current['modmask'], current['key']) if current else 'Not assigned' if not matches else 'Multiple bindings',
+               'editable': available and current is not None and bool(current.get('key')) and not current.get('keycode')}
+        # A key another module claims: that module binds it, so it is shown with its owner and is not edited here.
+        mask, key = preferences.get(ident, (76, default))
+        owner = claimed.get((mask, key.lower()))
+        if owner and not matches:
+            row.update(mask=mask, key=key, shortcut=label(mask, key), owner=owner, editable=False)
+        rows.append(row)
     return {'available': available, 'rows': rows, 'occupied': occupied}
 
 
@@ -104,6 +154,8 @@ def save(ipc, ident, mask, key):
     mask, key = normalize(mask, key)
     state = snapshot(ipc)
     row = next(r for r in state['rows'] if r['id'] == ident)
+    if row.get('owner'):
+        raise SetupError(row['owner'] + ' sets this shortcut; change it there.')
     if not row['editable']:
         raise SetupError('Update the guided setup to enable shortcut editing.')
     # Refuse ambiguous source chords too: unbind must never remove somebody else's binding.

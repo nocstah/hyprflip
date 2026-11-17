@@ -39,6 +39,8 @@ class SetupInstallTest(unittest.TestCase):
         self.available = {'python3', 'hyprctl', 'notify-send', 'gio', 'gdbus', 'omarchy-shell'}
         self.shell_running = True
         self.fail_reload, self.conflict = False, None
+        self.claim = None  # an owner that claims Super+Ctrl+Alt+O in hyprflip_claimed_keys
+        self.claim_doubles = False  # whether Hyprflip's own O stays beside the owner's after the reload
         self.navigation = self.config / 'hyprflip-navigation.lua'
         self.record = self.home / 'state/hyprflip/navigation.sha256'
         self.choice = self.home / 'state/hyprflip/navigation-choice'
@@ -60,12 +62,16 @@ class SetupInstallTest(unittest.TestCase):
                 reply = 'Injected parse failure' if self.fail_reload and self.reloads == 1 else ''
             elif args == ['hyprflip', 'status']:
                 reply = self.state
+            elif args[0] == 'repl' and 'hyprflip_claimed_keys' in args[1]:
+                reply = 'claims' + (f'\nSUPER + CTRL + ALT + O\t{self.claim}' if self.claim else '')
             elif args[0] == 'repl':
                 reply = 'true'
             elif args == ['-j', 'binds']:
                 description = 'Other action' if self.conflict == 'O' else (
                     'Hyprflip: unfold, fold or create a card' if self.module.exists() else 'Hyprflip: unfold or fold both faces')
                 reply = [{'modmask': 76, 'key': 'O', 'description': description}]
+                if self.claim_doubles and self.module.exists():
+                    reply.append({'modmask': 76, 'key': 'O', 'description': 'Hyprflip: unfold, fold or create a card'})
                 if self.module.exists() or self.conflict == 'C':
                     reply.append({'modmask': 76, 'key': 'C', 'description':
                                   'Other action' if self.conflict == 'C' else 'Hyprflip: edit card'})
@@ -136,6 +142,29 @@ class SetupInstallTest(unittest.TestCase):
             self.assertEqual(self.main.read_bytes(), self.original)
             self.assertFalse(self.helper.exists())
             self.assertEqual(self.reloads, 0)
+
+    def test_a_claimed_key_is_left_to_the_module_that_claims_it(self):
+        self.conflict, self.claim = 'O', 'Manager'
+        with self.assertRaises(SystemExit) as result: self.install()
+        self.assertEqual(result.exception.code, 0)
+        self.assertIn('Super+Ctrl+Alt+O: left to Manager, which claims it.', self.output.getvalue())
+        self.assertIn('Super+Ctrl+Alt+C: edit the current card', self.output.getvalue())
+        self.assertTrue(self.module.exists())
+        self.assertEqual(self.reloads, 1)
+
+    def test_a_claim_whose_owner_leaves_hyprflips_key_beside_its_own_puts_everything_back(self):
+        self.conflict, self.claim, self.claim_doubles = 'O', 'Manager', True
+        with self.assertRaisesRegex(RuntimeError, 'O shortcut that Manager claims did not register exactly once'):
+            self.install()
+        self.assertEqual(self.main.read_bytes(), self.original)
+        self.assertFalse(self.module.exists())
+        self.assertFalse(self.helper.exists())
+
+    def test_an_unclaimed_key_of_another_action_still_refuses(self):
+        self.conflict, self.claim = 'C', 'Manager'
+        with self.assertRaisesRegex(SystemExit, 'Super\\+Ctrl\\+Alt\\+C is assigned to another action'): self.install()
+        self.assertEqual(self.main.read_bytes(), self.original)
+        self.assertEqual(self.reloads, 0)
 
     def test_card_fullscreen_shortcut_is_checked_and_verified_on_new_cores(self):
         self.state['fullscreen_divider'] = 2

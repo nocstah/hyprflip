@@ -130,6 +130,10 @@ Snapshots include `shortcuts` with active action rows and occupied chords for
 local conflict feedback. `shortcut` accepts `binding`, integer `mask`, and a
 validated XKB `key`; the backend rechecks live conflicts, persists atomically,
 applies through owned Lua handles, and restores the previous value on failure.
+A row whose key another module claims (`hyprflip_claimed_keys`, see
+[the install guide](INSTALL.md#leave-a-hyprflip-key-to-another-module)) carries
+that module's name in `owner` beside its chord in `shortcut`, and is not
+`editable`; `shortcut` refuses it, naming the owner.
 The panel uses Wayland's shortcuts inhibitor only while recording a combination.
 
 `floating` is an explicitly targeted card action. Cards report their `floating`

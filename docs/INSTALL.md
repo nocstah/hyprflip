@@ -206,7 +206,8 @@ helper. It installs `setup.py`, `workflow.py`, `control.py`, `shortcuts.py` and
 `navigation.lua` beside them for panels to switch on (not with `--backend-only`), plus `hyprflip-setup.lua` and
 `hyprflip-preferences.lua` and `hyprflip-shortcuts.lua` in `~/.config/hypr/`.
 It adds the setup `require` after the other bindings,
-checks O/C/L/K/Space (and Return on cores with card fullscreen) for conflicts, backs up changed files and validates reload.
+checks O/C/L/K/Space (and Return on cores with card fullscreen) for conflicts, except keys
+[another module claims](#leave-a-hyprflip-key-to-another-module), backs up changed files and validates reload.
 It does not replace or unload compositor libraries.
 
 - **Super+Ctrl+Alt+O:** create a card from an ungrouped app, or unfold/fold one.
@@ -216,6 +217,32 @@ It does not replace or unload compositor libraries.
 - **Super+Ctrl+Alt+Space:** hold to peek; release to return.
 - **Super+Ctrl+Alt+Return:** fullscreen the whole dwindle or floating card; press
   again to leave. Installed and conflict-checked only with a core that supports it.
+
+### Leave a Hyprflip key to another module
+
+A module of your own, or another program's, can take one of these keys: claim
+it in the global table `hyprflip_claimed_keys`, then bind it yourself.
+
+```lua
+hyprflip_claimed_keys = hyprflip_claimed_keys or {}
+hyprflip_claimed_keys["SUPER + CTRL + ALT + O"] = "OmaRelay"
+hl.unbind("SUPER + CTRL + ALT + O")
+hl.bind("SUPER + CTRL + ALT + O", card_key, { description = "OmaRelay: card key" })
+```
+
+- Guided setup leaves a claimed key alone. It is no conflict. After its reload,
+  setup checks that exactly one binding is on the key: the claiming module's
+  own, with a description that does not start with `Hyprflip:`.
+- A claim made before Hyprflip's modules load keeps them from binding the key.
+  Made after them, as above, `hl.unbind` removes Hyprflip's binding first.
+- OmaCards' shortcut editor shows the key with the owner's name. It does not
+  move the key or put another action on it.
+- Each reload starts a new Lua state, so a claim lasts exactly as long as the
+  module that makes it is loaded. Take the module out, and Hyprflip binds the
+  key again at the next reload.
+- Write the chord as `hl.bind` takes it, with Super, Ctrl, Alt and Shift (or
+  Mod4, Control and Mod1). The owner is a name of up to 40 characters. If the
+  action was moved in the shortcut editor, claim the chord it is on now.
 
 Use a normal dwindle workspace, focus the desired front and use O
 for the [Gmail / WhatsApp + Telegram walkthrough](../README.md#make-your-first-card).

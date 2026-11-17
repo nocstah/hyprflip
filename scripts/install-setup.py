@@ -73,8 +73,10 @@ def main():
         (('create', 'O'), ('edit', 'C'), ('library', 'L'), ('find', 'K'), ('peek', 'space'))
         + ((('fullscreen', 'Return'),) if fullscreen else ())}
     if args.mouse_flip: expected_chords.add((76, 'mouse:274'))
+    # Keys another module claims (hyprflip_claimed_keys) stay with it: they are no conflict, and it binds them.
+    claimed = shortcuts.claims(lambda source: ctl('repl', source))
     conflicts = [b for b in json.loads(ctl('-j', 'binds')) if (b['modmask'], b['key'].lower()) in {(m, k.lower()) for m, k in expected_chords}
-                 and not b.get('description', '').startswith('Hyprflip:')]
+                 and not b.get('description', '').startswith('Hyprflip:') and (b['modmask'], b['key'].lower()) not in claimed]
     if conflicts:
         keys = ', '.join(shortcuts.label(b['modmask'], b['key'].upper() if len(b['key']) == 1 else b['key']) for b in conflicts)
         raise SystemExit(keys + ' is assigned to another action; resolve that conflict first.')
@@ -131,12 +133,16 @@ def main():
     if args.backend_only:
         print('Install the OmaCards backend and persistent motion preferences; keep current shortcuts.')
     else:
-        print('Super+Ctrl+Alt+O: unfold/fold an existing card, or choose its reverse side. Existing cards stay in place.')
-        print('Super+Ctrl+Alt+C: edit the current card in OmaCards when enabled, or the detected menu.')
-        print('Super+Ctrl+Alt+L: search saved cards; Enter opens or switches directly.')
-        print('Super+Ctrl+Alt+K: find an app on either face of any open card.')
-        if state.get('peek_available'): print('Super+Ctrl+Alt+Space: hold to peek; release to return.')
-        if fullscreen: print('Super+Ctrl+Alt+Return: fullscreen the whole card; press again to leave.')
+        def explain(ident, key, text):
+            mask, key = preferences.get(ident, (76, key))
+            owner = claimed.get((mask, key.lower()))
+            print(shortcuts.label(mask, key) + ': ' + (f'left to {owner}, which claims it.' if owner else text))
+        explain('create', 'O', 'unfold/fold an existing card, or choose its reverse side. Existing cards stay in place.')
+        explain('edit', 'C', 'edit the current card in OmaCards when enabled, or the detected menu.')
+        explain('library', 'L', 'search saved cards; Enter opens or switches directly.')
+        explain('find', 'K', 'find an app on either face of any open card.')
+        if state.get('peek_available'): explain('peek', 'space', 'hold to peek; release to return.')
+        if fullscreen: explain('fullscreen', 'Return', 'fullscreen the whole card; press again to leave.')
     if args.mouse_flip: print('Super+Ctrl+Alt+middle-click: flip the focused card on release (optional).')
     if navigation_loaded:
         print('Super+Shift+1…0, Super+Shift+Alt+1…0 and Super+Shift+arrows: move a whole card; other windows move as before.')
@@ -182,11 +188,16 @@ def main():
                     ('L', 'Hyprflip: open saved card'), ('K', 'Hyprflip: find an app in cards')]
         if state.get('peek_available'): expected.append(('SPACE', 'Hyprflip: hold to peek at the other side'))
         if fullscreen: expected.append(('Return', 'Hyprflip: fullscreen the whole card'))
+        # The claims the reloaded configuration makes: a claimed key needs exactly one binding, its owner's.
+        claimed_now = shortcuts.claims(lambda source: ctl('repl', source))
         for key, description in ([] if args.backend_only else expected):
             ident = shortcuts.DESCRIPTIONS[description]
             mask, key = preferences.get(ident, (76, key))
             matches = [b for b in binds if b['modmask'] == mask and b['key'].lower() == key.lower()]
-            if len(matches) != 1 or matches[0]['description'] != description:
+            owner = claimed_now.get((mask, key.lower()))
+            if owner and (len(matches) != 1 or matches[0].get('description', '').startswith('Hyprflip:')):
+                raise RuntimeError(f'The {key} shortcut that {owner} claims did not register exactly once as its own.')
+            if not owner and (len(matches) != 1 or matches[0]['description'] != description):
                 raise RuntimeError('The guided ' + key + ' shortcut did not register exactly once.')
         if args.mouse_flip:
             matches = [b for b in binds if b['modmask'] == 76 and b['key'] == 'mouse:274']

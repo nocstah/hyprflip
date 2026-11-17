@@ -27,6 +27,8 @@ SUITES = {
     'edit': ('edit_workflows.py', None),
     'pane': ('pane_workflows.py', None),
     'switch': ('navigation_switch_workflows.py', 'native-cards'),
+    # guided setup with a module that claims one of its keys, in a session with its own home
+    'claim': ('claimed_key_workflows.py', 'home'),
 }
 
 parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -76,10 +78,15 @@ def run(name):
         command.append('--notify-recorder')
     elif needs == 'native-cards':
         command.append('--native-cards')
+    env = None
+    if needs == 'home':
+        (directory / 'home').mkdir()
+        env = {**os.environ, 'HOME': str(directory / 'home')}
     session_log = logs / f'{name}-session.log'
     suite_log = logs / f'{name}.log'
     with session_log.open('wb') as out:
-        session = subprocess.Popen(command, cwd=PROJECT, stdout=out, stderr=subprocess.STDOUT, start_new_session=True)
+        session = subprocess.Popen(command, cwd=PROJECT, stdout=out, stderr=subprocess.STDOUT, start_new_session=True,
+                                   env=env)
     result = 'pass'
     try:
         deadline = time.monotonic() + args.start_timeout

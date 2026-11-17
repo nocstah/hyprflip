@@ -86,6 +86,43 @@ class ShortcutsTest(unittest.TestCase):
         self.assertIn('shortcuts.bind("SUPER + CTRL + ALT + Tab", run("flip"), { description = "Hyprflip: change face" })',
                       (project / 'examples/hyprflip.lua').read_text())
 
+    def test_parse_chord_reads_what_hl_bind_takes(self):
+        for text, expected in (('SUPER + CTRL + ALT + O', (76, 'O')), ('super+ctrl+alt+o', (76, 'O')),
+                               ('CTRL + SUPER + ALT + Return', (76, 'Return')), ('SUPER + SHIFT + F9', (65, 'F9')),
+                               ('MOD4 + CONTROL + MOD1 + space', (76, 'space')), ('SUPER + CTRL + ALT + mouse:274', (76, 'mouse:274'))):
+            with self.subTest(text=text): self.assertEqual(shortcuts.parse_chord(text), expected)
+        for text in ('O', 'SUPER +', 'HYPER + O', 'SUPER + SUPER + O', 'SUPER + O); os.exit(', ''):
+            with self.subTest(text=text): self.assertIsNone(shortcuts.parse_chord(text))
+
+    def test_claims_need_the_header_and_skip_what_they_cannot_read(self):
+        reply = ('claims\nSUPER + CTRL + ALT + O\tOmaRelay\nnot a chord\tSomebody\nSUPER + K\t\n'
+                 'SUPER + CTRL + ALT + L\t  A   very ' + 'long owner name ' * 5)
+        claimed = shortcuts.claims(lambda source: reply)
+        self.assertEqual(set(claimed), {(76, 'o'), (76, 'l')})
+        self.assertEqual(claimed[(76, 'o')], 'OmaRelay')
+        self.assertEqual(len(claimed[(76, 'l')]), 40)
+        self.assertTrue(claimed[(76, 'l')].startswith('A very long owner name'))
+        for answer in ('true', 'nil', '', 'unknown request'):
+            with self.subTest(answer=answer): self.assertEqual(shortcuts.claims(lambda source: answer), {})
+        def broken(source): raise shortcuts.SetupError('Lua error')
+        self.assertEqual(shortcuts.claims(broken), {})
+        self.assertIn('hyprflip_claimed_keys', shortcuts.CLAIMS_QUERY)
+
+    def test_a_claimed_key_shows_its_owner_and_is_not_edited_here(self):
+        self.ipc.binds = [{'description': 'Card: unfold, fold, create, or show the browser', 'key': 'O', 'modmask': 76},
+                          {'description': 'Hyprflip: edit card', 'key': 'C', 'modmask': 76}]
+        call = self.ipc.call
+        self.ipc.call = lambda *args: ('claims\nSUPER + CTRL + ALT + O\tOmaRelay' if 'hyprflip_claimed_keys' in args[-1]
+                                       else call(*args))
+        rows = {r['id']: r for r in shortcuts.snapshot(self.ipc)['rows']}
+        self.assertEqual((rows['create']['shortcut'], rows['create']['owner'], rows['create']['editable']),
+                         ('Super+Ctrl+Alt+O', 'OmaRelay', False))
+        self.assertNotIn('owner', rows['edit'])
+        self.assertTrue(rows['edit']['editable'])
+        with self.assertRaisesRegex(shortcuts.SetupError, 'OmaRelay sets this shortcut'): shortcuts.save(self.ipc, 'create', 76, 'F9')
+        with self.assertRaisesRegex(shortcuts.SetupError, 'is used by Card: unfold'): shortcuts.save(self.ipc, 'edit', 76, 'O')
+        self.assertEqual(self.ipc.mutations, [])
+
     def test_rejects_injection_modifiers_and_unknown_keysyms(self):
         for mask, key in ((True, 'F'), (0, 'F'), (1, 'F'), (256, 'F'), (64, 'F);os.exit()'),
                           (64, 'made_up_key'), (64, 'Super_L')):

@@ -1,5 +1,47 @@
 # Validation
 
+## A module claims one of Hyprflip's keys (2026-11-18)
+
+Found on the pilot desktop: OmaRelay's card key module binds Super+Ctrl+Alt+O
+itself. Every guided-setup install stopped there, first with "is assigned to
+another action". With a `Hyprflip:` description it stopped instead at the check
+after the reload ("The guided O shortcut did not register exactly once").
+
+A module now claims the key in the global table `hyprflip_claimed_keys`.
+Checked in a nested session (Hyprland 0.56.2) that `hyprctl repl` returns a
+Lua string as it is, and that a global does not survive `hyprctl reload`. So a
+claim lasts as long as its module is loaded.
+
+All three CTest checks and all 470 Python unit tests pass. Eight of the tests
+are new:
+- `tests/shortcuts_test.py` (3): chords as `hl.bind` takes them, claims read
+  only behind their header, and a claimed row with `owner` that the editor
+  refuses to move or to put another action on.
+- `tests/setup_install_test.py` (3): a claimed key installs and the summary
+  names the owner. Hyprflip's key left beside the owner's after the reload puts
+  everything back. An unclaimed foreign key still refuses.
+- `tests/shortcuts_lua_test.py` (2): the shipped `examples/shortcuts.lua` in
+  plain Lua, which leaves a claimed key unbound whatever its case and spacing,
+  and refuses to configure an action onto it.
+
+Taking out the pre-check's claim test, the after-check's owner test, or the
+registry's claim test makes those tests fail.
+
+In fresh nested sessions (Hyprland 0.56.2, Aquamarine 0.15.1 with the
+render-node patch):
+- The new `tests/claimed_key_workflows.py` passed all 5 checks, in a session
+  with its own home. It covers a module that claims O after Hyprflip's modules,
+  as OmaRelay's does, and one that claims it before them. It also covers the
+  editor, an unclaimed key that still stops setup before it writes, and taking
+  the module out. `tests/key_suites.py` runs it as `claim`.
+- `tests/key_suites.py`: all seven suites pass (workflows 10, nearby 15,
+  setup 7, edit 14, pane 12, switch 5, claim 5).
+- `tests/uninstall_session.py`: all 3 checks pass.
+- `scripts/install-setup.py --dry-run` against the pilot desktop, whose
+  OmaRelay module now claims O on the 0.3.0-rc.23 registry, passes its checks
+  and says "Super+Ctrl+Alt+O: left to OmaRelay, which claims it." It wrote
+  nothing.
+
 ## Release checks for 0.3.0-rc.23 (2026-11-18)
 
 0.3.0-rc.23 starts from feat/close-reason-six-faces (b77e29c: six faces,

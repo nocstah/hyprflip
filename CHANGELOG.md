@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+- Another module can take one of Hyprflip's keys. It claims the key in the
+  global table `hyprflip_claimed_keys` (chord to owner) and binds it itself.
+  Guided setup then leaves the key to it: the key is no conflict, and after the
+  reload setup checks that exactly one binding, the owner's, is on it. Before,
+  a module such as OmaRelay's card key on Super+Ctrl+Alt+O stopped every
+  guided-setup install: first with "is assigned to another action" and, with a
+  `Hyprflip:` description, at the check after the reload. A claim made before
+  Hyprflip's modules load keeps them from binding the key. The shortcut editor
+  shows a claimed key with its owner (`owner` in the shortcut rows) and does
+  not move it. A claim lasts as long as its module is loaded. See
+  [the install guide](docs/INSTALL.md#leave-a-hyprflip-key-to-another-module).
+- Guided setup's summary names each key as the shortcut editor set it, and
+  names the module a claimed key is left to.
+
 ## 0.3.0-rc.23 — 2026-11-18
 
 - Status reports why apps went away: `close_reasons` and `closes` (requested,

@@ -41,11 +41,45 @@ if file then
     end
     file:close()
 end
+-- A key another module claims in the global table hyprflip_claimed_keys (chord -> owner) is that module's to bind.
+-- Hyprland makes a new Lua state at each reload, so a claim lasts as long as the module that makes it is loaded.
+local aliases = {SUPER="SUPER", WIN="SUPER", LOGO="SUPER", MOD4="SUPER", CTRL="CTRL", CONTROL="CTRL",
+                 ALT="ALT", MOD1="ALT", SHIFT="SHIFT"}
+local function canonical(value)
+    local mods, key = {}, nil
+    for part in tostring(value):gmatch("[^+]+") do
+        local word = part:match("^%s*(.-)%s*$"):upper()
+        if key then
+            if not aliases[key] then return nil end
+            mods[aliases[key]] = true
+        end
+        key = word
+    end
+    if not key or key == "" then return nil end
+    local text = {}
+    for _, name in ipairs({"SUPER", "CTRL", "ALT", "SHIFT"}) do if mods[name] then text[#text+1] = name end end
+    text[#text+1] = key
+    return table.concat(text, "+")
+end
+local function claimed(value)
+    local claims = rawget(_G, "hyprflip_claimed_keys")
+    if type(claims) ~= "table" then return false end
+    local wanted = canonical(value)
+    if not wanted then return false end
+    for chord in pairs(claims) do
+        if type(chord) == "string" and canonical(chord) == wanted then return true end
+    end
+    return false
+end
 function M.bind(default, callback, options)
     local id = names[(options.description or ""):gsub("^Hyprflip: ", "")]
     if not id then return hl.bind(default, callback, options) end
     if entries[id] then entries[id].handle:remove() end
     local value = preferences[id] or default
+    if claimed(value) then
+        entries[id] = nil
+        return nil
+    end
     local handle = hl.bind(value, callback, options)
     entries[id] = {handle=handle, callback=callback, options=options, chord=value}
     return handle
@@ -61,7 +95,7 @@ function M.unbind(default)
 end
 function M.configure(id, mask, key)
     local entry, value = entries[id], chord(mask, key)
-    if not entry or not value then return false end
+    if not entry or not value or claimed(value) then return false end
     entry.handle:remove()
     entry.handle = hl.bind(value, entry.callback, entry.options)
     entry.chord = value
