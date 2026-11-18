@@ -264,6 +264,14 @@ class PanelControlTest(unittest.TestCase):
         self.assertEqual((card['active'], card['covered']), (1, True))
         self.assertNotIn('0xf', [p['address'] for f in card['faces'] for p in f['panes']])
 
+    def test_snapshot_says_which_program_manages_a_card(self):
+        snapshot = control.snapshot(self.ipc)
+        self.assertEqual((snapshot['cards'][0]['owner'], snapshot['capabilities']['card_owner']), (None, False))
+        self.ipc.snapshot['card_owner'] = True
+        self.retarget(owner='OmaRelay')
+        snapshot = control.snapshot(self.ipc)
+        self.assertEqual((snapshot['cards'][0]['owner'], snapshot['capabilities']['card_owner']), ('OmaRelay', True))
+
     def test_snapshot_says_a_card_has_a_cover_also_while_it_shows_its_own_face(self):
         # The cover takes one of the card's faces, shown or not: a panel counts it before offering another face.
         self.assertFalse(control.snapshot(self.ipc)['cards'][0]['has_cover'])

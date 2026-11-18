@@ -144,6 +144,8 @@ def snapshot(ipc):
                               'covered': bool(card.get('covered')),
                               # A window covers the card, shown or not; it takes one of the card's faces.
                               'has_cover': bool(card.get('cover')),
+                              # The program that manages the card (card <id> owner), such as OmaRelay, or None.
+                              'owner': card['owner'] if isinstance(card.get('owner'), str) else None,
                               'fullscreen': bool(card.get('fullscreen')),
                               # Native dwindle/floating cards; only these fullscreen as a whole.
                               'native': kind == 'container' and bool(card.get('native_group')),
@@ -199,7 +201,9 @@ def snapshot(ipc):
                         # only from a face that holds a single app.
                         'ungroup_any_face': True,
                         # The face action shows any face of a card directly.
-                        'show_face': True})
+                        'show_face': True,
+                        # Cards say which program manages them (owner).
+                        'card_owner': state.get('card_owner') is True})
         base['capabilities']['floating'] = bool(state.get('floating_cards'))
         base['capabilities']['appearance'] = type(state.get('card_frame')) is bool
         base['appearance'] = ('frame' if state['card_frame'] else 'classic') if base['capabilities']['appearance'] else None
@@ -636,7 +640,7 @@ ADDRESS = re.compile(r'0x[0-9a-fA-F]{1,16}')
 FIELDS = {'capabilities': set(), 'list': {'store', 'name', 'one_face'},
           'delete': {'store', 'name', 'token', 'lock_ms', 'one_face'},
           'open': {'store', 'name', 'recipe', 'workspace', 'bind', 'owned', 'focus', 'launch', 'timeout_ms', 'lock_ms',
-                   'one_face', 'cover', 'tiles'},
+                   'one_face', 'cover', 'tiles', 'owner'},
           'save': {'store', 'name', 'card', 'members', 'previous', 'base', 'keep', 'floating', 'owned', 'lock_ms', 'one_face'},
           'put': {'store', 'name', 'recipe', 'previous', 'one_face', 'lock_ms'}}
 REQUIRED = {'capabilities': set(), 'list': {'store'}, 'delete': {'store', 'name', 'token'},
@@ -687,6 +691,10 @@ def unattended_request(payload, env):
         if ('cover' in payload and not (isinstance(payload['cover'], str) and ADDRESS.fullmatch(payload['cover'])) or
                 'tiles' in payload and type(payload['tiles']) is not bool or
                 'cover' in payload and (get('tiles') is True or payload['cover'] in (get('bind') if isinstance(get('bind'), list) else []))):
+            raise w.Unfinished('invalid_request')
+        # The program the card is marked for, as the core takes it; tiles make no card to mark.
+        if 'owner' in payload and (not isinstance(payload['owner'], str) or not re.fullmatch(r'[A-Za-z0-9._-]{1,32}', payload['owner'])
+                                   or get('tiles') is True):
             raise w.Unfinished('invalid_request')
         opens_one = 'cover' in payload or get('tiles') is True
         if 'recipe' in payload and not untitled(payload['recipe'], 1 if opens_one else 2): raise w.Unfinished('invalid_request')

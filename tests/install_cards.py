@@ -867,6 +867,8 @@ hl.config({{animations={{enabled=false}},general={{gaps_in=14,gaps_out=24}},inpu
     ipc.focused((parked[0], 'mark'), (parked[1], 'card'))
     hidden = next(card['id'] for card in ipc.status()['containers'] if parked[0] in sum(card['faces'], []))
     ipc.action(f'card {hidden} workspace special:park silent')
+    # Marked for the program that parked it, which an update keeps (card_owner).
+    assert ipc.action(f'card {hidden} owner OmaRelay').startswith('ok')
     parked_card = next(card for card in ipc.status()['containers'] if card['id'] == hidden)
     parked_faces, parked_active = parked_card['faces'], parked_card['active']
 
@@ -908,6 +910,7 @@ hl.config({{animations={{enabled=false}},general={{gaps_in=14,gaps_out=24}},inpu
     assert 'hidden card' not in out and 'Could not keep a card' not in out, out
     again = next(c for c in ipc.status()['containers'] if set(sum(c['faces'], [])) == set(parked))
     assert (again['workspace']['name'], again['faces'], again['active']) == ('special:park', parked_faces, parked_active), again
+    assert again['owner'] == 'OmaRelay' and all(c['owner'] is None for c in ipc.status()['containers'] if c['id'] != again['id']), again
     windows = ipc.windows()
     assert all(windows[a]['workspace']['name'] == 'special:park' and windows[a]['grouped'] for a in parked), \
         [(windows[a]['workspace'], windows[a]['grouped']) for a in parked]
@@ -916,7 +919,7 @@ hl.config({{animations={{enabled=false}},general={{gaps_in=14,gaps_out=24}},inpu
     assert not (state / 'updating').exists()
     written = json.loads((state / 'update-result.json').read_text())
     assert (written['ok'], written['kept'], written['apart']) == (True, 3, []), written
-    passed('an update keeps a card parked on special:park as a card there, with its faces and shown face, unseen; '
+    passed('an update keeps a card parked on special:park as a card there, with its faces, shown face and owner, unseen; '
            'writes what became of the cards, removes its marker and says so on the event socket')
 
     # Brought back as its program does on a visit, it is laid out at once; then it goes back out of sight.

@@ -34,8 +34,8 @@ if not source.is_file() or not main.is_file():
 
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from card_restore import (FullscreenWindow, alone, apps, as_it_was, cover_again, describe, remember,  # noqa: E402
-                          return_keyboard, settle, uncover)
+from card_restore import (FullscreenWindow, alone, apps, as_it_was, cover_again, describe, owner, remember,  # noqa: E402
+                          return_keyboard, settle, uncover, without_owner)
 
 
 def ctl(*args):
@@ -121,8 +121,10 @@ covers = (sum(1 for item in saved_covers if not restored_under(item, saved_cards
 if covers:
     print(f"Taking the cover off {covers} card(s) for this update, and putting it back after.")
 if len(kept_cards) < len(containers):
-    print(f"Leaving {len(containers) - len(kept_cards)} hidden card(s) as separate windows; "
-          "the program that parked them rebuilds them.")
+    # Named for the program that manages them, when they say which (card_owner).
+    owners = sorted({card["owner"] for card in containers if card not in kept_cards and isinstance(card.get("owner"), str)})
+    print(f"Leaving {len(containers) - len(kept_cards)} hidden card(s) as separate windows; " +
+          (f"{' and '.join(owners)} rebuilds them." if owners else "the program that parked them rebuilds them."))
 if args.dry_run:
     raise SystemExit(0)
 
@@ -178,11 +180,11 @@ def report(outcome, lines):
     try:
         windows = {w["address"]: w for w in json.loads(ctl("-j", "clients"))}
         apart = []
-        for members in ([sorted(apps(line)) for line in lines if line not in outcome["kept"]] if outcome["changed"]
-                        else []) + outcome["left"]:
+        for members, manager in ([(sorted(apps(line)), owner(line)) for line in lines if line not in outcome["kept"]]
+                                 if outcome["changed"] else []) + outcome["left"]:
             present = [a for a in members if a in windows]
             if present:
-                apart.append({"workspace": windows[present[0]].get("workspace", {}).get("name", ""),
+                apart.append({"workspace": windows[present[0]].get("workspace", {}).get("name", ""), "owner": manager,
                               "apps": [{"address": a, "pid": windows[a].get("pid"), "class": windows[a].get("class", "")}
                                        for a in present]})
         kept = len(outcome["kept"]) if outcome["changed"] else len(lines)
@@ -192,17 +194,32 @@ def report(outcome, lines):
         pass
 
 
+def marks_owners():
+    """Whether the core loaded now takes a card's owner (card_owner)."""
+    try:
+        return json.loads(ctl("hyprflip", "status")).get("card_owner") is True
+    except (ValueError, AttributeError, RuntimeError, OSError):
+        return False
+
+
 def keep(line, form="restore "):
     # A card whose apps closed or changed meanwhile stays as separate windows,
-    # and the other cards are still kept.
-    reply = answer("hyprflip", form + line)
+    # and the other cards are still kept. A core without owners, such as the
+    # older one a rollback goes back to, keeps the card unmarked.
+    manager = owner(line)
+    reply = answer("hyprflip", form + (line if manager is None or marks_owners() else without_owner(line)))
     if not reply.startswith("ok:"):
-        print("Could not keep a card; its apps stay open as separate windows:", reply.removeprefix("error: "))
+        print("Could not keep a card" + (f" {manager} manages" if manager else "") +
+              "; its apps stay open as separate windows:", reply.removeprefix("error: "))
     return reply.startswith("ok:")
 
-# changed: the core was unloaded. kept: the lines rebuilt. left: the apps of cards the update never described.
-outcome = {"ok": False, "changed": False, "kept": [], "left": [[a for face in card["faces"] for a in face]
-                                                               for card in containers if card not in kept_cards]}
+# changed: the core was unloaded. kept: the lines rebuilt. left: the apps and owner of cards the update never described.
+def left_out(cards, kept):
+    return [([a for face in card["faces"] for a in face], card.get("owner") if isinstance(card.get("owner"), str) else None)
+            for card in cards if card not in kept]
+
+
+outcome = {"ok": False, "changed": False, "kept": [], "left": left_out(containers, kept_cards)}
 atomic(marker, json.dumps({"pid": os.getpid(), "release": release, "started_ms": int(time.time() * 1000)}).encode())
 try:
     # Capture after settling: a turn may have been active when installation
@@ -223,8 +240,7 @@ try:
                 current = json.loads(ctl("hyprflip", "status"))
             kept_now = keepable(current["containers"])
             saved_cards = [describe(card) for card in kept_now]
-            outcome["left"] = [[a for face in card["faces"] for a in face]
-                               for card in current["containers"] if card not in kept_now]
+            outcome["left"] = left_out(current["containers"], kept_now)
     if saved_pairs or saved_cards:
         record = {"instance": os.environ.get("HYPRLAND_INSTANCE_SIGNATURE"), "pairs": saved_pairs, "cards": saved_cards}
         if saved_covers:

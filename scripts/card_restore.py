@@ -10,6 +10,8 @@ from workflow import Unattended, name_words
 
 # A window address as Hyprland prints it: the only text a focus or a step here carries.
 ADDRESS = re.compile(r"0x[0-9a-fA-F]{1,16}")
+# A card owner's name as the core takes it: card <id> owner, restore … owner.
+OWNER = re.compile(r"[A-Za-z0-9._-]{1,32}")
 
 
 class FullscreenWindow(RuntimeError):
@@ -29,6 +31,9 @@ def describe(card):
     A cover still in place is named last, so the card is built under it again:
     a card with one face of its own keeps its cover through an update (cores
     with restore_cover). An older core refuses the line, and the apps stay open.
+    The program that manages the card is named before the cover, so the card is
+    marked again from its first frame; without_owner drops it for a core that
+    has no owners (card_owner).
     """
     x, y, width, height = card["box"]
     line = [("floating" if card.get("floating") else "tiled"), str(card["active"]), str(int(bool(card.get("unfolded")))),
@@ -38,10 +43,25 @@ def describe(card):
     for name, face, layout in zip(words, card["faces"], card["layouts"]):
         line += [name, layout["axis"], layout["focused"]] + [f"{w}:{r:.12g}" for w, r in zip(face, layout["ratios"])]
     line += name_words(card.get("names") or [])
+    if isinstance(card.get("owner"), str) and OWNER.fullmatch(card["owner"]):
+        line += ["owner", card["owner"]]
     if isinstance(card.get("cover"), str) and ADDRESS.fullmatch(card["cover"]):
         line += ["cover", card["cover"]]
     return " ".join(line)
 
+
+
+def owner(line):
+    """The program a card description names as the card's owner, or None."""
+    words = line.split()
+    return next((words[i + 1] for i, word in enumerate(words[:-1]) if word == "owner"), None)
+
+
+def without_owner(line):
+    """The description without its owner, for a core that has no owners and would refuse it."""
+    words = line.split()
+    at = next((i for i, word in enumerate(words[:-1]) if word == "owner"), None)
+    return line if at is None else " ".join(words[:at] + words[at + 2:])
 
 
 def own_apps(card):

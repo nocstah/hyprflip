@@ -100,6 +100,12 @@ counts the cover's face against the most a card can hold. `has_cover` is true
 whenever a cover is on the card, also while the card shows a face of its own
 (`covered: false`), so a panel can count the cover before it offers another face.
 
+`owner` names the program that manages a card
+([marks](SCRIPTING.md#mark-the-program-that-manages-a-card)), such as
+`OmaRelay`, or is null; `capabilities.card_owner` says the core has marks. A
+mark changes no action: a panel says who manages the card, and can say what
+that program does with an edit before the person makes it.
+
 `run` emits newline-delimited JSON on stdout and reads responses on stdin:
 
 - `question`: id, mode (`select`/`input`), prompt, choices containing value,

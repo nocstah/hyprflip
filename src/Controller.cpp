@@ -69,6 +69,12 @@ bool workspaceName(std::string_view text) {
     const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), number);
     return error == std::errc{} && end == text.data() + text.size() && number && number <= INT32_MAX;
 }
+// A card owner's name: one word of letters, digits, '.', '_' and '-', as panels show it.
+bool ownerName(const std::string &value) {
+    return !value.empty() && value.size() <= 32 && std::ranges::all_of(value, [](unsigned char c) {
+        return std::isalnum(c) || c == '.' || c == '_' || c == '-';
+    });
+}
 std::string quote(const std::string &value) {
     std::string out = "\"";
     for (unsigned char c : value) {
@@ -1978,7 +1984,7 @@ Result Controller::uncover(Pair &p) {
 Result Controller::cardAction(const std::string &arguments) {
     static constexpr auto USAGE =
         "Use card <id> flip, card <id> show <front|back|face number|cover>, card <id> name <n> [name], "
-        "card <id> cover <0x address>, card <id> uncover, card <id> ungroup or "
+        "card <id> cover <0x address>, card <id> uncover, card <id> ungroup, card <id> owner <name|-> or "
         "card <id> workspace <number|name:<name>|special[:<name>]> [silent], or "
         "card <id or 0x address> hold|leave|reveal [speed from 0.05 to 4].";
     std::istringstream input(arguments);
@@ -2089,6 +2095,15 @@ Result Controller::cardAction(const std::string &arguments) {
     }
     if (verb == "cover" && input >> value && !(input >> extra))
         return cover(*p, value);
+    // A mark, never a lock: the card works as before, and a panel says who manages it. - clears it.
+    if (verb == "owner") {
+        if (!(input >> value) || input >> extra || (value != "-" && !ownerName(value)))
+            return {false, "Use card <id> owner <name> (letters, digits, '.', '_' or '-', at most 32) or card <id> owner -."};
+        if (!p->containerID)
+            return {false, "Only a card made by Hyprflip can have an owner."};
+        p->owner = value == "-" ? "" : value;
+        return {true, "ok"};
+    }
     if (verb == "uncover" && !(input >> extra)) {
         if (!coverAt)
             return uncover(*p);
@@ -2428,12 +2443,12 @@ Result Controller::restore(const std::string &arguments) {
     if (!(input >> snapshot.active >> snapshot.unfolded >> snapshot.x >> snapshot.y >> snapshot.width >> snapshot.height) ||
         (mode != "tiled" && mode != "floating") || snapshot.active >= CONTAINER_MAX_FACES || snapshot.unfolded > 1)
         return {false, "Use restore [quiet] <tiled|floating> <active> <unfolded> <x> <y> <w> <h> front ... back ... "
-                       "[face ...] [cover <0xaddr>]"};
+                       "[face ...] [cover <0xaddr>] [owner <name>]"};
     unsigned faces = 2;
     int side = -1;
     bool sawBack = false;
     std::optional<uintptr_t> coverAddress;
-    std::string coverText;
+    std::string coverText, owner;
     const auto parse = [](const std::string &text, uintptr_t &value) {
         if (!text.starts_with("0x")) return false;
         const auto [end, error] = std::from_chars(text.data() + 2, text.data() + text.size(), value, 16);
@@ -2459,6 +2474,14 @@ Result Controller::restore(const std::string &arguments) {
             names[face - 1] = decoded.substr(0, CONTAINER_NAME_SIZE - 1);
             continue;
         }
+        if (token == "owner") {
+            // At most once, after the faces, before or after the cover: the card is marked from its first frame.
+            if (!owner.empty() || (side < 0 && !coverAddress) || !(input >> owner) || !ownerName(owner))
+                return {false, "Use owner <name> once, after the faces, in a card description (letters, digits, '.', "
+                               "'_' or '-', at most 32)."};
+            side = -1;
+            continue;
+        }
         if (token == "cover") {
             // At most once, after the faces: no app follows it.
             uintptr_t value = 0;
@@ -2472,6 +2495,9 @@ Result Controller::restore(const std::string &arguments) {
             // The cover comes last: a face after it would put apps in a card the line already closed.
             if (coverAddress)
                 return {false, "Use cover <0x address> once, after the faces, in a card description."};
+            if (!owner.empty())
+                return {false, "Use owner <name> once, after the faces, in a card description (letters, digits, '.', "
+                               "'_' or '-', at most 32)."};
             // A further face comes after the back: before it, its number would be taken from the back's.
             if (token == "face" && !sawBack)
                 return {false, "Each face needs an axis and a focused app address."};
@@ -2586,6 +2612,7 @@ Result Controller::restore(const std::string &arguments) {
     const uint64_t pairID = id ? m_nextID++ : 0;
     if (id) {
         m_pairs.push_back({pairID, {}, {}, false, id, FloatingCards::EPOCH});
+        m_pairs.back().owner = owner;
         if (cover) {
             // As card <id> cover leaves it: the cover shown, the requested face to return to.
             auto &p = m_pairs.back();
@@ -2914,11 +2941,11 @@ std::string Controller::status() {
         const auto own = ownFaces(*s, coverAt);
         const auto shown = own[reportedFace(p, *s)];
         json += std::format("{{\"id\":{},\"active\":{},\"unfolded\":{},\"current\":{},\"cover\":{},\"covered\":{},"
-                            "\"box\":[{},{},{},{}],\"faces\":[",
+                            "\"owner\":{},\"box\":[{},{},{},{}],\"faces\":[",
                             p.id, reportedFace(p, *s), s->unfolded ? "true" : "false", address(s->focused[shown]),
                             coverAt ? address(s->faces[*coverAt][0]) : "null",
-                            coverAt && s->active == *coverAt ? "true" : "false", s->geometry.x, s->geometry.y,
-                            s->geometry.w, s->geometry.h);
+                            coverAt && s->active == *coverAt ? "true" : "false", p.owner.empty() ? "null" : quote(p.owner),
+                            s->geometry.x, s->geometry.y, s->geometry.w, s->geometry.h);
         for (unsigned i = 0; i < own.size(); ++i) {
             if (i)
                 json += ',';
@@ -2957,7 +2984,7 @@ std::string Controller::status() {
            ",\"card_rings\":" + (m_frames ? m_frames->rings() : "[]") +
            ",\"card_dividers\":" + (m_frames ? m_frames->dividers() : "[]") +
            ",\"native_cards\":true,\"floating_cards\":true,\"workspace_protection\":true,\"container_provider\":true" +
-           ",\"layout_controls\":true,\"repair_cards\":true,\"card_ungroup\":true,\"card_cover\":true,\"restore_cover\":true,\"restore_parked\":true,\"pane_"
+           ",\"layout_controls\":true,\"repair_cards\":true,\"card_ungroup\":true,\"card_cover\":true,\"restore_cover\":true,\"restore_parked\":true,\"card_owner\":true,\"pane_"
            "replacement\":true" +
            ",\"reveal\":true,\"reveal_slide\":true,\"last_slide_wait_ms\":" +
            (Reveal::lastSlideWait() ? std::to_string(static_cast<long>(std::lround(*Reveal::lastSlideWait())))

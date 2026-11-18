@@ -69,6 +69,9 @@ class Controller {
         PHLWINDOWREF cover;
         // A window on the face the card shows again when the cover leaves.
         PHLWINDOWREF uncoverTo;
+        // The program that manages the card, such as OmaRelay (card <id> owner, restore … owner): a mark that
+        // panels show and updates keep, never a lock. It lasts as long as the card.
+        std::string owner;
     };
     struct State {
         // Faces 0..count-1; a plain pair always has two.

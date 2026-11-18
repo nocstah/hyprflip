@@ -1158,10 +1158,13 @@ class Setup:
             raise
 
     @staticmethod
-    def restore_line(arrangement, box, floating, cover=None):
+    def restore_line(arrangement, box, floating, cover=None, owner=None):
         """The core's quiet restore of an arrangement, as card_restore.describe words a card's.
 
-        With cover, the card is built under that window, tiled, and may have one face of its own."""
+        With cover, the card is built under that window, tiled, and may have one face of its own. With owner,
+        the card is marked for that program from its first frame (cores with card_owner)."""
+        if owner is not None and not (isinstance(owner, str) and re.fullmatch(r'[A-Za-z0-9._-]{1,32}', owner)):
+            raise SetupError('The card action is unavailable.')
         if not all(type(v) in (int, float) and math.isfinite(v) for v in box):
             raise SetupError('The card action is unavailable.')
         if cover is not None and (floating or not isinstance(cover, str) or not re.fullmatch(r'0x[0-9a-fA-F]{1,16}', cover)):
@@ -1178,7 +1181,8 @@ class Setup:
             line += (f' {side} {face["axis"]} {face["windows"][face["focus"]]}' +
                      ''.join(f' {a}:{r:.12g}' for a, r in zip(face['windows'], face['ratios'])))
         names = name_words([face.get('name', '') for face in arrangement['faces']])
-        return line + (' ' + ' '.join(names) if names else '') + (f' cover {cover}' if cover is not None else '')
+        return (line + (' ' + ' '.join(names) if names else '') + (f' owner {owner}' if owner is not None else '') +
+                (f' cover {cover}' if cover is not None else ''))
 
     def box(self, arrangement, floating, workspace, windows):
         """A tiled card's box is its front app's tile there, or else the screen's free area; a floating
@@ -3025,7 +3029,9 @@ class Unattended(Saved):
                 'max_faces': max_faces(state),
                 # Definitions of one face: the one_face view, open with cover or tiles, needs_cover,
                 # saving a card of one face of its own, and put. A cover needs a core that restores under one.
-                'one_face': state.get('restore_cover') is True}
+                'one_face': state.get('restore_cover') is True,
+                # open marks the card for the program named in owner, which the panel shows.
+                'card_owner': state.get('card_owner') is True}
 
     def listing(self, name=None):
         cards = self.cards()
@@ -3087,6 +3093,8 @@ class Unattended(Saved):
         bind, owned = request.get('bind', []), set(request.get('owned', []))
         cover, tiles = request.get('cover'), request.get('tiles') is True
         if cover is not None and (tiles or cover in bind): raise Unfinished('invalid_request')
+        # The mark is no part of the card: a core without owners opens it unmarked, and the reply says so.
+        owner = request.get('owner')
         apps, chosen, missing, launchers, processes = [], [], {}, {}, {}
         try:
             with self.locked(lock_ms, cancelled):
@@ -3249,7 +3257,8 @@ class Unattended(Saved):
                     moved = [selected[a] for face in arrangement['faces'] for a in face['windows']
                              if selected[a]['workspace']['id'] != workspace]
                     commands = [self.move_command(w['address'], workspace) for w in moved]
-                    commands.append('hyprflip ' + self.restore_line(arrangement, box, floating, cover=cover))
+                    marked = owner if state.get('card_owner') is True else None
+                    commands.append('hyprflip ' + self.restore_line(arrangement, box, floating, cover=cover, owner=marked))
                     tiled = []
                     with self.reserve(selected, state, workspace):
                         try:
@@ -3302,7 +3311,7 @@ class Unattended(Saved):
             return {'result': 'tiles', 'token': token, 'slots': self.slots(recipe, chosen, missing),
                     'launched': self.launches(apps, launchers, processes, chosen), 'unused': unused, **remembered}
         place = card.get('workspace') or {}
-        return {'result': 'opened', 'card': card['id'], 'token': token,
+        return {'result': 'opened', 'card': card['id'], 'token': token, 'owner': card.get('owner'),
                 'workspace': {'id': place.get('id', workspace), 'name': place.get('name', str(workspace)),
                               'special': bool(place.get('special'))},
                 'slots': self.slots(recipe, chosen, missing), 'launched': self.launches(apps, launchers, processes, chosen),

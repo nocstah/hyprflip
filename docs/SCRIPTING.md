@@ -19,6 +19,7 @@ lists:
 | `workspace` | `id`, `name` and `special` (true on a special workspace) |
 | `floating`, `box` | Placement, and the whole card's `[x, y, w, h]` |
 | `cover`, `covered` | The window covering the card, or null, and whether it is the face shown ([below](#cover-a-card-with-a-window)) |
+| `owner` | The program that manages the card, such as `OmaRelay`, or null ([below](#mark-the-program-that-manages-a-card)) |
 
 An id lasts as long as its card. After the plugin or Hyprland reloads, read
 the ids again.
@@ -28,7 +29,7 @@ the ids again.
 ```sh
 hyprctl hyprflip restore [quiet] <tiled|floating> <active> <unfolded> <x> <y> <w> <h> \
   front <axis> <focused> <address:ratio>... back <axis> <focused> <address:ratio>... \
-  [face <axis> <focused> <address:ratio>...]... [cover <address>]
+  [face <axis> <focused> <address:ratio>...]... [owner <name>] [cover <address>]
 ```
 
 `restore` turns open windows on one workspace into a native card. `active` is
@@ -148,6 +149,32 @@ workspace, then moves them where they belong:
 hyprctl hyprflip card 12 workspace special:park silent
 hyprctl hyprflip card 12 ungroup
 ```
+
+## Mark the program that manages a card
+
+```sh
+hyprctl hyprflip card 12 owner OmaRelay
+hyprctl hyprflip card 12 owner -
+```
+
+A program that keeps its own cards marks them, so that a panel can say who
+manages a card and what that program does with an edit. The mark is never a
+lock: the card works as before, and every action by anyone still applies. A
+name is one word of letters, digits, `.`, `_` and `-`, at most 32 characters;
+`-` clears the mark. It replies `ok: ok`, never notifies, and takes no focus.
+A plain pair cannot be marked: "Only a card made by Hyprflip can have an
+owner."
+
+`status` reports the name in each card's `owner`, or null. The mark stays with
+the card through moves, parking, turns, covers, floating, fullscreen and apps
+added or removed, and goes when the card does. An update with
+`scripts/install.py` keeps it. Cores that have marks report
+`"card_owner": true`.
+
+`owner <name>` in a [restore](#build-a-card) marks the card it builds, so no
+other program sees it unmarked. It comes once, after the faces and before any
+cover: "Use owner <name> once, after the faces, in a card description …". The
+card helper's [`open`](#open-a-card) takes `owner` and passes it on.
 
 ## Cover a card with a window
 
@@ -410,14 +437,15 @@ doing:
 
   ```json
   {"release": "0.3.0-rc.26", "finished_ms": 1795507200000, "ok": true, "kept": 3,
-   "apart": [{"workspace": "special:park", "apps": [
+   "apart": [{"workspace": "special:park", "owner": "OmaRelay", "apps": [
      {"address": "0x55d0a1b2c3d0", "pid": 4242, "class": "foot"}]}]}
   ```
 
   `ok` is false when the update was rolled back or refused after it began.
   `kept` counts the cards rebuilt, parked ones included. `apart` lists the cards
-  left as separate windows, with each one's workspace and the apps still open,
-  as they are now. A `finished_ms` before the marker's `started_ms` belongs to
+  left as separate windows, with each one's workspace, its
+  [owner](#mark-the-program-that-manages-a-card) or null, and the apps still
+  open, as they are now. A `finished_ms` before the marker's `started_ms` belongs to
   an earlier update.
 - **The event.** After an update that installed, once the marker is gone, the
   new core posts `hyprflip>>updated,<release>` on Hyprland's event socket
@@ -553,10 +581,10 @@ A request is a JSON object of at most 65536 bytes with `"protocol": 1`, an
 
 | Action | Fields (optional in brackets) | Reply |
 | --- | --- | --- |
-| `capabilities` | none | `actions`, `core`, `max_panes`, `max_faces`, `one_face` |
+| `capabilities` | none | `actions`, `core`, `max_panes`, `max_faces`, `one_face`, `card_owner` |
 | `list` | `store` [`name`, `one_face`] | `cards` |
 | `delete` | `store`, `name`, `token` [`one_face`, `lock_ms`] | `result`: `deleted` or `absent` |
-| `open` | `workspace`; `name` and `store`, or `recipe` [`bind`, `owned`, `focus`, `launch`, `timeout_ms`, `lock_ms`, `one_face`, `cover` or `tiles`] | `result`: `opened`, and the card; or `tiles` |
+| `open` | `workspace`; `name` and `store`, or `recipe` [`bind`, `owned`, `focus`, `launch`, `timeout_ms`, `lock_ms`, `one_face`, `owner`, `cover` or `tiles`] | `result`: `opened`, and the card; or `tiles` |
 | `save` | `store`, `name`, `card`, `members`, `previous` [`base`, `keep`, `floating`, `owned`, `one_face`, `lock_ms`] | `result`: `saved` or `unchanged` |
 | `put` | `store`, `name`, `recipe`, `previous` [`one_face`, `lock_ms`] | `result`: `saved` or `unchanged` |
 
@@ -611,6 +639,10 @@ reply is `conflict`. Neither of them asks Hyprland anything.
 - `launch` (default true) lets it launch missing apps. `timeout_ms` (1000 to
   60000, default 20000) is how long it waits for their windows, and `lock_ms`
   (0 to 30000, default 5000) how long it waits for the lock.
+- `owner` [marks the card](#mark-the-program-that-manages-a-card) for that
+  program in the restore that builds it, such as `"owner": "OmaRelay"`. On a
+  core without marks (`card_owner` false in `capabilities`) the card opens
+  unmarked. The reply's `owner` says which it got. `tiles` takes no owner.
 
 A window can be bound when it is mapped, belongs to no card, pair or group, and
 is not pinned, hidden or fullscreen. It must be on a numbered workspace, or on
@@ -676,7 +708,7 @@ it as the next `previous`. `remembered` appears only in that case: true, or
 false when the write failed. The card stays open either way.
 
 ```json
-{"protocol": 1, "ok": true, "result": "opened", "card": 12, "token": "…",
+{"protocol": 1, "ok": true, "result": "opened", "card": 12, "token": "…", "owner": null,
  "workspace": {"id": 3, "name": "3", "special": false},
  "slots": [[{"class": "example-browser", "initial_class": "example-browser",
              "label": "example-browser", "launcher": false, "address": "0x55d0a1b2c3d0"}],

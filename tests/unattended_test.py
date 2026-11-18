@@ -181,7 +181,7 @@ class QuietIPC(DwindleIPC):
     def restore(self, words):
         if self.refuse: return False, self.refuse
         usage = 'Use restore [quiet] <tiled|floating> <active> <unfolded> <x> <y> <w> <h> front ... back ...'
-        faces, layouts, side, cover = [], [], None, None
+        faces, layouts, side, cover, owner = [], [], None, None, None
         try:
             mode, active, unfolded = words[0], int(words[1]), int(words[2])
             rest = iter(words[7:])
@@ -196,6 +196,11 @@ class QuietIPC(DwindleIPC):
                 if token == 'cover':
                     # Last: no app follows it.
                     cover, side = next(rest), None
+                    continue
+                if token == 'owner':
+                    # Only a core with owners takes one; an older core refuses the line.
+                    if self.snapshot.get('card_owner') is not True: return False, usage
+                    owner, side = next(rest), None
                     continue
                 address, ratio = token.split(':')
                 faces[side].append(address); layouts[side]['ratios'].append(float(ratio))
@@ -216,10 +221,10 @@ class QuietIPC(DwindleIPC):
                 return False, 'That window is already in a card, pair or group. Release it first.'
             if self.clients[cover]['workspace']['id'] != self.clients[members[0]]['workspace']['id']:
                 return False, "Move the window to the card's workspace before covering the card with it."
-        self.add_card(faces, active, layouts, unfolded=bool(unfolded), floating=mode == 'floating', cover=cover)
+        self.add_card(faces, active, layouts, unfolded=bool(unfolded), floating=mode == 'floating', cover=cover, owner=owner)
         return True, 'ok'
 
-    def add_card(self, faces, active=0, layouts=None, unfolded=False, floating=False, cover=None):
+    def add_card(self, faces, active=0, layouts=None, unfolded=False, floating=False, cover=None, owner=None):
         """A native card, as a quiet restore makes it on its apps' workspace; with a cover, built under it and showing it."""
         layouts = deepcopy(layouts) or [dict(axis='horizontal', focused=face[0], ratios=[1.] * len(face)) for face in faces]
         for layout in layouts:
@@ -229,7 +234,7 @@ class QuietIPC(DwindleIPC):
         card = dict(id=self.next_card, faces=[list(face) for face in faces], active=active,
                     current=layouts[active]['focused'], unfolded=unfolded, box=[0, 0, 1000, 700], native_group=True,
                     fullscreen=False, floating=floating, workspace=dict(workspace, special=workspace['id'] < 0),
-                    layouts=layouts)
+                    layouts=layouts, owner=owner)
         if cover is not None:
             card.update(cover=cover, covered=True)
         self.next_card += 1
@@ -705,7 +710,7 @@ class UnattendedTest(unittest.TestCase):
         def slot(name, label, address, launcher=False):
             return {'class': name, 'initial_class': name, 'label': label, 'launcher': launcher, 'address': address}
         self.assertEqual(reply, {'protocol': 1, 'ok': True, 'result': 'opened', 'card': 10, 'token': setup.digest(self.acme()),
-                                 'workspace': {'id': 2, 'name': '2', 'special': False},
+                                 'owner': None, 'workspace': {'id': 2, 'name': '2', 'special': False},
                                  'slots': [[slot('omarelay-acme', 'Workspace browser', '0xb')],
                                            [slot('omarelay.terminal.acme', 'Workspace terminal', '0xc'),
                                             slot('obsidian', 'Obsidian', '0xd', True)]],
@@ -724,6 +729,29 @@ class UnattendedTest(unittest.TestCase):
         self.assertEqual((self.ipc.active, self.ipc.workspace, self.ipc.pointer, self.ipc.clients['0xa']),
                          ('0xa', 2, pointer, working))
         self.assertFalse(menus.current.exists())
+
+    def test_open_marks_the_card_for_its_owner_in_the_same_restore(self):
+        self.park(); self.keep('acme', self.acme())
+        self.ipc.snapshot['card_owner'] = True
+        reply = self.send('open', **self.opening(owner='OmaRelay'))
+        self.assertEqual((reply['result'], reply['owner']), ('opened', 'OmaRelay'))
+        # Named before any cover, after the faces: the card is marked from its first frame.
+        self.assertTrue(self.batches()[0][-1].endswith(' owner OmaRelay'), self.batches())
+        self.assertEqual(self.ipc.snapshot['containers'][0]['owner'], 'OmaRelay')
+
+    def test_an_owner_on_a_core_without_owners_opens_the_card_unmarked(self):
+        self.park(); self.keep('acme', self.acme())
+        reply = self.send('open', **self.opening(owner='OmaRelay'))
+        self.assertEqual((reply['result'], reply['owner']), ('opened', None))
+        self.assertNotIn('owner', self.batches()[0][-1])
+
+    def test_an_owner_must_be_one_short_word_and_tiles_take_none(self):
+        self.park(); self.keep('acme', self.acme())
+        self.ipc.snapshot['card_owner'] = True
+        for owner in ('Oma Relay', '', 'x' * 33, 7, 'Oma;Relay'):
+            self.assertEqual(self.send('open', **self.opening(owner=owner))['code'], 'invalid_request', owner)
+        self.assertEqual(self.send('open', **self.opening(owner='OmaRelay', tiles=True))['code'], 'invalid_request')
+        self.assertEqual(self.batches(), [])
 
     def test_open_imports_bound_windows_from_a_special_workspace_silently(self):
         self.park(); self.keep('acme', self.acme())
@@ -1830,7 +1858,12 @@ class UnattendedTest(unittest.TestCase):
         actions = ['capabilities', 'list', 'delete', 'open', 'save', 'put']
         # A core that does not say how many faces a card holds holds two.
         self.assertEqual(self.send('capabilities'), {'protocol': 1, 'ok': True, 'result': 'capabilities', 'actions': actions,
-                                                    'core': True, 'max_panes': 5, 'max_faces': 2, 'one_face': False})
+                                                    'core': True, 'max_panes': 5, 'max_faces': 2, 'one_face': False,
+                                                    'card_owner': False})
+        # Open marks a card for its owner on cores with owners.
+        self.ipc.snapshot['card_owner'] = True
+        self.assertEqual(self.send('capabilities')['card_owner'], True)
+        del self.ipc.snapshot['card_owner']
         # Definitions of one face follow the core's restore under a cover.
         self.ipc.snapshot['restore_cover'] = True
         self.assertEqual(self.send('capabilities')['one_face'], True)
@@ -1844,7 +1877,8 @@ class UnattendedTest(unittest.TestCase):
         # No core loaded is an answer as well.
         with patch.object(self.ipc, 'status', side_effect=setup.CoreUnavailable('Hyprflip is unavailable. Load the container plugin.')):
             self.assertEqual(self.send('capabilities'), {'protocol': 1, 'ok': True, 'result': 'capabilities', 'actions': actions,
-                                                        'core': False, 'max_panes': 0, 'max_faces': 2, 'one_face': False})
+                                                        'core': False, 'max_panes': 0, 'max_faces': 2, 'one_face': False,
+                                                        'card_owner': False})
         # Not reaching Hyprland is no answer: the caller tries again soon instead of waiting for another core.
         for failure in (setup.SetupError('Hyprland is not responding.'), OSError('hyprctl'),
                         subprocess.TimeoutExpired('hyprctl', 10)):

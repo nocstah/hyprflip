@@ -1027,5 +1027,25 @@ class DescribeTest(unittest.TestCase):
         self.assertTrue(card_restore.describe(self.card(4, active=3)).endswith(
             "face horizontal 0xe 0xe:1 face horizontal 0xf 0xf:1"))
 
+class OwnerTest(unittest.TestCase):
+    CARD = {"faces": [["0xa"], ["0xb"]], "active": 0, "unfolded": False, "floating": False, "box": [0, 0, 800, 600],
+            "layouts": [{"axis": "horizontal", "focused": "0xa", "ratios": [1]},
+                        {"axis": "horizontal", "focused": "0xb", "ratios": [1]}]}
+
+    def test_a_card_names_its_owner_before_its_cover(self):
+        line = card_restore.describe(dict(self.CARD, owner="OmaRelay", cover="0xc"))
+        # The cover stays last, where the installer and the core look for it.
+        self.assertTrue(line.endswith(" owner OmaRelay cover 0xc"), line)
+        self.assertEqual(card_restore.owner(line), "OmaRelay")
+        self.assertEqual(card_restore.without_owner(line), card_restore.describe(dict(self.CARD, cover="0xc")))
+
+    def test_no_owner_or_one_the_core_would_refuse_is_left_out(self):
+        for owner in (None, "", "Oma Relay", "x" * 33, 7):
+            line = card_restore.describe(dict(self.CARD, owner=owner))
+            self.assertNotIn("owner", line)
+            self.assertIsNone(card_restore.owner(line))
+            self.assertEqual(card_restore.without_owner(line), line)
+
+
 if __name__ == "__main__":
     unittest.main()

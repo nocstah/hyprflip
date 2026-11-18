@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+- A card can be marked with the program that manages it: `card <id> owner
+  <name>` (`-` clears it), or `owner <name>` in the restore that builds it.
+  `status` reports each card's `owner` and `"card_owner": true`. The mark is
+  never a lock; it stays with the card until the card goes, and an update keeps
+  it (a core without marks gets the card unmarked). See
+  [Mark the program that manages a card](docs/SCRIPTING.md#mark-the-program-that-manages-a-card).
+- The card helper's `open` takes `owner` and marks the card in the same batch;
+  its reply and `capabilities` say whether it could. Snapshot cards report
+  `owner`, and capabilities `card_owner`, so a panel can say who manages a card.
+- An update names the program that rebuilds the cards it left apart: "OmaRelay
+  rebuilds them", "Could not keep a card OmaRelay manages", and each `apart`
+  entry of `update-result.json` has its `owner`.
 ## 0.3.0-rc.26 — 2026-11-18
 
 - An update with `scripts/install.py` keeps parked cards: the new core

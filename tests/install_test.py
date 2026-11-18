@@ -102,6 +102,8 @@ class InstallerTest(unittest.TestCase):
         # A core that takes covers, the cards whose uncover it refuses, the card each restore
         # line rebuilds, and windows that are open beside the apps of every test.
         self.card_cover, self.refuse_uncover, self.rebuilt, self.extra_clients = False, set(), {}, ()
+        # Whether the core this update loads takes a card's owner; the one before it never says.
+        self.card_owner = False
         # The update's own traces: the marker and lock at the unload, the announcements, where windows are.
         self.marker_at_unload = self.lock_free_at_unload = None
         self.announced, self.places = [], {}
@@ -120,6 +122,8 @@ class InstallerTest(unittest.TestCase):
             reply = {"version": version, "pairs": self.pairs, "containers": self.containers}
             if self.card_cover:
                 reply["card_cover"] = True
+            if self.card_owner and version == VERSION:
+                reply["card_owner"] = True
         elif args == ["hyprflip", "finish"]:
             # Another program may park a card while the update settles.
             if self.park_at_finish:
@@ -193,6 +197,9 @@ class InstallerTest(unittest.TestCase):
             if quiet and self.library.read_bytes() == b"old plugin":
                 # A core older than quiet restores answers with its usage line.
                 reply = "error: Use restore <tiled|floating> <active> <unfolded> <x> <y> <w> <h> front ... back ..."
+            elif " owner " in restore and not (self.card_owner and self.library.read_bytes() == b"new plugin"):
+                # A core without owners answers with its usage line.
+                reply = "error: Use restore [quiet] <tiled|floating> <active> <unfolded> <x> <y> <w> <h> front ... back ..."
             elif restore in self.refused:
                 reply = "error: The card could not be restored; its apps stay open."
             else:
@@ -353,8 +360,48 @@ class InstallerTest(unittest.TestCase):
                       "Leaving 1 hidden card(s) as separate windows; the program that parked them rebuilds them.\n",
                       self.output.getvalue())
         self.assertEqual(json.loads(self.result.read_text())["apart"],
-                         [{"workspace": "special:park", "apps": [{"address": "0xe", "pid": 14, "class": "appe"},
+                         [{"workspace": "special:park", "owner": None, "apps": [{"address": "0xe", "pid": 14, "class": "appe"},
                                                                  {"address": "0xf", "pid": 15, "class": "appf"}]}])
+
+    def test_an_update_keeps_the_program_that_manages_each_card(self):
+        self.card_owner = True
+        self.containers = [card("0xc", "0xd", SHOWN, owner="OmaRelay"), card("0xe", "0xf", PARKED, owner="OmaRelay"),
+                           card("0x1e", "0x1f", SHOWN)]
+        self.places = {"0xe": "special:park", "0xf": "special:park"}
+        self.extra_clients = ("0x1e", "0x1f")
+        self.run_installer()
+        marked = [line("0xc", "0xd") + " owner OmaRelay", line("0xe", "0xf") + " owner OmaRelay"]
+        # Each card is marked in the restore that builds it; a card nobody manages stays unmarked.
+        self.assertEqual(self.restored, marked + [line("0x1e", "0x1f")])
+        self.assertEqual(self.recovery_at_unload["cards"], marked + [line("0x1e", "0x1f")])
+        self.assertEqual(json.loads(self.result.read_text())["kept"], 3)
+
+    def test_a_core_without_owners_keeps_the_card_unmarked(self):
+        # A core without owners would refuse the word, so the card is rebuilt without it: the mark is no part of it.
+        self.containers = [card("0xc", "0xd", SHOWN, owner="OmaRelay")]
+        self.run_installer()
+        self.assertEqual(self.restored, [line("0xc", "0xd")])
+        self.assertNotIn("Could not keep a card", self.output.getvalue())
+        # Nor does a rollback to such a core give up the card for its owner.
+        self.setUp()
+        self.card_owner = True
+        self.containers = [card("0xc", "0xd", SHOWN, owner="OmaRelay"), card("0xe", "0xf", SHOWN)]
+        self.unanswered = {line("0xe", "0xf"): 6}
+        with self.assertRaises(RuntimeError):
+            self.run_installer()
+        self.assertEqual(self.restored, [line("0xc", "0xd") + " owner OmaRelay", line("0xc", "0xd")])
+
+    def test_cards_left_apart_name_the_program_that_manages_them(self):
+        self.card_owner = True
+        self.containers = [card("0xc", "0xd", SHOWN, owner="OmaRelay"), card("0xe", "0xf", PARKED, fullscreen=True, owner="OmaRelay")]
+        self.places = {"0xe": "special:park", "0xf": "special:park"}
+        self.refused = {line("0xc", "0xd") + " owner OmaRelay"}
+        self.run_installer()
+        output = self.output.getvalue()
+        self.assertIn("Leaving 1 hidden card(s) as separate windows; OmaRelay rebuilds them.\n", output)
+        self.assertIn("Could not keep a card OmaRelay manages; its apps stay open as separate windows: ", output)
+        self.assertEqual([(entry["workspace"], entry["owner"]) for entry in json.loads(self.result.read_text())["apart"]],
+                         [("3", "OmaRelay"), ("special:park", "OmaRelay")])
 
     def test_a_parked_card_gets_no_tile_correction(self):
         # Rebuilt where no monitor shows it, its box says nothing of a tile: no focus, no step, nothing shown.
@@ -410,7 +457,7 @@ class InstallerTest(unittest.TestCase):
         written = json.loads(self.result.read_text())
         self.assertEqual({k: written[k] for k in ("release", "ok", "kept", "apart")},
                          {"release": VERSION, "ok": True, "kept": 1,
-                          "apart": [{"workspace": "special:park", "apps": [{"address": "0xe", "pid": 14, "class": "appe"},
+                          "apart": [{"workspace": "special:park", "owner": None, "apps": [{"address": "0xe", "pid": 14, "class": "appe"},
                                                                            {"address": "0xf", "pid": 15, "class": "appf"}]}]})
         self.assertEqual(self.announced, [VERSION])
         self.assertLess(self.calls.index(["plugin", "unload", str(self.library)]),

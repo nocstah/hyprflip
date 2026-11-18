@@ -259,6 +259,40 @@ hl.config({{general={{gaps_in=14,gaps_out=24}},decoration={{inactive_opacity=0.8
     visible(id)
     passed('a card parks on a special workspace and comes back without taking the focus or moving the pointer; parked, Find leaves it out')
 
+    # A mark, never a lock: the program that manages the card, as panels show it.
+    assert ipc.status()['card_owner'] is True and card(id)['owner'] is None
+    assert still(f'card {id} owner OmaRelay', term) == 'ok: ok' and card(id)['owner'] == 'OmaRelay'
+    assert active() == term and workspace() == 71
+    still(f'card {id} workspace special:park silent', term)
+    assert card(id)['owner'] == 'OmaRelay'
+    still(f'card {id} workspace 71 silent', term)
+    still(f'card {id} show back', term)
+    still(f'card {id} show front', term)
+    assert card(id)['owner'] == 'OmaRelay'
+    pair = next(p for p in ipc.status()['pairs'] if p['front'] == chat)
+    for action in (f'card {id} owner', f'card {id} owner Oma Relay', f'card {id} owner ' + 'x' * 33, f'card {id} owner a/b',
+                   f'card {id} owner OmaRelay now'):
+        assert 'card <id> owner <name>' in refused(action), action
+    assert 'Only a card made by Hyprflip' in refused(f'card {pair["id"]} owner OmaRelay')
+    assert still(f'card {id} owner -', term) == 'ok: ok' and card(id)['owner'] is None
+    passed('card <id> owner marks a card for the program that manages it, through parking and turns, without taking the focus '
+           'or moving the pointer; - clears it, and a malformed name or a plain pair is refused')
+
+    # Marked in the restore that builds it, from its first frame; the mark goes when the card does.
+    assert still(f'card {id} owner OmaRelay', term) == 'ok: ok'
+    assert still(f'card {id} ungroup', term) == 'ok: ok'
+    box = ipc.windows()[front]
+    words = (f'restore quiet tiled 0 0 {box["at"][0]} {box["at"][1]} {box["size"][0]} {box["size"][1]} '
+             f'front horizontal {front} {front}:1 back horizontal {back} {back}:1')
+    for action in (words.replace(' front ', ' owner OmaRelay front ', 1), words + ' owner OmaRelay owner Other',
+                   words + f' owner OmaRelay face horizontal {term} {term}:1', words + ' owner Oma/Relay'):
+        assert 'Use owner <name> once' in refused(action), action
+    assert still(words + ' owner OmaRelay', term) == 'ok: ok'
+    id = next(c for c in ipc.status()['containers'] if front in c['faces'][0])['id']
+    assert card(id)['owner'] == 'OmaRelay' and active() == term and workspace() == 71
+    visible(id)
+    passed('a quiet restore marks the card it builds for its owner in the same call; the owner comes once, after the faces')
+
     ipc.action(f'card {id} workspace 72')
     shown = card(id)
     assert workspace() == 72 and active() == shown['faces'][shown['active']][0], shown

@@ -233,9 +233,10 @@ hl.config({general={gaps_in=14,gaps_out=24},animations={enabled=false},
     assert state['restore_cover'] is True, state
     assert reply == {'protocol': 1, 'ok': True, 'result': 'capabilities',
                      'actions': ['capabilities', 'list', 'delete', 'open', 'save', 'put'],
-                     'core': True, 'max_panes': state['container_max_panes'], 'max_faces': 6, 'one_face': True}, reply
+                     'core': True, 'max_panes': state['container_max_panes'], 'max_faces': 6, 'one_face': True,
+                     'card_owner': True}, reply
     passed('the helper finds a core with native cards and ungroup by id, reports the six faces a card may have, '
-           'and says it opens cards of one face under a cover')
+           'and says it opens cards of one face under a cover and marks the cards it opens for their owner')
 
     # A definition with more faces than the core holds is refused before anything changes.
     seven = definition([app('seven-0', 'Seven')], [app('seven-1', 'Seven')])
@@ -311,9 +312,11 @@ hl.config({general={gaps_in=14,gaps_out=24},animations={enabled=false},
     for address in (mail, chat): ipc.move(address, 'special:park')
     show(81); ipc.focus(herdr)
     reply, sent = helper({'action': 'open', 'recipe': definition([app('mail', 'Mail')], [app('chat', 'Chat')]),
-                          'workspace': 81, 'bind': [mail, chat], 'focus': herdr, 'launch': False}, herdr)
+                          'workspace': 81, 'bind': [mail, chat], 'focus': herdr, 'launch': False, 'owner': 'OmaRelay'}, herdr)
     assert reply['ok'] and reply['result'] == 'opened' and reply['token'] is None, reply
     second = reply['card']
+    # Marked in the restore that built it, as card mode asks: the batch is still the one change.
+    assert reply['owner'] == card(second)['owner'] == 'OmaRelay' and ' owner OmaRelay' in changes(sent)[0][1], (reply, sent)
     assert card(second)['faces'] == [[mail], [chat]] and card(second)['workspace']['id'] == 81, card(second)
     monitor = next(m for m in ipc.data('-j', 'monitors') if m['name'] == output)
     assert active() == herdr and workspace() == 81 and not monitor['specialWorkspace']['id'], monitor
@@ -321,8 +324,8 @@ hl.config({general={gaps_in=14,gaps_out=24},animations={enabled=false},
     assert changes(sent)[0][1].count('follow=false') == 2, sent
     visible(second)
     ipc.action(f'card {second} workspace special:park silent')
-    passed('bound apps parked on a special workspace join the card silently: the special workspace stays hidden, '
-           'and the keyboard and the pointer stay')
+    passed('bound apps parked on a special workspace join the card silently, marked for its owner: the special '
+           'workspace stays hidden, and the keyboard and the pointer stay')
 
     # 3. An app that is not open, launched from a launcher nobody sees in a
     # menu. It takes the keyboard as it maps; the keyboard comes straight back.
