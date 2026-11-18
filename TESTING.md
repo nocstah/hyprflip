@@ -1,5 +1,87 @@
 # Validation
 
+## A covered card with one face of its own (2026-11-18)
+
+When a close would leave a card behind Herdr's window with one face of its
+own, OmaRelay keeps that face under the cover. The core can now build that
+shape in one `restore … cover <address>`, founded on the cover so that the
+card takes the cover's tile. The helper keeps such definitions in a `one_face`
+map of the caller's store, opens them under a cover or as tiles, and writes
+them with `put`. An update keeps a covered card with one face of its own.
+
+Checked on feat/one-face-cover at 1ca0ab4. All three CTest checks and all 494
+Python unit tests pass (470 on 847e4b0). The 24 new ones are:
+- `tests/saved_test.py` (10): the restore line with a cover, validate's
+  fewest faces, the `one_face` map keeping the card of two faces as its
+  fallback, the limit over both maps, a store without `one_face` written as
+  before, an older helper's read and write, the flag view's token, a bad
+  entry, the library, and the menu save's sentence;
+- `tests/unattended_test.py` (9): an open under a cover in one batch from the
+  cover's tile; the cover never bound or counted as open elsewhere, but counted
+  as a face; `unavailable` without `restore_cover` or with a cover in use;
+  `changed` under the lock; `needs_cover`; `tiles`; a save that needs the
+  `one_face` view; `put`; the new request fields;
+- `tests/install_test.py` (3 more): the old test that took such a card apart
+  is replaced by four, in which an update keeps the cover and the face it
+  showed, a recovery run builds it again, and a rollback to an older core
+  leaves its apps open;
+- `tests/edit_test.py` and `tests/panel_control_test.py` (1 each): no move to
+  another face, and no Other side.
+
+Each nested suite ran in its own fresh session (Hyprland 0.56.2, Aquamarine
+0.15.1 with the render-node patch, `--notify-recorder`), and every launcher
+exited cleanly:
+- the new `tests/restore_cover_workflows.py`: all 10 checks pass, and again
+  all 10 with `--hooks-off` in a session started with
+  `HYPRFLIP_CLOSE_HOOKS=0`. They cover one face of its own built in one batch
+  from a special workspace, with grim showing the cover's box unchanged and
+  the keyboard and pointer where they were; flip and `card show 1`; the same
+  beside a neighbour that has the keyboard; two faces of their own; each
+  refusal's sentence; parking, which still takes the card apart, and a second
+  restore that builds it again in the same tile; the face move refused with
+  "This card has one face of its own."; key closes of the app and of the
+  cover, both `dissolved`; and card frames on.
+- Planted: with the card founded on face 0 instead of the cover, the suite
+  fails at the neighbour check. The card took the neighbour's tile
+  (`[12, 12, 628, 776]`) instead of the cover's (`[648, 14, 618, 772]`). The
+  case with the cover alone on its workspace passes either way, so the
+  neighbour case is the one that guards this. Rebuilt afterwards, the plugin
+  was byte for byte the one tested above.
+- `tests/install_cards.py`: all 65 checks pass. The covered-update check now
+  also has a covered card with one face of its own keep its cover, on the face
+  it showed.
+- `tests/unattended_workflows.py`: 14 checks pass, one new. The helper puts
+  a definition of one face, opens it under the working tile in one batch
+  (the tile, the keyboard and the pointer stay), saves it only in the
+  `one_face` view, and binds it as tiles without moving anything.
+- `tests/cover_workflows.py` (15, with `--protocol`),
+  `tests/close_reason_workflows.py` (15 with `--protocol`, all 72 status
+  replies JSON; 4 with `--hooks-off`), `tests/multiface_workflows.py` (18),
+  `tests/card_id_workflows.py` (13), `tests/dwindle_workflows.py` (7),
+  `tests/floating_workflows.py` (10), `tests/switcher_workflows.py` (12),
+  `tests/repair_workflows.py` (10), `tests/opening_workflows.py` (6) and
+  `tests/uninstall_session.py` (3, with its own home) all pass.
+- `tests/saved_workflows.py`: `--phase save` (1), then `--phase restore` (5)
+  in a second session with the same `--state-dir`.
+- `tests/key_suites.py` with Hyprglass: all seven suites pass (workflows 10,
+  nearby 15, setup 7, edit 14, pane 12, switch 5, claim 5).
+
+`tests/fullscreen_workflows.py` with `--protocol` passed 8 checks (the 7
+recorded before, plus the pointer check that `--protocol` adds). It then failed
+where it has failed since 79fdb37: at line 236, `KeyError: 'address'`, because
+no window has the focus after an app leaves a fullscreen card.
+
+OmaCards at its feat/one-face-cover branch (cf93694), against this checkout:
+`tests/render.py` passes, with the new checks for a covered card's Showing
+label and the Other side of a card with one face of its own.
+`tests/installer_test.py` (6), `tests/pin_check.py` and
+`omarchy plugin validate .` pass. In nested sessions started with
+`--native-cards`, `tests/run-native.py --dwindle` passes 9 of 9,
+`tests/navigation-native.py` 5 of 5 and `tests/shortcut-native.py` 1 of 1.
+
+Not run: `tests/menu_workflows.py` (portable pickers; the Edit menu change is
+covered by the unit tests) and the other compositor suites.
+
 ## A module claims one of Hyprflip's keys; release checks for 0.3.0-rc.24 (2026-11-18)
 
 Found on the pilot desktop: OmaRelay's card key module binds Super+Ctrl+Alt+O
