@@ -180,33 +180,47 @@ class QuietIPC(DwindleIPC):
 
     def restore(self, words):
         if self.refuse: return False, self.refuse
-        faces, layouts, side = [[], []], [None, None], None
+        usage = 'Use restore [quiet] <tiled|floating> <active> <unfolded> <x> <y> <w> <h> front ... back ...'
+        faces, layouts, side, cover = [], [], None, None
         try:
             mode, active, unfolded = words[0], int(words[1]), int(words[2])
             rest = iter(words[7:])
             for token in rest:
-                if token in ('front', 'back'):
-                    side = int(token == 'back')
-                    layouts[side] = dict(axis=next(rest), focused=next(rest), ratios=[])
+                if token in ('front', 'back', 'face'):
+                    faces.append([]); layouts.append(dict(axis=next(rest), focused=next(rest), ratios=[]))
+                    side = len(faces) - 1
+                    continue
+                if token == 'name':
+                    next(rest); next(rest)
+                    continue
+                if token == 'cover':
+                    # Last: no app follows it.
+                    cover, side = next(rest), None
                     continue
                 address, ratio = token.split(':')
                 faces[side].append(address); layouts[side]['ratios'].append(float(ratio))
         except (IndexError, StopIteration, TypeError, ValueError):
-            return False, 'Use restore [quiet] <tiled|floating> <active> <unfolded> <x> <y> <w> <h> front ... back ...'
-        if mode not in ('tiled', 'floating') or active not in (0, 1):
-            return False, 'Use restore [quiet] <tiled|floating> <active> <unfolded> <x> <y> <w> <h> front ... back ...'
-        if not all(faces): return False, 'A card needs apps on both faces.'
-        members = faces[0] + faces[1]
+            return False, usage
+        if mode not in ('tiled', 'floating') or not 0 <= active < max(len(faces), 2): return False, usage
+        if cover is not None and mode != 'tiled': return False, 'A covered card is restored tiled.'
+        if len(faces) < (1 if cover else 2) or not all(faces): return False, 'A card needs apps on both faces.'
+        members = [a for face in faces for a in face]
         if any(a in face for card in self.snapshot['containers'] for face in card['faces'] for a in members):
             return False, 'An app in that card already belongs to another card.'
         if (any(a not in self.clients or self.clients[a]['fullscreen'] for a in members) or
                 len({self.clients[a]['workspace']['id'] for a in members}) > 1):
             return False, 'Those apps are gone or no longer fit; they stay open as separate windows.'
-        self.add_card(faces, active, layouts, unfolded=bool(unfolded), floating=mode == 'floating')
+        if cover is not None:
+            if cover not in self.clients: return False, f'No window has address {cover}.'
+            if self.clients[cover]['grouped'] or any(c.get('cover') == cover for c in self.snapshot['containers']):
+                return False, 'That window is already in a card, pair or group. Release it first.'
+            if self.clients[cover]['workspace']['id'] != self.clients[members[0]]['workspace']['id']:
+                return False, "Move the window to the card's workspace before covering the card with it."
+        self.add_card(faces, active, layouts, unfolded=bool(unfolded), floating=mode == 'floating', cover=cover)
         return True, 'ok'
 
-    def add_card(self, faces, active=0, layouts=None, unfolded=False, floating=False):
-        """A native card, as a quiet restore makes it on its apps' workspace."""
+    def add_card(self, faces, active=0, layouts=None, unfolded=False, floating=False, cover=None):
+        """A native card, as a quiet restore makes it on its apps' workspace; with a cover, built under it and showing it."""
         layouts = deepcopy(layouts) or [dict(axis='horizontal', focused=face[0], ratios=[1.] * len(face)) for face in faces]
         for layout in layouts:
             total = sum(layout['ratios']); layout['ratios'] = [r / total for r in layout['ratios']]
@@ -216,11 +230,15 @@ class QuietIPC(DwindleIPC):
                     current=layouts[active]['focused'], unfolded=unfolded, box=[0, 0, 1000, 700], native_group=True,
                     fullscreen=False, floating=floating, workspace=dict(workspace, special=workspace['id'] < 0),
                     layouts=layouts)
+        if cover is not None:
+            card.update(cover=cover, covered=True)
         self.next_card += 1
         self.snapshot['containers'].append(card)
-        for address in members: self.clients[address].update(grouped=list(members), floating=floating)
+        grouped = members + ([cover] if cover is not None else [])
+        for address in grouped: self.clients[address].update(grouped=list(grouped), floating=floating)
         # A quiet restore leaves the focus alone, unless it was on an app the card now hides.
-        if self.active in members and self.active not in faces[active]: self.active = card['current']
+        shown = [cover] if cover is not None else faces[active]
+        if self.active in members and self.active not in shown: self.active = shown[0] if cover else card['current']
         return card
 
     def card_action(self, text, words):
@@ -294,11 +312,16 @@ class UnattendedTest(unittest.TestCase):
         json.dumps(reply, ensure_ascii=True, allow_nan=False)
         return reply
 
-    def keep(self, name, recipe):
-        setup.RecipeStore(path=self.store, titles=False).change({name: None}, {name: recipe})
+    def keep(self, name, recipe, one_face=False):
+        store = setup.RecipeStore(path=self.store, titles=False, one_face=one_face)
+        store.change({name: store.read().get(name)}, {name: recipe})
 
-    def stored(self):
-        return setup.RecipeStore(path=self.store, titles=False).read()
+    def stored(self, one_face=False):
+        return setup.RecipeStore(path=self.store, titles=False, one_face=one_face).read()
+
+    def maps(self):
+        """Both maps of the caller's store: cards, and one_face."""
+        return setup.RecipeStore(path=self.store, titles=False).read_both()
 
     def acme(self, title=''):
         """OmaRelay's card for a workspace: its browser in front, its terminal and the user's notes behind."""
@@ -1804,10 +1827,16 @@ class UnattendedTest(unittest.TestCase):
         self.assertFalse((self.root / 'tools/hyprctl.log').exists())
 
     def test_capabilities_reports_actions_and_core(self):
-        actions = ['capabilities', 'list', 'delete', 'open', 'save']
+        actions = ['capabilities', 'list', 'delete', 'open', 'save', 'put']
         # A core that does not say how many faces a card holds holds two.
         self.assertEqual(self.send('capabilities'), {'protocol': 1, 'ok': True, 'result': 'capabilities', 'actions': actions,
-                                                    'core': True, 'max_panes': 5, 'max_faces': 2})
+                                                    'core': True, 'max_panes': 5, 'max_faces': 2, 'one_face': False})
+        # Definitions of one face follow the core's restore under a cover.
+        self.ipc.snapshot['restore_cover'] = True
+        self.assertEqual(self.send('capabilities')['one_face'], True)
+        self.ipc.snapshot['restore_cover'] = 'yes'
+        self.assertEqual(self.send('capabilities')['one_face'], False)
+        del self.ipc.snapshot['restore_cover']
         self.ipc.snapshot['container_max_faces'] = 6
         self.assertEqual(self.send('capabilities')['max_faces'], 6)
         self.ipc.snapshot.pop('card_ungroup')
@@ -1815,7 +1844,7 @@ class UnattendedTest(unittest.TestCase):
         # No core loaded is an answer as well.
         with patch.object(self.ipc, 'status', side_effect=setup.CoreUnavailable('Hyprflip is unavailable. Load the container plugin.')):
             self.assertEqual(self.send('capabilities'), {'protocol': 1, 'ok': True, 'result': 'capabilities', 'actions': actions,
-                                                        'core': False, 'max_panes': 0, 'max_faces': 2})
+                                                        'core': False, 'max_panes': 0, 'max_faces': 2, 'one_face': False})
         # Not reaching Hyprland is no answer: the caller tries again soon instead of waiting for another core.
         for failure in (setup.SetupError('Hyprland is not responding.'), OSError('hyprctl'),
                         subprocess.TimeoutExpired('hyprctl', 10)):
@@ -1824,6 +1853,250 @@ class UnattendedTest(unittest.TestCase):
                 self.assertEqual((reply['ok'], reply['code']), (False, 'hyprland'))
         self.assertEqual(self.send('capabilities', store=self.store)['code'], 'invalid_request')
         self.assertEqual(self.ipc.mutations, [])
+
+    # Definitions of one face: a card under a cover, or tiles beside the caller's own window.
+
+    def one(self, launcher=True):
+        """OmaRelay's definition of one face: the workspace browser over its terminal, behind Herdr's window."""
+        terminal = self.app('omarelay.terminal.acme', 'Workspace terminal')
+        notes = self.app('obsidian', 'Obsidian') | ({'desktop_id': 'obsidian.desktop'} if launcher else {})
+        return {'faces': [{'apps': [self.app('omarelay-acme', 'Workspace browser'), terminal, notes], 'axis': 'vertical',
+                           'ratios': [.5, .3, .2], 'focus': 0}], 'active': 0}
+
+    def covering(self, **fields):
+        """An open of the stored definition of one face under Herdr's window 0xa, binding the parked browser and terminal."""
+        self.ipc.snapshot['restore_cover'] = True
+        return self.opening(one_face=True, cover='0xa', launch=False) | fields
+
+    def test_open_with_a_cover_builds_under_it_in_one_batch_from_its_tile(self):
+        self.park(); self.keep('acme', self.one(), one_face=True)
+        working, pointer = deepcopy(self.ipc.clients['0xa']), list(self.ipc.pointer)
+        reply = self.send('open', **self.covering())
+        self.assertEqual((reply['result'], reply['card'], reply['token'], reply['focus_returned']),
+                         ('opened', 10, setup.digest(self.one()), True))
+        self.assertEqual([[slot.get('address'), slot.get('missing')] for slot in reply['slots'][0]],
+                         [['0xb', None], ['0xc', None], [None, 'not_launched']])
+        # The apps come to the workspace, then the card is built under the cover, in the cover's tile.
+        moves = tuple(f'dispatch hl.dsp.window.move({{window="address:{a}",workspace="2",follow=false}})' for a in ('0xb', '0xc'))
+        self.assertEqual(self.batches(), [moves + ('hyprflip restore quiet tiled 0 0 0 0 600 700 front vertical 0xb '
+                                                   '0xb:0.625 0xc:0.375 cover 0xa',)])
+        card = self.ipc.snapshot['containers'][0]
+        self.assertEqual((card['faces'], card['cover'], card['covered']), ([['0xb', '0xc']], '0xa', True))
+        # The cover never moves, and the keyboard, the workspace and the pointer stay.
+        self.assertFalse(any(MOVE.fullmatch(c) and '0xa' in c for c in self.batches()[0]))
+        self.assertEqual(self.focusing(), [])
+        self.assertEqual((self.ipc.active, self.ipc.workspace, self.ipc.pointer, self.ipc.clients['0xa']['workspace']),
+                         ('0xa', 2, pointer, working['workspace']))
+        # Two faces of their own open under a cover too, and a floating definition is tiled under one.
+        self.ipc = QuietIPC(); self.ipc.env = self.env; self.park()
+        self.ipc.snapshot['container_max_faces'] = 6
+        floating = self.acme() | {'floating': True}
+        self.keep('acme', floating)
+        reply = self.send('open', **self.covering(one_face=False))
+        self.assertEqual(reply['result'], 'opened', reply)
+        self.assertEqual(self.batches()[0][-1], 'hyprflip restore quiet tiled 0 0 0 0 600 700 front horizontal 0xb 0xb:1 '
+                                                'back vertical 0xc 0xc:1 cover 0xa')
+
+    def test_open_never_binds_or_counts_the_cover_and_counts_it_as_a_face(self):
+        self.park()
+        # An app of the herdr class in the definition: the cover is no copy of it open elsewhere.
+        recipe = self.one(launcher=False)
+        recipe['faces'][0]['apps'][2] = self.app('herdr', 'Herdr')
+        self.keep('acme', recipe, one_face=True)
+        reply = self.send('open', **self.covering(bind=['0xb']))
+        self.assertEqual([slot.get('missing') for slot in reply['slots'][0]], [None, 'owned', 'not_launched'])
+        self.assertEqual(reply['unused'], [])
+        # Without the cover, the same window is a copy open elsewhere.
+        self.ipc = QuietIPC(); self.ipc.env = self.env; self.park()
+        self.ipc.snapshot['restore_cover'] = True
+        reply = self.send('open', **self.opening(one_face=True, tiles=True, bind=['0xb'], launch=False))
+        self.assertEqual([slot.get('missing') for slot in reply['slots'][0]], [None, 'owned', 'open_elsewhere'])
+        # The cover takes a face: a definition of two faces and a cover is three, more than a core of two holds.
+        self.ipc = QuietIPC(); self.ipc.env = self.env; self.park()
+        self.keep('two', self.acme())
+        reply = self.send('open', **self.covering(name='two'))
+        self.assertEqual((reply['code'], self.ipc.mutations), ('too_many_faces', []))
+        # The cover is never bound, nor bound with tiles.
+        for fields in ({'bind': ['0xa', '0xb']}, {'tiles': True}, {'tiles': False, 'bind': ['0xb', '0xa']}):
+            with self.subTest(fields=fields):
+                self.assertEqual(self.send('open', **self.covering(**fields))['code'], 'invalid_request')
+        self.assertEqual(self.ipc.mutations, [])
+
+    def test_open_with_a_cover_needs_a_core_that_restores_under_one_and_a_free_cover(self):
+        self.park(); self.keep('acme', self.one(), one_face=True)
+        fields = self.covering()
+        del self.ipc.snapshot['restore_cover']
+        self.assertEqual(self.send('open', **fields)['code'], 'unavailable')
+        self.ipc.snapshot['restore_cover'] = True
+        # On another workspace, gone, in a card or fullscreen: the cover is not free.
+        def elsewhere(): self.ipc.clients['0xa']['workspace'] = {'id': 3, 'name': '3'}
+        def gone(): self.ipc.clients['0xe'] = window('0xe'); fields['cover'] = '0xe'; del self.ipc.clients['0xe']
+        def grouped(): self.ipc.clients['0xa']['grouped'] = ['0xa', '0xd']
+        def covers(): self.ipc.snapshot['containers'] = [{'id': 4, 'faces': [['0xd']], 'cover': '0xa'}]
+        for change, code in ((elsewhere, 'changed'), (gone, 'changed'), (grouped, 'in_card'), (covers, 'in_card')):
+            with self.subTest(change=change.__name__):
+                self.ipc = QuietIPC(); self.ipc.env = self.env; self.park(); self.ipc.snapshot['restore_cover'] = True
+                fields = self.covering()
+                change()
+                self.assertEqual(self.send('open', **fields)['code'], code)
+                self.assertEqual(self.ipc.mutations, [])
+
+    def test_open_with_a_cover_that_changed_under_the_lock_is_changed(self):
+        def new_pid(): self.ipc.clients['0xa']['pid'] = 4242
+        def moved(): self.ipc.clients['0xa']['workspace'] = {'id': 3, 'name': '3'}
+        def carded(): self.ipc.clients['0xa']['grouped'] = ['0xa', '0xd']
+        for change in (new_pid, moved, carded):
+            with self.subTest(change=change.__name__):
+                Path(self.store).unlink(missing_ok=True)
+                self.ipc = QuietIPC(); self.ipc.env = self.env; self.park(); self.keep('acme', self.one(), one_face=True)
+                self.arrivals['obsidian.desktop'] = ('0x30', 'obsidian', .2)
+                self.ipc.at(.1, change)
+                reply = self.send('open', **self.covering(launch=True))
+                self.assertEqual((reply['code'], reply['labels']), ('changed', ['herdr']))
+                self.assertEqual([m for m in self.ipc.mutations if m[0] != 'call'], [])
+
+    def test_a_definition_of_one_face_needs_a_cover_or_tiles(self):
+        self.park(); self.keep('acme', self.one(), one_face=True)
+        reply = self.send('open', **self.opening(one_face=True))
+        self.assertEqual((reply['code'], reply['message']), ('needs_cover', 'A card of one face opens only under a cover window.'))
+        # Without the flag the caller's view has no such definition, and an inline one is no request.
+        self.assertEqual(self.send('open', **self.opening())['code'], 'not_found')
+        self.assertEqual(self.send('open', recipe=self.one(), workspace=2, bind=['0xb'])['code'], 'invalid_request')
+        self.assertEqual((self.ipc.mutations, self.launched), ([], []))
+        flow = setup.Unattended(self.ipc, self.store, one_face=True)
+        with self.assertRaises(setup.Unfinished) as stop:
+            flow.open({'workspace': 2, 'recipe': self.one(), 'bind': ['0xb']}, lambda: False)
+        self.assertEqual(stop.exception.code, 'needs_cover')
+
+    def test_tiles_bind_and_launch_but_move_and_group_nothing(self):
+        self.park(); self.keep('acme', self.one(), one_face=True)
+        for address in ('0xb', '0xc'): self.ipc.clients[address]['workspace'] = {'id': 2, 'name': '2'}
+        self.arrivals['obsidian.desktop'] = ('0x30', 'obsidian', .2)
+        reply = self.send('open', **self.opening(one_face=True, tiles=True))
+        self.assertEqual(set(reply), {'protocol', 'ok', 'result', 'token', 'slots', 'launched', 'unused', 'remembered'})
+        self.assertEqual((reply['result'], reply['unused'], reply['remembered']), ('tiles', [], True))
+        self.assertEqual([slot['address'] for slot in reply['slots'][0]], ['0xb', '0xc', '0x30'])
+        self.assertEqual([(row['desktop_id'], row['address']) for row in reply['launched']], [('obsidian.desktop', '0x30')])
+        # No batch, no move, no restore and no lease: only the keyboard came back from the launched app.
+        self.assertEqual(self.batches(), [])
+        self.assertEqual([m for m in self.ipc.mutations if m[0] != 'call'], [])
+        self.assertEqual((self.ipc.snapshot['containers'], self.ipc.active), ([], '0xa'))
+        # A definition of one face stays in one_face when its launched app is remembered.
+        cards, one_face = self.maps()
+        self.assertEqual((cards, reply['token']), ({}, setup.digest(one_face['acme'])))
+        self.assertEqual(one_face['acme']['faces'][0]['apps'][2]['desktop_id'], 'obsidian.desktop')
+        # Two faces can come as tiles too, and an inline definition of one face may.
+        self.ipc = QuietIPC(); self.ipc.env = self.env; self.park()
+        reply = self.send('open', recipe=self.one(), workspace=2, bind=['0xb', '0xc'], tiles=True, launch=False)
+        self.assertEqual((reply['result'], reply['token']), ('tiles', None))
+        self.assertEqual(self.batches(), [])
+
+    def covered_card(self):
+        """A live covered card with one face of its own, id 10: the workspace browser and terminal under Herdr's window."""
+        clients = self.ipc.clients
+        for address, name in (('0xb', 'omarelay-acme'), ('0xc', 'omarelay.terminal.acme')):
+            clients[address].update({'class': name, 'initialClass': name})
+        clients['0xa'].update({'class': 'herdr', 'initialClass': 'herdr'})
+        return self.ipc.add_card([['0xb', '0xc']], layouts=[dict(axis='vertical', focused='0xb', ratios=[.6, .4])], cover='0xa')
+
+    def one_saved(self):
+        return {'faces': [{'apps': [self.app('omarelay-acme', 'omarelay-acme'),
+                                    self.app('omarelay.terminal.acme', 'omarelay.terminal.acme')],
+                           'axis': 'vertical', 'ratios': [.6, .4], 'focus': 0}], 'active': 0}
+
+    def test_save_of_a_card_with_one_face_of_its_own_needs_the_one_face_view(self):
+        self.covered_card()
+        fields = self.saving(members=['0xb', '0xc'])
+        reply = self.send('save', **fields)
+        self.assertEqual((reply['code'], reply['message']), ('one_face_store', 'This store keeps cards of two faces or more.'))
+        self.assertFalse(Path(self.store).exists())
+        # Its definition of two faces stays, and an older caller's view keeps reading it.
+        self.keep('acme', self.acme())
+        before = Path(self.store).read_bytes()
+        reply = self.send('save', **fields | {'previous': setup.digest(self.acme())})
+        self.assertEqual(reply['code'], 'one_face_store')
+        self.assertEqual(Path(self.store).read_bytes(), before)
+        reply = self.send('save', **fields | {'previous': setup.digest(self.acme()), 'one_face': True})
+        self.assertEqual((reply['result'], reply['token']), ('saved', setup.digest(self.one_saved())))
+        self.assertEqual(self.maps(), ({'acme': self.acme()}, {'acme': self.one_saved()}))
+        listed = self.send('list', store=self.store, one_face=True)['cards']['acme']
+        self.assertEqual((listed['token'], len(listed['faces'])), (reply['token'], 1))
+        self.assertEqual(self.send('list', store=self.store)['cards']['acme']['token'], setup.digest(self.acme()))
+        # Saving it again changes nothing; an older caller's delete removes both.
+        again = self.send('save', **fields | {'previous': reply['token'], 'one_face': True})
+        self.assertEqual((again['result'], again['token']), ('unchanged', reply['token']))
+        self.assertEqual(self.send('delete', store=self.store, name='acme', token=setup.digest(self.acme()))['result'], 'deleted')
+        self.assertEqual(self.maps(), ({}, {}))
+        self.assertEqual((self.ipc.mutations, self.focusing()), ([], []))
+
+    def test_put_writes_a_definition_with_no_card(self):
+        fields = {'store': self.store, 'name': 'acme', 'recipe': self.acme(), 'previous': None}
+        reply = self.send('put', **fields)
+        token = setup.digest(self.acme())
+        self.assertEqual(reply, {'protocol': 1, 'ok': True, 'result': 'saved', 'name': 'acme', 'token': token, 'dropped': [],
+                                 'slots': [[self.slot_of(app) for app in face['apps']] for face in self.acme()['faces']]})
+        self.assertEqual(self.stored(), {'acme': self.acme()})
+        self.assertEqual(self.send('put', **fields | {'previous': token})['result'], 'unchanged')
+        before = Path(self.store).read_bytes()
+        for previous in (None, '0' * 64):
+            with self.subTest(previous=previous):
+                self.assertEqual(self.send('put', **fields | {'previous': previous})['code'], 'conflict')
+        self.assertEqual(self.send('put', **fields | {'name': 'other', 'previous': token})['code'], 'conflict')
+        # One face only in the one_face view, and never with a title.
+        self.assertEqual(self.send('put', **fields | {'recipe': self.one(), 'previous': token})['code'], 'invalid_request')
+        self.assertEqual(self.send('put', **fields | {'recipe': self.acme('Inbox'), 'previous': token})['code'], 'invalid_request')
+        self.assertEqual(Path(self.store).read_bytes(), before)
+        flow = setup.Unattended(self.ipc, self.store)
+        with self.assertRaises(setup.Unfinished) as stop:
+            flow.put({'name': 'acme', 'recipe': self.one(), 'previous': token}, lambda: False)
+        self.assertEqual(stop.exception.code, 'one_face_store')
+        self.assertEqual(Path(self.store).read_bytes(), before)
+        reply = self.send('put', **fields | {'recipe': self.one(), 'previous': token, 'one_face': True})
+        self.assertEqual((reply['result'], reply['token']), ('saved', setup.digest(self.one())))
+        self.assertEqual(self.maps(), ({'acme': self.acme()}, {'acme': self.one()}))
+        # Two faces again pop the definition of one face.
+        reply = self.send('put', **fields | {'previous': reply['token'], 'one_face': True})
+        self.assertEqual((reply['result'], self.maps()), ('saved', ({'acme': self.acme()}, {})))
+        self.assertEqual((self.ipc.log, self.launched), ([], []))
+
+    @staticmethod
+    def slot_of(app):
+        return {'class': app['class'], 'initial_class': app['initial_class'], 'label': app['label'],
+                'launcher': 'desktop_id' in app, 'address': None}
+
+    def test_requests_check_the_new_fields(self):
+        self.park()
+        invalid = [('list', {'store': self.store, 'one_face': 1}),
+                   ('delete', {'store': self.store, 'name': 'acme', 'token': '0' * 64, 'one_face': 'yes'}),
+                   ('open', self.opening(cover='0xa', tiles=True)),
+                   ('open', self.opening(cover='0xb')),
+                   ('open', self.opening(cover='a')),
+                   ('open', self.opening(cover=None)),
+                   ('open', self.opening(tiles=1)),
+                   ('open', {'recipe': self.one(), 'workspace': 2, 'bind': ['0xb']}),
+                   ('open', {'recipe': self.one(), 'workspace': 2, 'bind': ['0xb'], 'tiles': False}),
+                   ('open', self.opening(cover='0xa', bind='0xa')),
+                   ('save', self.saving(cover='0xa')),
+                   ('save', self.saving(base=self.one())),
+                   ('save', self.saving(tiles=True)),
+                   ('put', {'store': self.store, 'name': 'acme', 'recipe': self.acme()}),
+                   ('put', {'store': self.store, 'name': 'acme', 'recipe': self.acme(), 'previous': 'x'}),
+                   ('put', {'store': self.store, 'name': 'acme', 'recipe': self.acme(), 'previous': None, 'bind': []}),
+                   ('put', {'name': 'acme', 'recipe': self.acme(), 'previous': None}),
+                   ('capabilities', {'one_face': True})]
+        for action, fields in invalid:
+            with self.subTest(action=action, fields=sorted(fields)):
+                self.assertEqual(self.send(action, **fields)['code'], 'invalid_request')
+        self.assertEqual(self.send('put', name='acme', recipe=self.acme(), previous=None, store='/tmp/x.json')['code'],
+                         'invalid_store')
+        self.assertEqual(self.ipc.log, [])
+        # A base of one face for a caller with the one_face view, and inline ones of one face under a cover or as tiles.
+        self.assertNotEqual(self.send('save', **self.saving(base=self.one(), one_face=True)).get('code'), 'invalid_request')
+        for fields in ({'cover': '0xa'}, {'tiles': True}):
+            with self.subTest(fields=fields):
+                self.ipc.snapshot['restore_cover'] = True
+                reply = self.send('open', recipe=self.one(launcher=False), workspace=2, bind=['0xb'], launch=False, **fields)
+                self.assertNotEqual(reply.get('code'), 'invalid_request')
 
 
 class SharedExtractionsTest(unittest.TestCase):

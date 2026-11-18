@@ -2709,6 +2709,8 @@ class Unfinished(Exception):
         'unavailable': 'Cards cannot open here. Load a Hyprflip core with native cards and card ungroup.',
         'unsupported_workspace': 'Cards open on numbered dwindle workspaces only.',
         'too_many_faces': 'This card has more faces than the loaded Hyprflip core can hold.',
+        'needs_cover': 'A card of one face opens only under a cover window.',
+        'one_face_store': 'This store keeps cards of two faces or more.',
         'fullscreen': 'Leave fullscreen, then try again.',
         'incomplete': 'A side of the card has no app to show.',
         'in_card': 'That app already belongs to a card or group.',
@@ -2746,9 +2748,11 @@ class Unattended(Saved):
     the workspace and the pointer where they are. The store is the caller's own
     file, which never keeps a window title.
     """
-    def __init__(self, ipc, store_path):
+    def __init__(self, ipc, store_path, one_face=False):
         super().__init__(ipc, NoMenu())
         self.store_path = store_path
+        # A caller that knows definitions of one face sees them; any other sees cards alone, as before.
+        self.one_face = one_face is True
         self.env = ipc.env if getattr(ipc, 'env', None) is not None else os.environ
 
     @property
@@ -2756,7 +2760,7 @@ class Unattended(Saved):
         # Never the user's library: the caller's own file, which run_unattended
         # accepted with valid_path, or none at all.
         if self.store_path is None: raise Unfinished('invalid_store')
-        return RecipeStore(path=self.store_path, titles=False)
+        return RecipeStore(path=self.store_path, titles=False, one_face=self.one_face)
 
     @staticmethod
     def token(recipe):
@@ -2776,6 +2780,14 @@ class Unattended(Saved):
         """
         return {a: w for a, w in self.eligible(windows, state, special=True).items()
                 if w['workspace']['id'] > 0 or SPECIAL_NAME.fullmatch(w['workspace'].get('name', ''))}
+
+    @staticmethod
+    def held(state):
+        """Windows in a card, as an app or its cover, or in a pair."""
+        held = {a for card in state.get('containers', []) for face in card['faces'] for a in face}
+        held.update(card['cover'] for card in state.get('containers', []) if card.get('cover'))
+        held.update(a for pair in state.get('pairs', []) for a in (pair['front'], pair['back']))
+        return held
 
     @staticmethod
     def no_warp(focus):
@@ -2877,6 +2889,14 @@ class Unattended(Saved):
         except (SetupError, OSError) as error:
             raise Unfinished('store_unreadable') from error
 
+    def names(self):
+        """Every name the store keeps, in either map, whatever the view: the limit of 100 counts them all."""
+        try:
+            cards, one_face = self.store.read_both()
+        except (SetupError, OSError) as error:
+            raise Unfinished('store_unreadable') from error
+        return cards.keys() | one_face.keys()
+
     def write(self, name, stored, recipe):
         """Replaces the definition that was read as stored, or removes it with None."""
         try:
@@ -2885,10 +2905,12 @@ class Unattended(Saved):
             # The store says why only in words; reading it again gives the caller a code.
             try:
                 current = self.store.read()
+                cards, one_face = self.store.read_both()
             except (SetupError, OSError):
                 raise Unfinished('store_unreadable') from error
             if current.get(name) != stored: raise Unfinished('conflict') from error
-            if stored is None and recipe is not None and len(current) >= 100: raise Unfinished('limit') from error
+            names = cards.keys() | one_face.keys()
+            if recipe is not None and name not in names and len(names) >= 100: raise Unfinished('limit') from error
             raise Unfinished('store_unreadable') from error
 
     @staticmethod
@@ -2925,11 +2947,14 @@ class Unattended(Saved):
             state = {}  # No core loaded is an answer too: no cards. Not reaching Hyprland is not.
         state = state if isinstance(state, dict) else {}
         panes = state.get('container_max_panes')
-        return {'result': 'capabilities', 'actions': ['capabilities', 'list', 'delete', 'open', 'save'],
+        return {'result': 'capabilities', 'actions': ['capabilities', 'list', 'delete', 'open', 'save', 'put'],
                 'core': state.get('native_cards') is True and state.get('card_ungroup') is True,
                 'max_panes': panes if type(panes) is int else 0,
                 # The most faces a card may have, a cover included: 2 on cores that do not say.
-                'max_faces': max_faces(state)}
+                'max_faces': max_faces(state),
+                # Definitions of one face: the one_face view, open with cover or tiles, needs_cover,
+                # saving a card of one face of its own, and put. A cover needs a core that restores under one.
+                'one_face': state.get('restore_cover') is True}
 
     def listing(self, name=None):
         cards = self.cards()
@@ -2981,9 +3006,16 @@ class Unattended(Saved):
         return stranded or None
 
     def open(self, request, cancelled):
-        """Builds a definition's card from the windows the caller binds and the apps it may launch."""
+        """Builds a definition's card from the windows the caller binds and the apps it may launch.
+
+        With cover, the card is built under that window, which stays where it is and is never bound, moved or
+        counted as an app open elsewhere; the definition may then have one face. With tiles, the windows are
+        bound and the missing apps launched, but nothing moves and no card is made: the caller arranges them.
+        """
         lock_ms, workspace = request.get('lock_ms', 5000), request['workspace']
         bind, owned = request.get('bind', []), set(request.get('owned', []))
+        cover, tiles = request.get('cover'), request.get('tiles') is True
+        if cover is not None and (tiles or cover in bind): raise Unfinished('invalid_request')
         apps, chosen, missing, launchers, processes = [], [], {}, {}, {}
         try:
             with self.locked(lock_ms, cancelled):
@@ -2992,12 +3024,19 @@ class Unattended(Saved):
                 focus = request.get('focus') or self.ipc.data('-j', 'activewindow').get('address')
                 state = self.ipc.status()
                 if not (state.get('native_cards') and state.get('card_ungroup')): raise Unfinished('unavailable')
+                if cover is not None and state.get('restore_cover') is not True: raise Unfinished('unavailable')
                 layouts = {w['id']: w['tiledLayout'] for w in self.ipc.data('-j', 'workspaces')}
                 if layouts.get(workspace) != 'dwindle' or not card_layout_available(state, 'dwindle'):
                     raise Unfinished('unsupported_workspace')
                 windows = self.ipc.windows()
                 if any(w.get('fullscreen') and w['workspace']['id'] == workspace for w in windows.values()):
                     raise Unfinished('fullscreen')
+                # The cover: on the workspace, in no card, pair or group, and not fullscreen.
+                covering = deepcopy(windows.get(cover)) if cover is not None else None
+                if cover is not None:
+                    if covering is None or covering['workspace']['id'] != workspace: raise Unfinished('changed')
+                    if cover in self.held(state) or covering.get('grouped'): raise Unfinished('in_card', [app_name(covering)])
+                    if covering.get('fullscreen'): raise Unfinished('fullscreen')
                 name, stored, token = request.get('name'), None, None
                 if name is not None:
                     stored = self.cards().get(name)
@@ -3005,7 +3044,9 @@ class Unattended(Saved):
                     token = self.token(stored)
                 # A workspace the definition names is ignored: the card opens on the requested one.
                 recipe = RecipeStore.untitled(request['recipe'] if name is None else stored)
-                if len(recipe['faces']) > max_faces(state): raise Unfinished('too_many_faces')
+                # A cover takes a face of the card's.
+                if len(recipe['faces']) + (cover is not None) > max_faces(state): raise Unfinished('too_many_faces')
+                if len(recipe['faces']) == 1 and cover is None and not tiles: raise Unfinished('needs_cover')
                 places = self.places(recipe)
                 apps = [app for face in recipe['faces'] for app in face['apps']]
                 chosen = [None] * len(apps)
@@ -3029,7 +3070,7 @@ class Unattended(Saved):
                 def unfilled(index):
                     app = apps[index]
                     if {app['class'], app['initial_class']} & owned: missing[index] = 'owned'
-                    elif any(self.same_app(app, w) for a, w in windows.items() if a not in bind):
+                    elif any(self.same_app(app, w) for a, w in windows.items() if a not in bind and a != cover):
                         missing[index] = 'open_elsewhere'
                     elif not request.get('launch', True): missing[index] = 'not_launched'
                     elif entry := catalog.infer(app, by_label=False): launchers[index] = entry
@@ -3112,50 +3153,62 @@ class Unattended(Saved):
 
             # 6. The commit, under the lock again. A signal stops it until the batch goes out.
             if cancelled(): raise Unfinished('cancelled')
+            card, focus_returned = None, None
             with self.locked(lock_ms, cancelled):
                 if cancelled(): raise Unfinished('cancelled')
                 if name is not None and ((now := self.cards().get(name)) is None or self.token(now) != token):
                     raise Unfinished('conflict')
                 windows, state = self.ipc.windows(), self.ipc.status()
                 available = self.bindable(windows, state)
-                changed = [a for a, w in selected.items() if a not in available or
+                changed = [app_name(w) for a, w in selected.items() if a not in available or
                            any(windows[a].get(k) != w.get(k) for k in ('pid', 'class', 'workspace', 'floating'))]
-                if changed: raise Unfinished('changed', [app_name(selected[a]) for a in changed])
-                floating = bool(recipe.get('floating'))
-                box = self.box(arrangement, floating, workspace, windows)
-                # Recorded before the batch, so that apps can go back even when its reply is lost.
-                moved = [selected[a] for face in arrangement['faces'] for a in face['windows']
-                         if selected[a]['workspace']['id'] != workspace]
-                commands = [self.move_command(w['address'], workspace) for w in moved]
-                commands.append('hyprflip ' + self.restore_line(arrangement, box, floating))
-                tiled = []
-                with self.reserve(selected, state, workspace):
-                    try:
-                        self.tile_selected(selected, tiled)
-                        if cancelled(): raise Unfinished('cancelled')
-                    except (Unfinished, SetupError, OSError, subprocess.TimeoutExpired):
-                        # Nothing moved yet; the apps tiled for the card float again.
-                        if (stranded := self.roll_back([], workspace, tiled)) is not None:
-                            raise Unfinished('rollback_failed', stranded=stranded)
-                        raise
-                    # From here on a signal waits for the result: the batch may have moved apps.
-                    try:
-                        replies = self.ipc.batch(commands)
-                    except (SetupError, OSError, subprocess.TimeoutExpired):
-                        replies = None
-                    # 7. Status tells what happened, whatever the replies said.
-                    card = next((c for c in self.ipc.status().get('containers', [])
-                                 if {a for face in c['faces'] for a in face} == ours), None)
-                    if card is None:
-                        stranded = self.roll_back(moved, workspace, tiled)
-                        self.keep_keyboard(focus, ours)
-                        if stranded is not None: raise Unfinished('rollback_failed', stranded=stranded)
-                        if replies is None: raise Unfinished('hyprland')
-                        busy = len(replies) == len(commands) and replies[-1].startswith('error: Finish the active')
-                        raise Unfinished('busy' if busy else 'refused')
-                # 8. If the new card took the keyboard, it goes back. That never undoes the card.
-                focus_returned = self.keep_keyboard(focus, ours)
-                # 9. The launchers that brought an app are kept with the definition.
+                if cover is not None:
+                    # The cover is still the window that was checked, where it was, and in no card.
+                    now = windows.get(cover)
+                    if (now is None or any(now.get(k) != covering.get(k) for k in ('pid', 'class', 'workspace')) or
+                            cover in self.held(state) or now.get('grouped') or now.get('fullscreen')):
+                        changed.append(app_name(covering))
+                if changed: raise Unfinished('changed', changed)
+                if not tiles:
+                    # A covered card is tiled, in the cover's tile, whatever the definition says.
+                    floating = bool(recipe.get('floating')) and cover is None
+                    box = ([*windows[cover]['at'], *windows[cover]['size']] if cover is not None else
+                           self.box(arrangement, floating, workspace, windows))
+                    # Recorded before the batch, so that apps can go back even when its reply is lost.
+                    moved = [selected[a] for face in arrangement['faces'] for a in face['windows']
+                             if selected[a]['workspace']['id'] != workspace]
+                    commands = [self.move_command(w['address'], workspace) for w in moved]
+                    commands.append('hyprflip ' + self.restore_line(arrangement, box, floating, cover=cover))
+                    tiled = []
+                    with self.reserve(selected, state, workspace):
+                        try:
+                            self.tile_selected(selected, tiled)
+                            if cancelled(): raise Unfinished('cancelled')
+                        except (Unfinished, SetupError, OSError, subprocess.TimeoutExpired):
+                            # Nothing moved yet; the apps tiled for the card float again.
+                            if (stranded := self.roll_back([], workspace, tiled)) is not None:
+                                raise Unfinished('rollback_failed', stranded=stranded)
+                            raise
+                        # From here on a signal waits for the result: the batch may have moved apps.
+                        try:
+                            replies = self.ipc.batch(commands)
+                        except (SetupError, OSError, subprocess.TimeoutExpired):
+                            replies = None
+                        # 7. Status tells what happened, whatever the replies said. Status leaves a cover
+                        # out of the card's faces.
+                        card = next((c for c in self.ipc.status().get('containers', [])
+                                     if {a for face in c['faces'] for a in face} == ours), None)
+                        if card is None:
+                            stranded = self.roll_back(moved, workspace, tiled)
+                            self.keep_keyboard(focus, ours)
+                            if stranded is not None: raise Unfinished('rollback_failed', stranded=stranded)
+                            if replies is None: raise Unfinished('hyprland')
+                            busy = len(replies) == len(commands) and replies[-1].startswith('error: Finish the active')
+                            raise Unfinished('busy' if busy else 'refused')
+                    # 8. If the new card took the keyboard, it goes back. That never undoes the card, nor
+                    # turns it from its cover.
+                    focus_returned = self.keep_keyboard(focus, ours | ({cover} if cover is not None else set()))
+                # 9. The launchers that brought an app are kept with the definition, in the map it came from.
                 remembered, opened = {}, {i: launchers[i] for i in processes if chosen[i]}
                 if name is not None and opened:
                     update = RecipeStore.untitled(self.remember_opened(recipe, opened, chosen, selected))
@@ -3173,6 +3226,10 @@ class Unattended(Saved):
             # A Hyprland that answers without a core is no failure to reach it.
             code = 'unavailable' if isinstance(error, CoreUnavailable) else 'hyprland'
             raise Unfinished(code, launched=self.launches(apps, launchers, processes, chosen)) from error
+        if tiles:
+            # Bound and launched, where they are: the caller arranges them.
+            return {'result': 'tiles', 'token': token, 'slots': self.slots(recipe, chosen, missing),
+                    'launched': self.launches(apps, launchers, processes, chosen), 'unused': unused, **remembered}
         place = card.get('workspace') or {}
         return {'result': 'opened', 'card': card['id'], 'token': token,
                 'workspace': {'id': place.get('id', workspace), 'name': place.get('name', str(workspace)),
@@ -3232,8 +3289,11 @@ class Unattended(Saved):
             live = [a for face in card['faces'] for a in face]
             if set(live) != set(request['members']) or any(a not in windows for a in live): raise Unfinished('changed')
             if card.get('fullscreen') or any(windows[a].get('fullscreen') for a in live): raise Unfinished('fullscreen')
-            # 2. Its shape now, without titles. The caller may know better whether it floats.
+            # 2. Its shape now, without titles. The caller may know better whether it floats. A covered card
+            # with one face of its own captures as one face (status leaves the cover out), which only the
+            # one_face view keeps.
             recipe = self.capture(card, windows)
+            if len(recipe['faces']) < 2 and not self.one_face: raise Unfinished('one_face_store')
             if request.get('floating') is not None:
                 recipe.pop('floating', None)
                 if request['floating']: recipe['floating'] = True
@@ -3259,12 +3319,33 @@ class Unattended(Saved):
             if stored is not None and recipe == reference:
                 result, token = 'unchanged', request['previous']
             else:
-                if stored is None and len(cards) >= 100: raise Unfinished('limit')
+                if stored is None and name not in (names := self.names()) and len(names) >= 100: raise Unfinished('limit')
                 self.write(name, stored, recipe)
                 result, token = 'saved', self.token(recipe)
         return {'result': result, 'name': name, 'token': token, 'dropped': dropped,
                 'slots': [[self.slot(app, address=address) for app, address in zip(face['apps'], faces)]
                           for face, faces in zip(recipe['faces'], addresses)]}
+
+    def put(self, request, cancelled):
+        """Writes a definition the caller gives, with no card behind it: the apps a caller keeps as tiles beside its
+        own window, say. previous is the token of the definition it replaces, or None for a new name."""
+        name, previous = request['name'], request['previous']
+        with self.locked(request.get('lock_ms', 5000), cancelled):
+            stored = self.cards().get(name)
+            if previous is None:
+                if stored is not None: raise Unfinished('conflict')
+            elif stored is None or self.token(stored) != previous:
+                raise Unfinished('conflict')
+            recipe = RecipeStore.untitled(request['recipe'])
+            if len(recipe['faces']) < 2 and not self.one_face: raise Unfinished('one_face_store')
+            if stored is not None and recipe == RecipeStore.untitled(stored):
+                result, token = 'unchanged', previous
+            else:
+                if stored is None and name not in (names := self.names()) and len(names) >= 100: raise Unfinished('limit')
+                self.write(name, stored, recipe)
+                result, token = 'saved', self.token(recipe)
+        return {'result': result, 'name': name, 'token': token, 'dropped': [],
+                'slots': [[self.slot(app, address=None) for app in face['apps']] for face in recipe['faces']]}
 
 
 def notify(message):

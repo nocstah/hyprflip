@@ -624,11 +624,16 @@ def interrupt(*_):
 
 ADDRESS = re.compile(r'0x[0-9a-fA-F]{1,16}')
 # The fields each unattended action takes besides protocol and action, and those it needs.
-FIELDS = {'capabilities': set(), 'list': {'store', 'name'}, 'delete': {'store', 'name', 'token', 'lock_ms'},
-          'open': {'store', 'name', 'recipe', 'workspace', 'bind', 'owned', 'focus', 'launch', 'timeout_ms', 'lock_ms'},
-          'save': {'store', 'name', 'card', 'members', 'previous', 'base', 'keep', 'floating', 'owned', 'lock_ms'}}
+# one_face asks for the store's view with definitions of one face (capabilities says one_face).
+FIELDS = {'capabilities': set(), 'list': {'store', 'name', 'one_face'},
+          'delete': {'store', 'name', 'token', 'lock_ms', 'one_face'},
+          'open': {'store', 'name', 'recipe', 'workspace', 'bind', 'owned', 'focus', 'launch', 'timeout_ms', 'lock_ms',
+                   'one_face', 'cover', 'tiles'},
+          'save': {'store', 'name', 'card', 'members', 'previous', 'base', 'keep', 'floating', 'owned', 'lock_ms', 'one_face'},
+          'put': {'store', 'name', 'recipe', 'previous', 'one_face', 'lock_ms'}}
 REQUIRED = {'capabilities': set(), 'list': {'store'}, 'delete': {'store', 'name', 'token'},
-            'open': {'workspace'}, 'save': {'store', 'name', 'card', 'members', 'previous'}}
+            'open': {'workspace'}, 'save': {'store', 'name', 'card', 'members', 'previous'},
+            'put': {'store', 'name', 'recipe', 'previous'}}
 
 
 def unattended_request(payload, env):
@@ -640,13 +645,15 @@ def unattended_request(payload, env):
     def addresses(value, low):
         return (isinstance(value, list) and low <= len(value) <= 10 and len(set(map(str, value))) == len(value) and
                 all(isinstance(a, str) and ADDRESS.fullmatch(a) for a in value))
-    def untitled(recipe):
-        # A definition that travels in a request never carries a title.
+    def untitled(recipe, fewest=2):
+        # A definition that travels in a request never carries a title. One of one face goes only where
+        # the request can keep or open one.
         try:
-            w.RecipeStore.validate(recipe)
+            w.RecipeStore.validate(recipe, fewest)
         except (ValueError, KeyError, TypeError, AttributeError):
             return False
         return all(app['title'] == '' for face in recipe['faces'] for app in face['apps'])
+    def token(value): return isinstance(value, str) and re.fullmatch(r'[0-9a-f]{64}', value)
 
     if not isinstance(payload, dict) or type(payload.get('protocol')) is not int or payload['protocol'] != PROTOCOL:
         raise w.Unfinished('invalid_request')
@@ -655,6 +662,8 @@ def unattended_request(payload, env):
             REQUIRED[action] - set(payload)):
         raise w.Unfinished('invalid_request')
     get = payload.get
+    if 'one_face' in payload and type(payload['one_face']) is not bool: raise w.Unfinished('invalid_request')
+    one_face = get('one_face') is True
     if 'name' in payload and not w.RecipeStore.valid_name(payload['name']): raise w.Unfinished('invalid_name')
     if 'lock_ms' in payload and not number(payload['lock_ms'], 0, 30000): raise w.Unfinished('invalid_request')
     if 'owned' in payload and not (isinstance(payload['owned'], list) and len(payload['owned']) <= 8 and
@@ -666,7 +675,13 @@ def unattended_request(payload, env):
         # A stored definition by name, from the caller's store, or one in the request.
         if ('name' in payload) == ('recipe' in payload) or 'name' in payload and 'store' not in payload:
             raise w.Unfinished('invalid_request')
-        if 'recipe' in payload and not untitled(payload['recipe']): raise w.Unfinished('invalid_request')
+        # A cover window, never bound, or tiles; not both. Only these open a definition of one face.
+        if ('cover' in payload and not (isinstance(payload['cover'], str) and ADDRESS.fullmatch(payload['cover'])) or
+                'tiles' in payload and type(payload['tiles']) is not bool or
+                'cover' in payload and (get('tiles') is True or payload['cover'] in (get('bind') if isinstance(get('bind'), list) else []))):
+            raise w.Unfinished('invalid_request')
+        opens_one = 'cover' in payload or get('tiles') is True
+        if 'recipe' in payload and not untitled(payload['recipe'], 1 if opens_one else 2): raise w.Unfinished('invalid_request')
         if not number(payload['workspace'], 1, 2**31 - 1): raise w.Unfinished('unsupported_workspace')
         if ('bind' in payload and not addresses(payload['bind'], 0) or
                 get('focus') is not None and not (isinstance(payload['focus'], str) and ADDRESS.fullmatch(payload['focus'])) or
@@ -675,8 +690,8 @@ def unattended_request(payload, env):
     if action == 'save':
         previous, keep = payload['previous'], get('keep', [])
         if (not number(payload['card'], 1, 2**63 - 1) or not addresses(payload['members'], 1) or
-                previous is not None and not (isinstance(previous, str) and re.fullmatch(r'[0-9a-f]{64}', previous)) or
-                'base' in payload and (previous is not None or not untitled(payload['base'])) or
+                previous is not None and not token(previous) or
+                'base' in payload and (previous is not None or not untitled(payload['base'], 1 if one_face else 2)) or
                 get('floating') is not None and type(payload['floating']) is not bool):
             raise w.Unfinished('invalid_request')
         # Closed apps to keep, each by its place in the definition it replaces, which there must be.
@@ -684,6 +699,10 @@ def unattended_request(payload, env):
                 not all(isinstance(k, dict) and set(k) == {'face', 'index'} and number(k['face'], 0, w.RECIPE_MAX_FACES - 1) and
                         number(k['index'], 0, 4) for k in keep) or
                 len({(k['face'], k['index']) for k in keep}) != len(keep) or keep and previous is None and 'base' not in payload):
+            raise w.Unfinished('invalid_request')
+    if action == 'put':
+        previous = payload['previous']
+        if previous is not None and not token(previous) or not untitled(payload['recipe'], 1 if one_face else 2):
             raise w.Unfinished('invalid_request')
     # Never the library, nor a file anyone else could write or swap.
     if 'store' in payload and not w.RecipeStore.valid_path(payload['store'], env): raise w.Unfinished('invalid_store')
@@ -708,12 +727,13 @@ def run_unattended(raw, ipc, env):
             raise w.Unfinished('invalid_request') from error
         request = unattended_request(payload, env)
         if not env.get('XDG_RUNTIME_DIR') or not env.get('HYPRLAND_INSTANCE_SIGNATURE'): raise w.Unfinished('unavailable')
-        flow, action = w.Unattended(ipc, request.get('store')), request['action']
+        flow, action = w.Unattended(ipc, request.get('store'), one_face=request.get('one_face') is True), request['action']
         def cancelled(): return interrupted
         if action == 'capabilities': result = flow.capabilities()
         elif action == 'list': result = flow.listing(request.get('name'))
         elif action == 'delete': result = flow.delete(request['name'], request['token'], request.get('lock_ms', 5000), cancelled)
         elif action == 'open': result = flow.open(request, cancelled)
+        elif action == 'put': result = flow.put(request, cancelled)
         else: result = flow.save(request, cancelled)
         return {'protocol': PROTOCOL, 'ok': True, **result}, 0
     except w.Unfinished as stop:
