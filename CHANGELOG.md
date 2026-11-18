@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.0-rc.27 — 2026-11-18
 
 - A card can be marked with the program that manages it: `card <id> owner
   <name>` (`-` clears it), or `owner <name>` in the restore that builds it.

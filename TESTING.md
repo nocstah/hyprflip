@@ -69,6 +69,9 @@ the same against its rc.30 and rc.31 commits.
 Not run: `tests/menu_workflows.py` and the other compositor suites, which
 neither the mark nor the installer's handling of it reaches.
 
+Released from a3cbd8a. The release commit changes only the changelog, the
+README, the beta guide and this note.
+
 ## Parked cards through an update; release checks for 0.3.0-rc.26 (2026-11-18)
 
 An update used to take every card OmaRelay had parked on a special workspace
