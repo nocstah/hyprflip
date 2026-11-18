@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.0-rc.26 — 2026-11-18
 
 - An update with `scripts/install.py` keeps parked cards: the new core
   rebuilds a card on the special workspace it was parked on, unseen, with its

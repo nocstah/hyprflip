@@ -81,6 +81,10 @@ release tag, the result names the newest release the commit contains,
 Not run: the other compositor suites, which neither the core change (only
 quiet restores of apps on one special workspace) nor the installer reaches.
 
+Released from 725d907. No code changed after 5031715, the commit every check
+above ran on; the release commit changes only the changelog, the README and
+the beta guide.
+
 ## A covered card with one face of its own; release checks for 0.3.0-rc.25 (2026-11-18)
 
 When a close would leave a card behind Herdr's window with one face of its
