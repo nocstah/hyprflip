@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Updating the core with scripts/install.py keeps open native cards, leaves parked ones as separate windows,
+"""Updating the core with scripts/install.py keeps open native cards, parked ones too on their special workspace,
 and leaves the keyboard, the pointer and the monitors where they were, in a disposable compositor."""
 import argparse
 import json
@@ -132,7 +132,7 @@ def open_cards():
 class Moves:
     """Which workspaces came to be shown, by name, and which windows got the keyboard, as Hyprland's event socket said."""
     def __init__(self):
-        self.seen = []
+        self.seen, self.hyprflip = [], []
         events = Path(env['XDG_RUNTIME_DIR']) / 'hypr' / env['HYPRLAND_INSTANCE_SIGNATURE'] / '.socket2.sock'
         self.connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         self.connection.connect(str(events))
@@ -148,6 +148,8 @@ class Moves:
                     self.seen.append(line.removeprefix(b'workspace>>').decode())
                 elif line.startswith(b'activewindowv2>>'):
                     self.seen.append('0x' + line.removeprefix(b'activewindowv2>>').decode())
+                elif line.startswith(b'hyprflip>>'):
+                    self.hyprflip.append(line.decode())
 
 
 moves = None
@@ -164,10 +166,16 @@ def update(keyboard, corrects=None, tiles=True, focused=None):
     brings it along. The update says nothing of what is as it was.
     """
     before, at, monitors = open_cards(), pointer(), shown()
+    # Every card, a parked one included, is kept.
+    total = len(ipc.status()['containers'])
     assert active() == keyboard, (keyboard, active())
-    mark = len(moves.seen)
+    mark, events = len(moves.seen), len(moves.hyprflip)
     out = install()
-    assert f'Keeping {len(before)} open card(s)' in out, out
+    assert f'Keeping {total} open card(s)' in out, out
+    # Each update says so once on the event socket, with the release its result names.
+    written = json.loads((home / '.local/state/hyprflip/update-result.json').read_text())
+    wait(lambda: len(moves.hyprflip) > events)
+    assert moves.hyprflip[events:] == ['hyprflip>>updated,' + written['release']], moves.hyprflip[events:]
     time.sleep(.3)
     visits = moves.seen[mark:]
     print('update: pointer', at, pointer(), 'monitors', monitors, shown(), 'keyboard kept', active() == keyboard,
@@ -859,6 +867,8 @@ hl.config({{animations={{enabled=false}},general={{gaps_in=14,gaps_out=24}},inpu
     ipc.focused((parked[0], 'mark'), (parked[1], 'card'))
     hidden = next(card['id'] for card in ipc.status()['containers'] if parked[0] in sum(card['faces'], []))
     ipc.action(f'card {hidden} workspace special:park silent')
+    parked_card = next(card for card in ipc.status()['containers'] if card['id'] == hidden)
+    parked_faces, parked_active = parked_card['faces'], parked_card['active']
 
     ipc.call('dispatch', 'hl.dsp.focus({workspace=95})')
     # A neighbouring tile, so the card's place in the layout matters.
@@ -893,15 +903,38 @@ hl.config({{animations={{enabled=false}},general={{gaps_in=14,gaps_out=24}},inpu
     passed('an update keeps a tiled 70/30 card beside its neighbour and an unfolded floating card exactly as they were, '
            'and leaves the keyboard and the pointer where they were')
 
-    # The update rebuilt only those two: the parked card's apps stay where it
-    # was, as separate windows, for the program that parked it to rebuild.
-    assert 'Leaving 1 hidden card(s) as separate windows; the program that parked them rebuilds them.' in out, out
-    assert 'Could not keep a card' not in out, out
+    # The parked card is a card again, where it was, unseen: same faces, same face shown, its apps grouped.
+    assert 'Keeping 3 open card(s) through this update, 1 of them parked out of sight.' in out, out
+    assert 'hidden card' not in out and 'Could not keep a card' not in out, out
+    again = next(c for c in ipc.status()['containers'] if set(sum(c['faces'], [])) == set(parked))
+    assert (again['workspace']['name'], again['faces'], again['active']) == ('special:park', parked_faces, parked_active), again
     windows = ipc.windows()
-    for address in parked:
-        window = windows[address]
-        assert window['workspace']['name'] == 'special:park' and not window['grouped'] and window['acceptsInput'], (window['workspace'], window['grouped'], window['acceptsInput'])
-    passed('an update leaves a card parked on special:park as separate windows there and says how many')
+    assert all(windows[a]['workspace']['name'] == 'special:park' and windows[a]['grouped'] for a in parked), \
+        [(windows[a]['workspace'], windows[a]['grouped']) for a in parked]
+    # What a program that keeps cards reads: no marker, a result that lost nothing, and the core's event.
+    state = home / '.local/state/hyprflip'
+    assert not (state / 'updating').exists()
+    written = json.loads((state / 'update-result.json').read_text())
+    assert (written['ok'], written['kept'], written['apart']) == (True, 3, []), written
+    passed('an update keeps a card parked on special:park as a card there, with its faces and shown face, unseen; '
+           'writes what became of the cards, removes its marker and says so on the event socket')
+
+    # Brought back as its program does on a visit, it is laid out at once; then it goes back out of sight.
+    ipc.call('dispatch', 'hl.dsp.focus({workspace=96})')
+    reply = ipc.action(f"card {again['id']} workspace 96")
+    assert reply.startswith('ok'), reply
+    time.sleep(.3)
+    back = next(c for c in ipc.status()['containers'] if c['id'] == again['id'])
+    shown_face = back['faces'][back['active']]
+    windows = ipc.windows()
+    assert back['workspace']['name'] == '96' and all(windows[a]['workspace']['name'] == '96' for a in parked), back
+    # Its one shown app fills the card's width, and its height less at most a header.
+    width, height = windows[shown_face[0]]['size']
+    assert len(shown_face) == 1 and abs(width - (back['box'][2] - 4)) <= 4 and back['box'][3] - 40 <= height <= back['box'][3], \
+        (back['box'], windows[shown_face[0]]['at'], windows[shown_face[0]]['size'])
+    assert ipc.action(f"card {again['id']} workspace special:park silent").startswith('ok')
+    ipc.call('dispatch', 'hl.dsp.focus({workspace=95})')
+    passed('a parked card the update kept comes back to a workspace laid out as a card, and parks again')
 
     # A plain restore would give the last card rebuilt, the floating one, the
     # keyboard and show its workspace. With the keyboard on the other card's app
@@ -929,9 +962,9 @@ hl.config({{animations={{enabled=false}},general={{gaps_in=14,gaps_out=24}},inpu
     # on the desktop the pointer findings were measured on (only real pointer
     # motion moves the keyboard then, not a warp).
     assert ipc.data('-j', 'getoption', 'input:follow_mouse')['int'] == 1
-    tiled = next(c for c in ipc.status()['containers'] if not c['floating'])
+    tiled = next(c for c in ipc.status()['containers'] if not c['floating'] and not c['workspace']['special'])
     line, saved, described = card_restore.describe(tiled), tuple(tiled['box']), shape(tiled)
-    box = lambda: tuple(next(c for c in ipc.status()['containers'] if not c['floating'])['box'])
+    box = lambda: tuple(next(c for c in ipc.status()['containers'] if not c['floating'] and not c['workspace']['special'])['box'])
 
     def displace():
         # togglesplit and swapsplit act on the focused window.
@@ -949,7 +982,7 @@ hl.config({{animations={{enabled=false}},general={{gaps_in=14,gaps_out=24}},inpu
         point = rest(neighbor)
         # Over the neighbour's tile and neither card.
         assert not any(c['box'][0] <= point[0] < c['box'][0] + c['box'][2] and c['box'][1] <= point[1] < c['box'][1] + c['box'][3]
-                       for c in ipc.status()['containers']), (point, ipc.status()['containers'])
+                       for c in ipc.status()['containers'] if not c['workspace']['special']), (point, ipc.status()['containers'])
         if active() != keyboard:
             ipc.call('dispatch', w.Unattended.focus_command(keyboard))
             wait(lambda: active() == keyboard)
@@ -958,7 +991,7 @@ hl.config({{animations={{enabled=false}},general={{gaps_in=14,gaps_out=24}},inpu
         settled, after = box(), pointer()
         print('pointer', point, after, 'keyboard on the', 'card' if keyboard == current else 'neighbour', flush=True)
         assert all(abs(p - q) <= 4 for p, q in zip(settled, saved)), (saved, displaced, settled)
-        assert shape(next(c for c in ipc.status()['containers'] if not c['floating'])) == described
+        assert shape(next(c for c in ipc.status()['containers'] if not c['floating'] and not c['workspace']['special'])) == described
         assert after == point and active() == keyboard, (point, after, keyboard, active())
     passed('a tiled card displaced by a layout reflow is returned to its saved tile, and the keyboard and the pointer '
            'stay where they were')
@@ -977,7 +1010,7 @@ hl.config({{animations={{enabled=false}},general={{gaps_in=14,gaps_out=24}},inpu
     else:
         raise AssertionError('settle went on without the keyboard')
     assert (box(), tile(neighbor), pointer(), active()) == (displaced, beside, point, neighbor), (displaced, box(), beside, tile(neighbor))
-    assert shape(next(c for c in ipc.status()['containers'] if not c['floating'])) == described
+    assert shape(next(c for c in ipc.status()['containers'] if not c['floating'] and not c['workspace']['special'])) == described
     passed('a card that does not take the keyboard stays where it is, and no other tile moves')
 
     ipc.call('plugin', 'unload', str(library))

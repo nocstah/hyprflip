@@ -1111,7 +1111,15 @@ std::string fitProblem(const ContainerSnapshot &snapshot, bool floating) {
            px(own * available / std::max(1., needed)) + " px " + dimension +
            ". Float the card or close a window on this workspace, then open it again.";
 }
-uint64_t create(const ContainerSnapshot &snapshot, bool floating, bool focus, unsigned root) {
+uint64_t create(const ContainerSnapshot &snapshot, bool floating, bool focus, unsigned root, bool parked) {
+    // An app a card may take: as supports() says, or with parked, one on a special workspace too.
+    const auto usable = [parked](uintptr_t address) {
+        if (supports(address))
+            return true;
+        const auto w = parked ? resolve(address) : nullptr;
+        return w && !w->m_group && w->m_workspace && w->m_workspace->m_isSpecialWorkspace &&
+               !Fullscreen::controller()->isFullscreen(w);
+    };
     if (!canCreate(snapshot) || root >= snapshot.faces)
         return 0;
     auto c = std::make_shared<Card>();
@@ -1127,7 +1135,7 @@ uint64_t create(const ContainerSnapshot &snapshot, bool floating, bool focus, un
         c->vertical[s] = snapshot.vertical[s];
         c->names[s] = std::string(snapshot.names[s], strnlen(snapshot.names[s], CONTAINER_NAME_SIZE));
         for (unsigned i = 0; i < snapshot.count[s]; ++i) {
-            if (!supports(snapshot.windows[s][i]))
+            if (!usable(snapshot.windows[s][i]))
                 return 0;
             auto w = resolve(snapshot.windows[s][i]);
             if (c->side(w))

@@ -105,17 +105,32 @@ class BootstrapTest(unittest.TestCase):
         spec = importlib.util.spec_from_file_location("hyprflip_bootstrap", PROJECT / "scripts/bootstrap.py")
         bootstrap = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(bootstrap)
-        state = tempfile.TemporaryDirectory()
+        state, home = tempfile.TemporaryDirectory(), tempfile.TemporaryDirectory()
         self.addCleanup(state.cleanup)
+        self.addCleanup(home.cleanup)
+        # What the install put in place: the core, a helper, and a backup that is no part of it.
+        self.lib = Path(home.name) / ".local/lib/hyprflip"
+        self.lib.mkdir(parents=True)
+        for name, content in (("hyprflip.so", b"core"), ("control.py", b"helper"), ("control.py.bak-1", b"old")):
+            (self.lib / name).write_bytes(content)
         answers = {"rev-parse": (0, "b" * 40 + "\n"), "describe": describe}
         with patch.object(bootstrap, "run", lambda *command, **_: answers[command[1]]), \
-                patch.dict(os.environ, {"XDG_STATE_HOME": state.name}):
+                patch.dict(os.environ, {"XDG_STATE_HOME": state.name, "HOME": home.name}):
             (Path(state.name) / "hyprflip").mkdir()
             (Path(state.name) / "hyprflip/installed-release").write_text("0.1.0\n")
             self.assertEqual(bootstrap.record_commit(), "b" * 40)
         directory = Path(state.name) / "hyprflip"
         release = directory / "installed-release"
+        self.files = json.loads((directory / "installed-files.json").read_text())
         return (directory / "installed-commit").read_text(), release.read_text() if release.exists() else None
+
+    def test_install_records_each_installed_file(self):
+        import hashlib
+        self.record((0, "v0.3.0-rc.26\n"))
+        self.assertEqual(self.files["commit"], "b" * 40)
+        self.assertEqual(sorted(self.files["files"]), ["control.py", "hyprflip.so"])
+        core = self.files["files"]["hyprflip.so"]
+        self.assertEqual((core["sha256"], core["size"]), (hashlib.sha256(b"core").hexdigest(), 4))
 
     def test_install_records_the_release_it_contains(self):
         self.assertEqual(self.record((0, "v0.3.0-rc.16\n")), ("b" * 40 + "\n", "0.3.0-rc.16\n"))
@@ -135,6 +150,14 @@ class BootstrapTest(unittest.TestCase):
         self.assertEqual(self.core_step("Installed and loaded."), "Loaded")
         self.assertEqual(self.core_step("Keeping 2 open card(s) through this update.\nInstalled and loaded."),
                          "Loaded; kept 2 open card(s)")
+        # Parked cards are kept too, and counted; after a refusal the count could be wrong, so it is left out.
+        self.assertEqual(self.core_step("Keeping 8 open card(s) through this update, 6 of them parked out of sight.\n"
+                                        "Installed and loaded."),
+                         "Loaded; kept 8 open card(s), 6 of them parked")
+        self.assertEqual(self.core_step("Keeping 8 open card(s) through this update, 6 of them parked out of sight.\n"
+                                        "Could not keep a card; its apps stay open as separate windows: gone\n"
+                                        "Installed and loaded."),
+                         "Loaded; kept 7 open card(s); could not keep 1, whose apps stay open as separate windows")
         self.assertEqual(self.core_step("Keeping 2 open card(s) through this update.\n"
                                         "Leaving 1 hidden card(s) as separate windows; the program that parked them rebuilds them.\n"
                                         "Could not keep a card; its apps stay open as separate windows: gone\n"

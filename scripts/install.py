@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Install the built plugin and its Lua shortcuts for this user, with backups."""
 import argparse
+import contextlib
 import datetime
 import json
 import os
@@ -18,6 +19,12 @@ source = project / "build/hyprflip.so"
 home = Path.home()
 library = home / ".local/lib/hyprflip/hyprflip.so"
 recovery = library.with_suffix(".upgrade.json")
+state_dir = Path(os.environ.get("XDG_STATE_HOME") or home / ".local/state") / "hyprflip"
+# While it exists and its pid lives, a program that keeps cards (OmaRelay) leaves them alone: the update is
+# taking them apart and building them again. See docs/SCRIPTING.md, Updates and the programs that keep cards.
+marker = state_dir / "updating"
+# What became of the cards, written just before the marker goes.
+result = state_dir / "update-result.json"
 config_root = Path(os.environ.get("XDG_CONFIG_HOME", home / ".config")) / "hypr"
 module = config_root / "hyprflip.lua"
 main = config_root / "hyprland.lua"
@@ -61,10 +68,19 @@ installed = any(p["name"] == "hyprflip" for p in json.loads(ctl("-j", "plugin", 
 installed_state = json.loads(ctl("hyprflip", "status")) if installed else {}
 
 
+def parked(card):
+    return bool(card.get("workspace", {}).get("special"))
+
+
 def shown(containers):
-    # A card parked on a special workspace stays as separate windows: restore
-    # cannot rebuild it there, and the program that parked it rebuilds it.
-    return [card for card in containers if not card.get("workspace", {}).get("special")]
+    # The cards a monitor can show. A parked card never has a cover: it leaves it behind.
+    return [card for card in containers if not parked(card)]
+
+
+def keepable(containers):
+    # The cards an update rebuilds: the core rebuilds a parked one on its special workspace. A parked card
+    # that is fullscreen stays as separate windows there, for the program that parked it.
+    return [card for card in containers if not (parked(card) and card.get("fullscreen"))]
 
 
 containers = installed_state.get("containers", [])
@@ -80,7 +96,8 @@ saved_pairs = installed_state.get("pairs", [])
 # with one face of its own under its cover is no card without it: it keeps its
 # cover, which its description names, and is restored under it.
 covering = installed_state.get("card_cover")
-saved_cards = [describe(card) for card in cards]
+kept_cards = keepable(containers)
+saved_cards = [describe(card) for card in kept_cards]
 saved_covers = []
 if not saved_pairs and not containers and recovery.is_file():
     pending = json.loads(recovery.read_text())
@@ -91,7 +108,9 @@ if not saved_pairs and not containers and recovery.is_file():
 if saved_pairs:
     print(f"Preserving {len(saved_pairs)} existing pair(s) through this update.")
 if saved_cards:
-    print(f"Keeping {len(saved_cards)} open card(s) through this update.")
+    hidden = sum(1 for card in kept_cards if parked(card))
+    print(f"Keeping {len(saved_cards)} open card(s) through this update" +
+          (f", {hidden} of them parked out of sight" if hidden else "") + ".")
 def restored_under(item, lines):
     """Whether a card's description names its cover, so that the restore builds it under the cover again."""
     return any(line.split()[-2:] == ["cover", item["cover"]] for line in lines)
@@ -101,11 +120,42 @@ covers = (sum(1 for item in saved_covers if not restored_under(item, saved_cards
           sum(1 for card in cards if covering and card.get("cover") and not alone(card)))
 if covers:
     print(f"Taking the cover off {covers} card(s) for this update, and putting it back after.")
-if len(cards) < len(containers):
-    print(f"Leaving {len(containers) - len(cards)} hidden card(s) as separate windows; "
+if len(kept_cards) < len(containers):
+    print(f"Leaving {len(containers) - len(kept_cards)} hidden card(s) as separate windows; "
           "the program that parked them rebuilds them.")
 if args.dry_run:
     raise SystemExit(0)
+
+
+def release_name():
+    """The release this checkout is, as bootstrap.py records it, else the plugin's version."""
+    if (project / ".git").exists():
+        found = subprocess.run(["git", "-C", str(project), "describe", "--tags", "--abbrev=0", "--match", "v[0-9]*"],
+                               capture_output=True, text=True, timeout=10)
+        tag = found.stdout.strip()[1:]
+        if not found.returncode and re.fullmatch(r"\d+\.\d+\.\d+(?:-rc\.\d+)?", tag):
+            return tag
+    return version
+
+
+def hold_lock():
+    """The card helper's request lock, held for the whole update so that card menus and unattended requests
+    wait, or None outside a Hyprland session. Raises SystemExit, before anything changes, when it stays taken."""
+    runtime, instance = os.environ.get("XDG_RUNTIME_DIR"), os.environ.get("HYPRLAND_INSTANCE_SIGNATURE")
+    if not runtime or not instance:
+        return None
+    from workflow import Busy, Request
+    held = contextlib.ExitStack()
+    try:
+        held.enter_context(Request(Path(runtime), instance).exclusive(10))
+    except Busy:
+        raise SystemExit("A card menu or another program is changing cards. Close the menu or wait for it, "
+                         "then update again; nothing was changed.") from None
+    return held
+
+
+release = release_name()
+lock = hold_lock()
 
 stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
 originals = {p: p.read_bytes() if p.exists() else None for p in (library, module, main)}
@@ -122,6 +172,26 @@ def atomic(path, data):
     os.replace(temporary, path)
 
 
+def report(outcome, lines):
+    """Writes update-result.json: whether the update installed, how many cards were kept, and each card that came
+    apart with its apps as they are now. Never raises."""
+    try:
+        windows = {w["address"]: w for w in json.loads(ctl("-j", "clients"))}
+        apart = []
+        for members in ([sorted(apps(line)) for line in lines if line not in outcome["kept"]] if outcome["changed"]
+                        else []) + outcome["left"]:
+            present = [a for a in members if a in windows]
+            if present:
+                apart.append({"workspace": windows[present[0]].get("workspace", {}).get("name", ""),
+                              "apps": [{"address": a, "pid": windows[a].get("pid"), "class": windows[a].get("class", "")}
+                                       for a in present]})
+        kept = len(outcome["kept"]) if outcome["changed"] else len(lines)
+        atomic(result, json.dumps({"release": release, "finished_ms": int(time.time() * 1000), "ok": outcome["ok"],
+                                   "kept": kept, "apart": apart}).encode())
+    except Exception:
+        pass
+
+
 def keep(line, form="restore "):
     # A card whose apps closed or changed meanwhile stays as separate windows,
     # and the other cards are still kept.
@@ -130,10 +200,14 @@ def keep(line, form="restore "):
         print("Could not keep a card; its apps stay open as separate windows:", reply.removeprefix("error: "))
     return reply.startswith("ok:")
 
+# changed: the core was unloaded. kept: the lines rebuilt. left: the apps of cards the update never described.
+outcome = {"ok": False, "changed": False, "kept": [], "left": [[a for face in card["faces"] for a in face]
+                                                               for card in containers if card not in kept_cards]}
+atomic(marker, json.dumps({"pid": os.getpid(), "release": release, "started_ms": int(time.time() * 1000)}).encode())
 try:
     # Capture after settling: a turn may have been active when installation
     # began. Native groups retain geometry, focus and current side on unload.
-    # A card parked meanwhile stays out as well.
+    # A card parked meanwhile is kept as well.
     if installed:
         ctl("hyprflip", "finish")
         current = json.loads(ctl("hyprflip", "status"))
@@ -147,7 +221,10 @@ try:
                     raise SystemExit(f"A covered card kept its cover, so nothing was updated: {refused} "
                                      "Then update again.") from None
                 current = json.loads(ctl("hyprflip", "status"))
-            saved_cards = [describe(card) for card in shown(current["containers"])]
+            kept_now = keepable(current["containers"])
+            saved_cards = [describe(card) for card in kept_now]
+            outcome["left"] = [[a for face in card["faces"] for a in face]
+                               for card in current["containers"] if card not in kept_now]
     if saved_pairs or saved_cards:
         record = {"instance": os.environ.get("HYPRLAND_INSTANCE_SIGNATURE"), "pairs": saved_pairs, "cards": saved_cards}
         if saved_covers:
@@ -156,6 +233,7 @@ try:
     # Unloading the core drops the keyboard from most apps of a multi-app face.
     place = remember(ctl)
     if installed:
+        outcome["changed"] = True
         reply = ctl("plugin", "unload", str(library))
         if reply != "ok": raise RuntimeError(reply)
     atomic(library, source.read_bytes())
@@ -206,7 +284,8 @@ try:
     # the core it goes back to can be older than quiet restores and refuse them.
     # All of them first: a correction next to a card that is still loose tiles
     # resizes the wrong split and squeezes that card to a sliver.
-    kept = [line for line in saved_cards if keep(line, "restore quiet ")]
+    outcome["changed"] = True
+    kept = outcome["kept"] = [line for line in saved_cards if keep(line, "restore quiet ")]
     # A quiet restore leaves the keyboard where the unload left it, which can be
     # nowhere. It goes back before any correction, as each of those gives it back
     # where it found it, and a monitor put back there can hand it to someone else.
@@ -231,6 +310,7 @@ try:
     errors = ctl("configerrors")
     if errors: raise RuntimeError(errors)
     recovery.unlink(missing_ok=True)
+    outcome["ok"] = True
     print("Installed and loaded. Hyprland reports no configuration errors.")
 except Exception:
     # Restore exact user content if loading or validation fails.
@@ -248,9 +328,22 @@ except Exception:
             answer("hyprflip", "adopt", pair["front"], pair["back"])
         # Older cores lack restore; their cards stay as open windows and the
         # recovery file keeps them for the next successful update.
+        outcome["kept"] = []
         for line in saved_cards:
-            keep(line)
+            if keep(line):
+                outcome["kept"].append(line)
         cover_again(answer, saved_covers)
     except Exception:
         pass
     raise
+finally:
+    # Programs that keep cards read the result once the marker is gone; the core just loaded says so on socket2.
+    report(outcome, saved_cards)
+    marker.unlink(missing_ok=True)
+    if lock:
+        lock.close()
+    if outcome["ok"]:
+        try:
+            answer("hyprflip", "announce", "updated", release)
+        except Exception:
+            pass

@@ -264,6 +264,33 @@ class PanelControlTest(unittest.TestCase):
         self.assertEqual((card['active'], card['covered']), (1, True))
         self.assertNotIn('0xf', [p['address'] for f in card['faces'] for p in f['panes']])
 
+    def test_snapshot_says_a_card_has_a_cover_also_while_it_shows_its_own_face(self):
+        # The cover takes one of the card's faces, shown or not: a panel counts it before offering another face.
+        self.assertFalse(control.snapshot(self.ipc)['cards'][0]['has_cover'])
+        self.covered()
+        self.assertTrue(control.snapshot(self.ipc)['cards'][0]['has_cover'])
+        self.retarget(covered=False)
+        card = control.snapshot(self.ipc)['cards'][0]
+        self.assertEqual((card['covered'], card['has_cover']), (False, True))
+
+    def test_snapshot_says_whether_the_core_and_helpers_are_those_installed(self):
+        self.assertIsNone(control.snapshot(self.ipc)['install_check'])
+        home = Path(self.directory.name) / 'home'
+        lib = home / '.local/lib/hyprflip'
+        lib.mkdir(parents=True)
+        (lib / 'hyprflip.so').write_bytes(b'core')
+        (lib / 'control.py').write_bytes(b'helper')
+        state = Path(self.directory.name) / 'hyprflip'
+        state.mkdir(exist_ok=True)
+        setup.record_installed_files(lib, state, 'c' * 40)
+        self.ipc.env = dict(self.ipc.env, HOME=str(home))
+        info = (lib / 'hyprflip.so').stat()
+        self.ipc.snapshot['loaded_file'] = {'path': str(lib / 'hyprflip.so'), 'inode': info.st_ino, 'size': info.st_size,
+                                            'mtime_ns': info.st_mtime_ns}
+        self.assertEqual(control.snapshot(self.ipc)['install_check'], {'loaded': 'same', 'changed': []})
+        (lib / 'control.py').write_bytes(b'hand-copied helper')
+        self.assertEqual(control.snapshot(self.ipc)['install_check'], {'loaded': 'same', 'changed': ['control.py']})
+
     def test_face_on_a_covered_card_turns_to_the_face_it_returns_to(self):
         card = self.covered()
         def show(action):

@@ -81,7 +81,7 @@ def validate_context(ipc, expected):
 
 def snapshot(ipc):
     base = {'protocol': PROTOCOL, 'available': False, 'cards': [], 'saved': [],
-            'error': '', 'library_error': '', 'context': None, 'capabilities': {}}
+            'error': '', 'library_error': '', 'context': None, 'capabilities': {}, 'install_check': None}
     # The source commit bootstrap.py installed, if any; panels compare it with their pin.
     env = ipc.env if ipc.env is not None else os.environ
     recorded = Path(env.get('XDG_STATE_HOME', str(Path(env.get('HOME', str(Path.home()))) / '.local/state'))) / 'hyprflip/installed-commit'
@@ -103,6 +103,9 @@ def snapshot(ipc):
     base['navigation'], base['navigation_choice'] = navigation.state(paths, shipped), navigation.choice(paths)
     try:
         windows, state = ipc.windows(), ipc.status()
+        # Whether the core and helpers that run are those installed (None without a record of the install).
+        base['install_check'] = w.install_check(Path(env.get('HOME', str(Path.home()))) / '.local/lib/hyprflip',
+                                                recorded.parent, state)
         ctx = context(ipc, windows)
         store = w.RecipeStore(ipc.env)
         try:
@@ -139,6 +142,8 @@ def snapshot(ipc):
                               'current': current, 'active': active, 'unfolded': bool(card.get('unfolded')),
                               # A window covers the card: its own face is shown, and active is the one it returns to.
                               'covered': bool(card.get('covered')),
+                              # A window covers the card, shown or not; it takes one of the card's faces.
+                              'has_cover': bool(card.get('cover')),
                               'fullscreen': bool(card.get('fullscreen')),
                               # Native dwindle/floating cards; only these fullscreen as a whole.
                               'native': kind == 'container' and bool(card.get('native_group')),

@@ -37,6 +37,15 @@ There are no persistent window IDs: tokens belong to one Hyprland instance.
 last installed, or are null. The release (such as `0.3.0-rc.16`) is the newest
 release tag that commit contains, so a panel can require a minimum release and
 accept later ones instead of matching one exact commit.
+`install_check` says whether what runs is what that install put in place, or
+is null when no install was recorded (before 0.3.0-rc.26, or after a hand
+install). `loaded` is `same` when the running core was loaded from
+`~/.local/lib/hyprflip/hyprflip.so` as that file is now, `differs` when it was
+loaded from another file or from a copy since replaced, and `unknown` for a
+core that does not say (its `status` has no `loaded_file`). `changed` names the
+files in `~/.local/lib/hyprflip` that are not as installed: changed, missing or
+added; backups and caches do not count. A panel can offer to reinstall when
+`loaded` is `differs` or `changed` is not empty.
 `context.anchor_label` names the app that will become the front of a new card;
 it is display text only and never used to identify or retarget a window.
 
@@ -87,7 +96,9 @@ A card a program has covered with a window of its own
 while the cover is shown. Its `faces` leave the cover out, and `active` is the
 face the card returns to. `face` and `edit` turn away from the cover, even to
 that face. `flip` turns from the cover, the face the card shows. `add_face`
-counts the cover's face against the most a card can hold.
+counts the cover's face against the most a card can hold. `has_cover` is true
+whenever a cover is on the card, also while the card shows a face of its own
+(`covered: false`), so a panel can count the cover before it offers another face.
 
 `run` emits newline-delimited JSON on stdout and reads responses on stdin:
 

@@ -276,7 +276,11 @@ def settle(line, ctl=ctl):
         found = card()
         return sum(abs(p - q) for p, q in zip(found["box"], target)) if found else None
 
-    best = distance()
+    found = card()
+    # A card parked on a special workspace that no monitor shows has no tile to go back to.
+    if found and found.get("workspace", {}).get("special"):
+        return
+    best = sum(abs(p - q) for p, q in zip(found["box"], target)) if found else None
     # A tile rebuilt under a fullscreen window reads as no size until that ends: then there is no saved tile to go back to.
     if best is None or best <= 4 or not (target[2] and target[3]):
         return

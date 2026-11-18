@@ -524,6 +524,71 @@ def workspace_name(window):
     return str(number) if not name or name == str(number) else f'{number} ({name})'
 
 
+# What bootstrap.py installed into ~/.local/lib/hyprflip, file by file, kept in the state directory beside
+# installed-commit: {"commit": ..., "files": {name: {"sha256", "size", "mtime_ns"}}}.
+INSTALLED_FILES = 'installed-files.json'
+
+
+def library_files(lib):
+    """The files an install puts in lib: the core and its helpers, never a backup, cache or directory."""
+    try:
+        return {p.name: p for p in lib.iterdir()
+                if p.is_file() and p.suffix in ('.so', '.py', '.lua') and '.bak' not in p.name}
+    except OSError:
+        return {}
+
+
+def file_print(path):
+    info = path.stat()
+    return {'sha256': hashlib.sha256(path.read_bytes()).hexdigest(), 'size': info.st_size, 'mtime_ns': info.st_mtime_ns}
+
+
+def record_installed_files(lib, state, commit):
+    """Records each installed file as it is now, for install_check."""
+    data = {'commit': commit, 'files': {name: file_print(path) for name, path in sorted(library_files(lib).items())}}
+    temporary = state / (INSTALLED_FILES + '.new')
+    temporary.write_text(json.dumps(data, indent=2) + '\n')
+    temporary.replace(state / INSTALLED_FILES)
+
+
+def install_check(lib, state, status):
+    """Whether what runs is what was installed, or None without a record of the install.
+
+    loaded: 'same' when the core status names was loaded from lib's hyprflip.so as that file is now, 'differs'
+    when another file or an older copy of it is loaded, 'unknown' for a core that does not say. changed: the
+    files in lib that are not as installed, missing or added. A file whose size and time are as recorded is
+    taken as it was, so the core is hashed only when it changed.
+    """
+    try:
+        recorded = json.loads((state / INSTALLED_FILES).read_text())['files']
+        if not isinstance(recorded, dict): return None
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    present, changed = library_files(lib), []
+    for name, info in recorded.items():
+        path = present.get(name)
+        try:
+            if path is None:
+                changed.append(name)
+            elif ((path.stat().st_size, path.stat().st_mtime_ns) != (info.get('size'), info.get('mtime_ns')) and
+                  hashlib.sha256(path.read_bytes()).hexdigest() != info.get('sha256')):
+                changed.append(name)
+        except (OSError, AttributeError):
+            changed.append(name)
+    changed += [name for name in present if name not in recorded]
+    loaded, core, running = 'unknown', lib / 'hyprflip.so', status.get('loaded_file')
+    if isinstance(running, dict):
+        try:
+            now = core.stat()
+            same = (Path(str(running.get('path', ''))).resolve() == core.resolve() and
+                    (running.get('inode'), running.get('size'), running.get('mtime_ns')) ==
+                    (now.st_ino, now.st_size, now.st_mtime_ns))
+        except OSError:
+            same = False
+        loaded = 'same' if same else 'differs'
+    return {'loaded': loaded, 'changed': sorted(changed)}
+
+
 class Request:
     """A newer create/edit request supersedes a waiting picker."""
     def __init__(self, runtime, instance):

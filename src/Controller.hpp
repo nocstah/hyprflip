@@ -255,6 +255,9 @@ class Controller {
     std::optional<uint32_t> m_eventKey;
     bool m_mutating = false;
     bool m_stopping = false;
+    // The plugin file this core was loaded from, as status reports it, so that a helper can tell whether the
+    // installed file is the one running: {"path","inode","size","mtime_ns"}, or null when it could not be read.
+    std::string m_loadedFile = "null";
     std::string m_lastFallback;
     double m_captureMs = 0;
     struct Reservation {

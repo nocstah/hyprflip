@@ -171,10 +171,12 @@ def install_core():
     # Only this output says what became of the cards: a refused quiet restore
     # shows no notification, and a panel never sees the installer's lines.
     kept = re.search(r'Keeping (\d+) open card', output)
+    parked = re.search(r', (\d+) of them parked out of sight', output)
     refused = output.count('Could not keep a card')
     hidden = re.search(r'Leaving (\d+) hidden card', output)
     tiles = output.count('A card was kept, but')
     return ('Loaded' + (f'; kept {int(kept.group(1)) - refused} open card(s)' if kept else '') +
+            (f', {parked.group(1)} of them parked' if kept and parked and not refused else '') +
             (f'; could not keep {refused}, whose apps stay open as separate windows' if refused else '') +
             (f'; left {hidden.group(1)} hidden card(s) as separate windows' if hidden else '') +
             (f'; could not check or return the tile of {tiles}' if tiles else '') +
@@ -213,6 +215,14 @@ def record_commit():
     state.mkdir(parents=True, exist_ok=True)
     record(state, 'installed-release', release)
     record(state, 'installed-commit', commit.strip())
+    # Each installed file as it is now, so that a panel can tell when what runs is no longer this install.
+    if str(project / 'scripts') not in sys.path:
+        sys.path.insert(0, str(project / 'scripts'))
+    import workflow
+    try:
+        workflow.record_installed_files(Path.home() / '.local/lib/hyprflip', state, commit.strip())
+    except OSError:
+        (state / workflow.INSTALLED_FILES).unlink(missing_ok=True)
     return commit.strip()
 
 

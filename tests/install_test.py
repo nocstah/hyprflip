@@ -1,5 +1,6 @@
 """Exercise installer transactions without touching the desktop or user files."""
 import contextlib
+import fcntl
 import io
 import json
 import os
@@ -63,6 +64,10 @@ class InstallerTest(unittest.TestCase):
         self.config = self.home / "config"
         self.library = self.home / ".local/lib/hyprflip/hyprflip.so"
         self.recovery = self.library.with_suffix(".upgrade.json")
+        # Never the desktop's own: the update's marker and result, and the card helper's request lock.
+        self.state, self.runtime = self.home / "state", self.root / "runtime"
+        self.runtime.mkdir()
+        self.marker, self.result = self.state / "hyprflip/updating", self.state / "hyprflip/update-result.json"
         self.module = self.config / "hypr/hyprflip.lua"
         self.main = self.config / "hypr/hyprland.lua"
         self.main.parent.mkdir(parents=True)
@@ -97,6 +102,9 @@ class InstallerTest(unittest.TestCase):
         # A core that takes covers, the cards whose uncover it refuses, the card each restore
         # line rebuilds, and windows that are open beside the apps of every test.
         self.card_cover, self.refuse_uncover, self.rebuilt, self.extra_clients = False, set(), {}, ()
+        # The update's own traces: the marker and lock at the unload, the announcements, where windows are.
+        self.marker_at_unload = self.lock_free_at_unload = None
+        self.announced, self.places = [], {}
 
     def hyprctl(self, command, **kwargs):
         self.assertEqual(command[0], "hyprctl")
@@ -121,6 +129,14 @@ class InstallerTest(unittest.TestCase):
         elif args == ["plugin", "unload", str(self.library)]:
             # What a failed update would retry from.
             self.recovery_at_unload = json.loads(self.recovery.read_text()) if self.recovery.exists() else None
+            # What a program that keeps cards sees meanwhile: the marker, and the request lock taken.
+            self.marker_at_unload = json.loads(self.marker.read_text()) if self.marker.exists() else None
+            with setup.Request(self.runtime, "test-instance").lock.open("a") as handle:
+                try:
+                    fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    self.lock_free_at_unload = True
+                except BlockingIOError:
+                    self.lock_free_at_unload = False
             self.loaded = False
             self.pairs = []
             self.containers = []
@@ -138,7 +154,9 @@ class InstallerTest(unittest.TestCase):
         elif args == ["configerrors"]:
             reply = ""
         elif args == ["-j", "clients"]:
-            reply = [{"address": address, "grouped": list(PAIR.values()), "acceptsInput": address not in self.hidden_after_restore}
+            reply = [{"address": address, "grouped": list(PAIR.values()), "acceptsInput": address not in self.hidden_after_restore,
+                      "pid": int(address, 16), "class": "app" + address[2:],
+                      "workspace": {"name": self.places.get(address, SHOWN["name"])}}
                      for address in (*PAIR.values(), "0xc", "0xd", "0xe", "0xf", *self.extra_clients)
                      if address != self.closed_after_restore]
         elif args == ["-j", "activewindow"]:
@@ -207,6 +225,10 @@ class InstallerTest(unittest.TestCase):
                 found["covered"] = rest == ["cover"]
             else:
                 self.fail(f"Unexpected card action: {args}")
+        elif args[:3] == ["hyprflip", "announce", "updated"]:
+            self.assertEqual(len(args), 4)
+            self.announced.append(args[3])
+            reply = "error: Unknown action." if self.library.read_bytes() == b"old plugin" else "ok: ok"
         elif args == ["hyprflip", "adopt", PAIR["front"], PAIR["back"]]:
             if self.library.read_bytes() == b"old plugin":
                 reply = "unknown request"
@@ -227,7 +249,8 @@ class InstallerTest(unittest.TestCase):
     def run_installer(self, *arguments):
         self.output = io.StringIO()
         with patch.object(Path, "home", return_value=self.home), \
-                patch.dict(os.environ, {"XDG_CONFIG_HOME": str(self.config),
+                patch.dict(os.environ, {"XDG_CONFIG_HOME": str(self.config), "XDG_STATE_HOME": str(self.state),
+                                        "XDG_RUNTIME_DIR": str(self.runtime),
                                         "HYPRLAND_INSTANCE_SIGNATURE": "test-instance"}), \
                 patch.object(sys, "argv", ["install.py", *arguments]), \
                 patch("subprocess.run", side_effect=self.hyprctl), \
@@ -259,6 +282,9 @@ class InstallerTest(unittest.TestCase):
         self.assertEqual(self.pairs, [])
         self.assertEqual(json.loads(self.recovery.read_text()),
                          {"instance": "test-instance", "pairs": [PAIR], "cards": []})
+        self.assertEqual(json.loads(self.result.read_text())["ok"], False)
+        self.assertFalse(self.marker.exists())
+        self.assertEqual(self.announced, [])
 
         self.fail_adoption = False
         self.run_installer()
@@ -302,9 +328,23 @@ class InstallerTest(unittest.TestCase):
         self.assertEqual(self.library.read_bytes(), b"new plugin")
         self.assertFalse(self.recovery.exists())
 
-    def test_update_leaves_parked_cards_out_of_restore_and_recovery(self):
-        # The fullscreen check covers the cards an update keeps, not a parked one.
+    def test_update_keeps_parked_cards_through_restore_and_recovery(self):
+        # The core rebuilds a parked card on its special workspace, quietly, like the others.
+        self.containers = [card("0xc", "0xd", SHOWN), card("0xe", "0xf", PARKED)]
+        self.run_installer()
+        lines = [line("0xc", "0xd"), line("0xe", "0xf")]
+        self.assertEqual(self.restored, lines)
+        self.assertIn(["hyprflip", "restore quiet " + lines[1]], self.calls)
+        self.assertEqual(self.recovery_at_unload, {"instance": "test-instance", "pairs": [PAIR], "cards": lines})
+        self.assertIn("Keeping 2 open card(s) through this update, 1 of them parked out of sight.\n", self.output.getvalue())
+        self.assertNotIn("hidden card", self.output.getvalue())
+        self.assertEqual(self.library.read_bytes(), b"new plugin")
+        self.assertFalse(self.recovery.exists())
+
+    def test_a_parked_fullscreen_card_stays_separate_windows(self):
+        # The fullscreen check covers the cards a monitor shows; a parked fullscreen card is left to its program.
         self.containers = [card("0xc", "0xd", SHOWN), card("0xe", "0xf", PARKED, fullscreen=True)]
+        self.places = {"0xe": "special:park", "0xf": "special:park"}
         self.run_installer()
         shown = line("0xc", "0xd")
         self.assertEqual(self.restored, [shown])
@@ -312,17 +352,27 @@ class InstallerTest(unittest.TestCase):
         self.assertIn("Keeping 1 open card(s) through this update.\n"
                       "Leaving 1 hidden card(s) as separate windows; the program that parked them rebuilds them.\n",
                       self.output.getvalue())
-        self.assertEqual(self.library.read_bytes(), b"new plugin")
-        self.assertFalse(self.recovery.exists())
+        self.assertEqual(json.loads(self.result.read_text())["apart"],
+                         [{"workspace": "special:park", "apps": [{"address": "0xe", "pid": 14, "class": "appe"},
+                                                                 {"address": "0xf", "pid": 15, "class": "appf"}]}])
 
-    def test_dry_run_counts_hidden_cards_without_changing_anything(self):
+    def test_a_parked_card_gets_no_tile_correction(self):
+        # Rebuilt where no monitor shows it, its box says nothing of a tile: no focus, no step, nothing shown.
+        self.containers = [card("0xe", "0xf", PARKED)]
+        self.rebuilt = {line("0xe", "0xf"): card("0xe", "0xf", PARKED, box=[0, 0, 400, 300])}
+        self.run_installer()
+        self.assertEqual(self.restored, [line("0xe", "0xf")])
+        self.assertFalse([c for c in self.calls if c[0] == "dispatch"], self.calls)
+        self.assertNotIn("A card was kept, but", self.output.getvalue())
+
+    def test_dry_run_counts_parked_cards_without_changing_anything(self):
         self.containers = [card("0xe", "0xf", PARKED)]
         with self.assertRaises(SystemExit) as result:
             self.run_installer("--dry-run")
         self.assertEqual(result.exception.code, 0)
-        self.assertIn("Leaving 1 hidden card(s) as separate windows; the program that parked them rebuilds them.\n",
-                      self.output.getvalue())
+        self.assertIn("Keeping 1 open card(s) through this update, 1 of them parked out of sight.\n", self.output.getvalue())
         self.assertEqual(self.calls, [["-j", "binds"], ["-j", "plugin", "list"], ["hyprflip", "status"]])
+        self.assertFalse(self.marker.exists() or self.result.exists())
 
     def test_parked_cards_alone_never_replay_the_recovery_file(self):
         # The recovery file is read only when no card or pair of any kind is open.
@@ -331,18 +381,55 @@ class InstallerTest(unittest.TestCase):
         self.recovery.write_text(json.dumps({"instance": "test-instance", "pairs": [PAIR],
                                              "cards": [line("0xc", "0xd")]}))
         self.run_installer()
-        self.assertEqual(self.restored, [])
+        self.assertEqual(self.restored, [line("0xe", "0xf")])
         self.assertEqual(self.pairs, [])
         self.assertNotIn(["hyprflip", "adopt", PAIR["front"], PAIR["back"]], self.calls)
         self.assertEqual(self.library.read_bytes(), b"new plugin")
 
-    def test_a_card_parked_while_the_update_settles_is_left_out(self):
+    def test_a_card_parked_while_the_update_settles_is_kept(self):
         self.containers = [card("0xc", "0xd", SHOWN)]
         self.park_at_finish = True
         self.run_installer()
-        self.assertEqual(self.restored, [])
-        self.assertEqual(self.recovery_at_unload["cards"], [])
+        self.assertEqual(self.restored, [line("0xc", "0xd")])
+        self.assertEqual(self.recovery_at_unload["cards"], [line("0xc", "0xd")])
         self.assertEqual(self.library.read_bytes(), b"new plugin")
+
+    def test_programs_that_keep_cards_see_the_update_and_what_became_of_them(self):
+        # While the core is away, the marker names the update and the card helper's request lock is taken.
+        self.containers = [card("0xc", "0xd", SHOWN), card("0xe", "0xf", PARKED)]
+        self.refused = {line("0xe", "0xf")}
+        self.places = {"0xe": "special:park", "0xf": "special:park"}
+        self.run_installer()
+        self.assertEqual(set(self.marker_at_unload), {"pid", "release", "started_ms"})
+        self.assertEqual((self.marker_at_unload["pid"], self.marker_at_unload["release"]), (os.getpid(), VERSION))
+        self.assertIs(self.lock_free_at_unload, False)
+        # Afterwards: no marker, the lock free, what came apart, and one event from the core just loaded.
+        self.assertFalse(self.marker.exists())
+        with setup.Request(self.runtime, "test-instance").exclusive(0):
+            pass
+        written = json.loads(self.result.read_text())
+        self.assertEqual({k: written[k] for k in ("release", "ok", "kept", "apart")},
+                         {"release": VERSION, "ok": True, "kept": 1,
+                          "apart": [{"workspace": "special:park", "apps": [{"address": "0xe", "pid": 14, "class": "appe"},
+                                                                           {"address": "0xf", "pid": 15, "class": "appf"}]}]})
+        self.assertEqual(self.announced, [VERSION])
+        self.assertLess(self.calls.index(["plugin", "unload", str(self.library)]),
+                        self.calls.index(["hyprflip", "announce", "updated", VERSION]))
+
+    def test_an_update_waits_for_no_one_and_changes_nothing_while_a_card_change_holds_the_lock(self):
+        self.containers = [card("0xc", "0xd", SHOWN)]
+        # The workflow module the installer imports, which another test module may have put in place.
+        loaded = sys.modules.get("workflow", setup)
+        def taken(*args, **kwargs):
+            raise loaded.Busy("Another card change is still in progress. Try again in a moment.")
+        with patch.object(loaded.Request, "exclusive", taken), \
+                self.assertRaisesRegex(SystemExit, "A card menu or another program is changing cards"):
+            self.run_installer()
+        self.assertNotIn(["hyprflip", "finish"], self.calls)
+        self.assertTrue(self.loaded)
+        for path, content in self.originals.items():
+            self.assertEqual(path.read_bytes(), content)
+        self.assertFalse(self.marker.exists() or self.result.exists())
 
     def test_a_refused_restore_leaves_that_card_and_keeps_the_others(self):
         self.containers = [card("0xc", "0xd", SHOWN), card("0xe", "0xf", SHOWN)]
@@ -758,6 +845,11 @@ class InstallerTest(unittest.TestCase):
         for path, content in self.originals.items():
             self.assertEqual(path.read_bytes(), content)
         self.assertFalse(self.recovery.exists())
+        # Nothing came apart: the result says so, the marker is gone, and nothing is announced.
+        written = json.loads(self.result.read_text())
+        self.assertEqual((written["ok"], written["apart"]), (False, []))
+        self.assertFalse(self.marker.exists())
+        self.assertEqual(self.announced, [])
 
     def test_a_cover_that_closed_meanwhile_is_named_and_the_update_goes_on(self):
         self.covered()

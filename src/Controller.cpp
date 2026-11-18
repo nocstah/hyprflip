@@ -24,6 +24,7 @@
 #include <hyprland/src/layout/algorithm/TiledAlgorithm.hpp>
 #include <hyprland/src/layout/algorithm/tiled/dwindle/DwindleAlgorithm.hpp>
 #include <hyprland/src/layout/LayoutManager.hpp>
+#include <hyprland/src/managers/EventManager.hpp>
 #include <hyprland/src/managers/SeatManager.hpp>
 #include <hyprland/src/managers/SessionLockManager.hpp>
 #include <hyprland/src/managers/fullscreen/FullscreenController.hpp>
@@ -37,6 +38,8 @@
 #include <hyprland/src/render/decorations/IHyprWindowDecoration.hpp>
 #include <limits>
 #include <cctype>
+#include <dlfcn.h>
+#include <sys/stat.h>
 #include <random>
 #include <linux/input-event-codes.h>
 #include <sstream>
@@ -153,6 +156,13 @@ std::string closeInstance() {
 Controller::Controller(HANDLE handle, Settings settings)
     : m_handle(handle), m_settings(std::move(settings)), m_shader(std::make_shared<FlipShader>()),
       m_closes(closeInstance()) {
+    // The file as it is now, at load: a later copy over it, or another build loaded, then reads differently.
+    Dl_info self{};
+    struct stat file{};
+    if (dladdr(reinterpret_cast<void *>(&closeInstance), &self) && self.dli_fname && stat(self.dli_fname, &file) == 0)
+        m_loadedFile = "{\"path\":" + quote(self.dli_fname) + ",\"inode\":" + std::to_string(file.st_ino) +
+                       ",\"size\":" + std::to_string(file.st_size) + ",\"mtime_ns\":" +
+                       std::to_string(static_cast<long long>(file.st_mtim.tv_sec) * 1000000000LL + file.st_mtim.tv_nsec) + "}";
     // Only a watchdog for outputs that stop presenting (e.g. DPMS). Motion is
     // sampled by the output's render cycle, never by an independent timer.
     m_timer = makeShared<CEventLoopTimer>(std::nullopt, [this](SP<CEventLoopTimer>, void *) {
@@ -2404,6 +2414,7 @@ void Controller::onFrame(PHLMONITOR monitor) {
 //   back  <horizontal|vertical> <focused> <address:ratio>...    required without a cover
 //   [face <horizontal|vertical> <focused> <address:ratio>...]  each further face, up to CONTAINER_MAX_FACES (six)
 //   [name <face from 1> <percent-encoded name>]...
+// A quiet restore whose apps are all on one special workspace builds the card there, parked.
 //   [cover <0x address>]   a window to cover the card with: it joins as an extra face after the card's own, and the
 //                          card shows it, as card <id> cover does. A covered card may have one face of its own.
 Result Controller::restore(const std::string &arguments) {
@@ -2550,6 +2561,14 @@ Result Controller::restore(const std::string &arguments) {
         apps.push_back(cover);
     }
     snapshot.faces = coverAddress ? own + 1 : own;
+    // A card parked out of sight, as an update puts it back: a quiet restore builds it on its special workspace
+    // when every app is on that one workspace. A cover never goes along out of sight.
+    bool parked = false;
+    if (quiet && !cover && !apps.empty()) {
+        const auto space = apps.front()->m_workspace;
+        parked = space && space->m_isSpecialWorkspace &&
+                 std::ranges::all_of(apps, [&](const PHLWINDOW &w) { return w->m_workspace == space; });
+    }
     if (quiet ? scriptBusy(apps) : inputBusy())
         return {false, "Finish the active grab or drag before restoring a card."};
     if (!FloatingCards::canCreate(snapshot))
@@ -2563,7 +2582,7 @@ Result Controller::restore(const std::string &arguments) {
             member |= focused && snapshot.windows[s][i] == focused;
     m_mutating = true;
     // A covered card is founded on its cover, so it takes the cover's tile exactly.
-    const auto id = FloatingCards::create(snapshot, mode == "floating", !quiet || member, cover ? coverAt : 0);
+    const auto id = FloatingCards::create(snapshot, mode == "floating", !quiet || member, cover ? coverAt : 0, parked);
     const uint64_t pairID = id ? m_nextID++ : 0;
     if (id) {
         m_pairs.push_back({pairID, {}, {}, false, id, FloatingCards::EPOCH});
@@ -2798,12 +2817,24 @@ Result Controller::dispatch(const std::string &action) {
         finish();
         return {true, "ok"};
     }
+    // After scripts/install.py has put the cards back: a program on socket2 hears hyprflip>>updated,<release>.
+    if (action.starts_with("announce ")) {
+        const auto release = action.substr(std::string_view("announce updated ").size());
+        const bool valid = action.starts_with("announce updated ") && !release.empty() && release.size() <= 40 &&
+                           std::ranges::all_of(release, [](unsigned char c) {
+                               return std::isalnum(c) || c == '.' || c == '-' || c == '+' || c == '_';
+                           });
+        if (!valid)
+            return {false, "Use announce updated <release>."};
+        g_pEventManager->postEvent(SHyprIPCEvent{"hyprflip", "updated," + release});
+        return {true, "ok"};
+    }
     return {
         false,
         "Unknown action. Use mark, pair, card, attach [horizontal|vertical], replace <old> <new>, release, unfold, "
         "layout <horizontal|vertical|balance|toggle>, other_side, "
         "workspace <number> [silent], move <left|right|up|down>, cancel, "
-        "flip, peek [end], unpair, finish, restore [quiet] ..., "
+        "flip, peek [end], unpair, finish, restore [quiet] ..., announce updated <release>, "
         "card <id> <flip|show <front|back|n|cover>|cover <address>|uncover|ungroup|workspace <workspace> [silent]>, "
         "card <id or 0x address> hold|leave|reveal [speed] [up|down], or status."};
 }
@@ -2837,7 +2868,8 @@ void Controller::notify(const Result &r) {
 }
 std::string Controller::status() {
     reconcile();
-    std::string json = "{\"version\":\"" HYPRFLIP_VERSION "\",\"marked\":" + address(m_marked.lock()) +
+    std::string json = "{\"version\":\"" HYPRFLIP_VERSION "\",\"loaded_file\":" + m_loadedFile +
+                       ",\"marked\":" + address(m_marked.lock()) +
                        ",\"transition\":" + quote(std::string(name(transition(m_settings.transition->value()).value_or(Transition::Flip)))) +
                        ",\"transition_modes\":[\"flip\",\"vertical\",\"slide\",\"fade\",\"dissolve\",\"portal\",\"instant\"]" +
                        ",\"capture_ms\":" + std::format("{}", m_captureMs) +
@@ -2925,7 +2957,7 @@ std::string Controller::status() {
            ",\"card_rings\":" + (m_frames ? m_frames->rings() : "[]") +
            ",\"card_dividers\":" + (m_frames ? m_frames->dividers() : "[]") +
            ",\"native_cards\":true,\"floating_cards\":true,\"workspace_protection\":true,\"container_provider\":true" +
-           ",\"layout_controls\":true,\"repair_cards\":true,\"card_ungroup\":true,\"card_cover\":true,\"restore_cover\":true,\"pane_"
+           ",\"layout_controls\":true,\"repair_cards\":true,\"card_ungroup\":true,\"card_cover\":true,\"restore_cover\":true,\"restore_parked\":true,\"pane_"
            "replacement\":true" +
            ",\"reveal\":true,\"reveal_slide\":true,\"last_slide_wait_ms\":" +
            (Reveal::lastSlideWait() ? std::to_string(static_cast<long>(std::lround(*Reveal::lastSlideWait())))

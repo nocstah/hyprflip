@@ -60,6 +60,12 @@ hyprctl hyprflip restore quiet tiled 0 0 0 0 1200 900 \
 A `face …` group comes after the back: one before it is refused with "Each
 face needs an axis and a focused app address."
 
+A quiet restore without a cover also builds a card whose apps are all on one
+special workspace, there and unseen, as it was [parked](#parked-cards): it
+does not show that workspace or move the focus to it. Cores that do this
+report `"restore_parked": true` in `status`. Any other restore of apps on a
+special workspace is refused.
+
 ### Build a card under a cover
 
 `cover <address>`, last in the line, builds the card under that window as its
@@ -367,14 +373,60 @@ it as an open saved card, go to it, reveal it or fill in its missing apps, and
 they name an app it holds instead of taking it (see
 [saved cards](SAVED_CARDS.md#opening-behavior)).
 
-An update with `scripts/install.py` leaves a parked card as separate windows on
-its special workspace and says how many it left: the core does not build cards
-on special workspaces, and the program that parked the card rebuilds it. It
-keeps the cards on normal workspaces. If the new core refuses to rebuild one of
-them, that card's apps stay as separate windows and the other cards are still
-kept. If `hyprctl` cannot reach Hyprland, the update is rolled back and the
-installer keeps its recovery file; the next update in the same Hyprland session
-rebuilds the pairs and cards from it when no card or pair is open.
+An update with `scripts/install.py` keeps a parked card parked: the new core
+rebuilds it on its special workspace, unseen, with its faces, the face it shows
+and its size, and the installer says how many of the cards it kept were parked.
+A parked card that is fullscreen stays as separate windows there, for the
+program that parked it. If the new core refuses to rebuild a card, that card's
+apps stay as separate windows and the other cards are still kept. If `hyprctl`
+cannot reach Hyprland, the update is rolled back and the installer keeps its
+recovery file; the next update in the same Hyprland session rebuilds the pairs
+and cards from it when no card or pair is open. Before 0.3.0-rc.26 an update
+left every parked card as separate windows.
+
+## Through an update
+
+An update unloads the core, loads the new one and rebuilds the cards, which
+come apart and come back under new ids meanwhile. A program that keeps its own
+cards, or parks them, can wait for that instead of taking it for the user's
+doing:
+
+- **The request lock.** Before it changes anything, `scripts/install.py` takes
+  the request lock the card menus, OmaCards and
+  [`control.py unattended`](#locking-and-cancelling) share, and holds it until
+  the update ends. If a menu or another program keeps it for 10 seconds, the
+  update stops without changing anything: "A card menu or another program is
+  changing cards. Close the menu or wait for it, then update again; nothing was
+  changed." So an update never starts in the middle of a change that takes it.
+- **The marker.** While it updates, `$XDG_STATE_HOME/hyprflip/updating`
+  (`~/.local/state/hyprflip/updating` by default) holds
+  `{"pid": …, "release": "0.3.0-rc.26", "started_ms": …}`, `started_ms` in
+  milliseconds since the epoch. It is written whole, renamed into place, and
+  removed when the update ends, installed or rolled back. Leave cards alone while
+  it is there. A marker whose `pid` is gone was left by an installer that was
+  killed; ignore it.
+- **The result.** As it ends, the installer writes `update-result.json` beside
+  the marker, also renamed into place:
+
+  ```json
+  {"release": "0.3.0-rc.26", "finished_ms": 1795507200000, "ok": true, "kept": 3,
+   "apart": [{"workspace": "special:park", "apps": [
+     {"address": "0x55d0a1b2c3d0", "pid": 4242, "class": "foot"}]}]}
+  ```
+
+  `ok` is false when the update was rolled back or refused after it began.
+  `kept` counts the cards rebuilt, parked ones included. `apart` lists the cards
+  left as separate windows, with each one's workspace and the apps still open,
+  as they are now. A `finished_ms` before the marker's `started_ms` belongs to
+  an earlier update.
+- **The event.** After an update that installed, once the marker is gone, the
+  new core posts `hyprflip>>updated,<release>` on Hyprland's event socket
+  (`$XDG_RUNTIME_DIR/hypr/$HYPRLAND_INSTANCE_SIGNATURE/.socket2.sock`). No event
+  follows a rollback, so take the marker going as the end too.
+
+The installer sends `announce updated <release>` to post the event; the
+release is letters, digits and `.-+_`, at most 40 of them. An announcement
+never shows a notification.
 
 ## Why an app closed
 

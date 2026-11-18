@@ -13,7 +13,10 @@ const ContainerAPI *api();
 // focus the card leaves the focus where it is. The group is founded on the
 // first app of face root, so a tiled card takes that app's tile: a covered
 // card is founded on its cover. Native only: the ABI's create keeps face 0.
-uint64_t create(const ContainerSnapshot &snapshot, bool floating = true, bool focus = true, unsigned root = 0);
+// With parked, apps on a special workspace may make the card there, as an
+// update puts a parked card back; menus and the ABI never build one there.
+uint64_t create(const ContainerSnapshot &snapshot, bool floating = true, bool focus = true, unsigned root = 0,
+                bool parked = false);
 bool canCreate(const ContainerSnapshot &snapshot);
 // Names a face; an empty name gives it back its default.
 bool name(uint64_t id, unsigned side, const std::string &value);

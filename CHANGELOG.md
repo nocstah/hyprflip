@@ -1,5 +1,32 @@
 # Changelog
 
+## Unreleased
+
+- An update with `scripts/install.py` keeps parked cards: the new core
+  rebuilds a card on the special workspace it was parked on, unseen, with its
+  faces, the face it shows and its size, and the installer says how many of the
+  cards it kept were parked. Before, every parked card came apart into separate
+  windows for the program that parked it to rebuild. A parked card that is
+  fullscreen still stays as separate windows. A quiet restore without a cover
+  now builds a card whose apps are all on one special workspace; cores that do
+  this report `"restore_parked": true`.
+- Programs that keep their own cards can see an update through: the installer
+  takes the card request lock before it changes anything (and stops, changing
+  nothing, if a menu or another program keeps it for 10 seconds), marks the
+  update in `$XDG_STATE_HOME/hyprflip/updating`, writes what became of the
+  cards to `update-result.json` beside it, and has the new core post
+  `hyprflip>>updated,<release>` on Hyprland's event socket. See
+  [Through an update](docs/SCRIPTING.md#through-an-update).
+- The helper snapshot says whether what runs is what was installed:
+  `install_check` names the helper files changed since the install, and whether
+  the running core was loaded from the installed file as it is now. The core's
+  `status` reports the file it was loaded from in `loaded_file`, and
+  `scripts/bootstrap.py` records each installed file in
+  `installed-files.json`.
+- Cards in the snapshot report `has_cover`, true while a cover is on the card
+  even when it shows a face of its own, so a panel counts the cover before it
+  offers another face.
+
 ## 0.3.0-rc.25 — 2026-11-18
 
 - A card can be built under its cover in one call: `restore … cover
