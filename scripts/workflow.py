@@ -1093,14 +1093,19 @@ class Setup:
             raise
 
     @staticmethod
-    def restore_line(arrangement, box, floating):
-        """The core's quiet restore of an arrangement, as card_restore.describe words a card's."""
+    def restore_line(arrangement, box, floating, cover=None):
+        """The core's quiet restore of an arrangement, as card_restore.describe words a card's.
+
+        With cover, the card is built under that window, tiled, and may have one face of its own."""
         if not all(type(v) in (int, float) and math.isfinite(v) for v in box):
+            raise SetupError('The card action is unavailable.')
+        if cover is not None and (floating or not isinstance(cover, str) or not re.fullmatch(r'0x[0-9a-fA-F]{1,16}', cover)):
             raise SetupError('The card action is unavailable.')
         line = (f'restore quiet {"floating" if floating else "tiled"} {arrangement["active"]} 0 ' +
                 ' '.join(f'{v:.12g}' for v in box))
         # The core refuses more faces than it holds itself.
-        if not 2 <= len(arrangement['faces']) <= RECIPE_MAX_FACES or not 0 <= arrangement['active'] < len(arrangement['faces']):
+        fewest = 1 if cover is not None else 2
+        if not fewest <= len(arrangement['faces']) <= RECIPE_MAX_FACES or not 0 <= arrangement['active'] < len(arrangement['faces']):
             raise SetupError('The card action is unavailable.')
         for side, face in zip(restore_words(len(arrangement['faces'])), arrangement['faces']):
             if not all(re.fullmatch(r'0x[0-9a-fA-F]{1,16}', a) for a in face['windows']):
@@ -1108,7 +1113,7 @@ class Setup:
             line += (f' {side} {face["axis"]} {face["windows"][face["focus"]]}' +
                      ''.join(f' {a}:{r:.12g}' for a, r in zip(face['windows'], face['ratios'])))
         names = name_words([face.get('name', '') for face in arrangement['faces']])
-        return line + (' ' + ' '.join(names) if names else '')
+        return line + (' ' + ' '.join(names) if names else '') + (f' cover {cover}' if cover is not None else '')
 
     def box(self, arrangement, floating, workspace, windows):
         """A tiled card's box is its front app's tile there, or else the screen's free area; a floating
@@ -1726,8 +1731,16 @@ class RecipeStore:
     The user's library is the default. Another program can keep a separate
     store at a path valid_path accepts; it never mixes with the library, and
     with titles=False it never keeps a window title.
+
+    A store without titles may also keep definitions of one face, for cards
+    under a cover, in a second map beside cards: {"version": 1, "cards": {...},
+    "one_face": {...}}. Helpers before 0.3.0-rc.25 read only cards and write
+    back only cards, so they never see a definition of one face. A store opened
+    with one_face=True reads both maps as one, a definition of one face in
+    place of the same name's in cards; otherwise it reads cards alone, as
+    before. The library never reads or writes one_face.
     """
-    def __init__(self, env=None, path=None, titles=True):
+    def __init__(self, env=None, path=None, titles=True, one_face=False):
         if path is None:
             env = os.environ if env is None else env
             self.root = Path(env.get('XDG_STATE_HOME', str(Path(env.get('HOME', Path.home())) / '.local/state'))) / 'hyprflip'
@@ -1738,6 +1751,7 @@ class RecipeStore:
         # The lock and temporary files sit beside the file, named after it:
         # cards.lock and cards-<uuid> for the library.
         self.separate, self.titles = path is not None, titles
+        self.one_face = bool(one_face) and not titles
 
     @staticmethod
     def valid_path(path, env=None):
@@ -1782,13 +1796,13 @@ class RecipeStore:
         return recipe
 
     @staticmethod
-    def validate(recipe):
+    def validate(recipe, fewest=2):
         if not isinstance(recipe, dict) or type(recipe.get('active')) is not int: raise ValueError()
         if 'workspace' in recipe and (type(recipe['workspace']) is not int or not 1 <= recipe['workspace'] <= 2147483647): raise ValueError()
         if 'floating' in recipe and type(recipe['floating']) is not bool: raise ValueError()
         # Two faces, front and back, or more with cores that hold more; the core's own cap,
-        # container_max_faces, decides what opens.
-        if not isinstance(recipe['faces'], list) or not 2 <= len(recipe['faces']) <= RECIPE_MAX_FACES: raise ValueError()
+        # container_max_faces, decides what opens. With fewest=1, one face, for a card under a cover.
+        if not isinstance(recipe['faces'], list) or not fewest <= len(recipe['faces']) <= RECIPE_MAX_FACES: raise ValueError()
         if not 0 <= recipe['active'] < len(recipe['faces']): raise ValueError()
         for face in recipe['faces']:
             apps, ratios = face['apps'], face['ratios']
@@ -1805,7 +1819,13 @@ class RecipeStore:
                 if 'desktop_id' in app and not DesktopApps.valid_id(app['desktop_id']): raise ValueError()
 
     def read(self):
-        if not self.path.exists(): return {}
+        """The definitions this store's view sees: cards, and with one_face its definitions of one face over them."""
+        cards, one_face = self.read_both()
+        return {**cards, **one_face} if self.one_face else cards
+
+    def read_both(self):
+        """Both maps, cards and one_face, whatever the view. An invalid entry in either makes the store unreadable."""
+        if not self.path.exists(): return {}, {}
         try:
             if self.path.stat().st_size > 1024 * 1024: raise ValueError()
             data = json.loads(self.path.read_text())
@@ -1813,7 +1833,15 @@ class RecipeStore:
             for name, recipe in data['cards'].items():
                 if not self.valid_name(name): raise ValueError()
                 self.validate(recipe)
-            return data['cards']
+            one_face = {}
+            if not self.titles and 'one_face' in data:
+                one_face = data['one_face']
+                if not isinstance(one_face, dict) or len(data['cards'].keys() | one_face.keys()) > 100: raise ValueError()
+                for name, recipe in one_face.items():
+                    if not self.valid_name(name): raise ValueError()
+                    self.validate(recipe, fewest=1)
+                    if len(recipe['faces']) != 1: raise ValueError()
+            return data['cards'], one_face
         except (ValueError, KeyError, TypeError, UnicodeError, RecursionError) as error:
             # RecursionError: JSON nested deeper than the parser goes.
             raise SetupError(f'Saved cards could not be read. Check {self.path}; it has not been overwritten.') from error
@@ -1830,23 +1858,35 @@ class RecipeStore:
             # A safety net: callers blank titles first, but none is ever written.
             replacements = {name: None if recipe is None else self.untitled(recipe) for name, recipe in replacements.items()}
         for recipe in replacements.values():
-            if recipe is not None: self.validate(recipe)
+            # One face only where the view keeps definitions of one face.
+            if recipe is not None: self.validate(recipe, fewest=1 if self.one_face else 2)
         # A separate store's directory is its program's own; only the library makes one.
         if not self.separate: self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
         with (self.root / (self.path.stem + '.lock')).open('a') as lock:
             fcntl.flock(lock, fcntl.LOCK_EX)
-            cards = self.read()
-            if any(cards.get(name) != previous for name, previous in expected.items()):
+            cards, one_face = self.read_both()
+            view = {**cards, **one_face} if self.one_face else cards
+            if any(view.get(name) != previous for name, previous in expected.items()):
                 raise SetupError('That saved card changed in another menu. Open Saved cards again.')
             for name, recipe in replacements.items():
-                if recipe is None: cards.pop(name, None)
-                else: cards[name] = recipe
-            if len(cards) > 100: raise SetupError('You have 100 saved cards. Delete an unused one before saving another.')
+                if recipe is None:
+                    # Gone from both maps: a definition of one face never comes back after a delete.
+                    cards.pop(name, None); one_face.pop(name, None)
+                elif len(recipe['faces']) == 1:
+                    # cards keeps the name's earlier definition, for helpers that read cards alone.
+                    one_face[name] = recipe
+                else:
+                    cards[name] = recipe; one_face.pop(name, None)
+            if len(cards.keys() | one_face.keys()) > 100:
+                raise SetupError('You have 100 saved cards. Delete an unused one before saving another.')
+            data = {'version': 1, 'cards': cards}
+            # Written only when it holds something, so that a store without it reads as it always did.
+            if one_face: data['one_face'] = one_face
             temporary = self.root / (self.path.stem + '-' + uuid.uuid4().hex)
             try:
                 descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
                 with os.fdopen(descriptor, 'w') as handle:
-                    json.dump({'version': 1, 'cards': cards}, handle, ensure_ascii=False, indent=2, allow_nan=False)
+                    json.dump(data, handle, ensure_ascii=False, indent=2, allow_nan=False)
                     handle.write('\n'); handle.flush(); os.fsync(handle.fileno())
                 temporary.replace(self.path)
             finally:

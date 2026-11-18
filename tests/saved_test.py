@@ -310,6 +310,21 @@ class MultiFaceSavedTest(unittest.TestCase):
             with self.subTest(broken=broken), self.assertRaises(setup.SetupError):
                 setup.Setup.restore_line(arrangement | broken, [0, 0, 1, 1], False)
 
+    def test_restore_line_with_a_cover_ends_in_it_and_may_have_one_face(self):
+        one = {'active': 0, 'faces': [{'windows': ['0xa', '0xb'], 'axis': 'vertical', 'ratios': [.6, .4], 'focus': 1,
+                                       'name': 'Mail'}]}
+        self.assertEqual(setup.Setup.restore_line(one, [0, 0, 1200, 700], False, cover='0xf'),
+                         'restore quiet tiled 0 0 0 0 1200 700 front vertical 0xb 0xa:0.6 0xb:0.4 name 1 Mail cover 0xf')
+        two = {'active': 1, 'faces': [{'windows': ['0xa'], 'axis': 'horizontal', 'ratios': [1], 'focus': 0},
+                                      {'windows': ['0xb'], 'axis': 'horizontal', 'ratios': [1], 'focus': 0}]}
+        self.assertTrue(setup.Setup.restore_line(two, [0, 0, 1, 1], False, cover='0xf').endswith(
+            'back horizontal 0xb 0xb:1 cover 0xf'))
+        # Without a cover one face is refused as always; a covered card is tiled, and its cover an address.
+        for cover, floating in ((None, False), ('0xf', True), ('f', False), ('0xf 0xa', False), (15, False)):
+            with self.subTest(cover=cover, floating=floating), self.assertRaises(setup.SetupError):
+                setup.Setup.restore_line(one, [0, 0, 1, 1], floating, cover=cover)
+        self.assertNotIn('cover', setup.Setup.restore_line(two, [0, 0, 1, 1], False))
+
     def test_restore_line_writes_six_faces(self):
         arrangement = {'active': 5, 'faces': [
             {'windows': [f'0x{i:x}'], 'axis': 'horizontal', 'ratios': [1], 'focus': 0} for i in range(0xa, 0x10)]}
@@ -395,5 +410,142 @@ class MultiFaceSavedTest(unittest.TestCase):
         for index, f in enumerate(six['faces'][2:], 3): f['name'] = f'Face {index}'
         self.store.update('Six', six, None)
         self.assertEqual(self.store.read(), {'Six': six})
+
+
+
+def old_read(path):
+    """RecipeStore.read as helpers before 0.3.0-rc.25 had it: cards alone, every entry checked."""
+    store = setup.RecipeStore(path=str(path), titles=False)
+    data = json.loads(Path(path).read_text())
+    if type(data['version']) is not int or data['version'] != 1 or not isinstance(data['cards'], dict) or len(data['cards']) > 100:
+        raise ValueError()
+    for name, recipe in data['cards'].items():
+        if not store.valid_name(name): raise ValueError()
+        store.validate(recipe)
+    return data['cards']
+
+
+class OneFaceStoreTest(unittest.TestCase):
+    """A caller's store keeping definitions of one face in a second map, which older helpers never see."""
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.root = Path(directory.name)
+        (self.root / 'caller').mkdir(mode=0o700)
+        self.path = str(self.root / 'caller/cards.json')
+        face = {'apps': [{'class': 'a', 'initial_class': 'a', 'title': '', 'label': 'A'}], 'axis': 'horizontal',
+                'ratios': [1.0], 'focus': 0}
+        other = {'apps': [{'class': 'b', 'initial_class': 'b', 'title': '', 'label': 'B'}], 'axis': 'horizontal',
+                 'ratios': [1.0], 'focus': 0}
+        self.pair = {'faces': [deepcopy(face), deepcopy(other)], 'active': 0}
+        self.lone = {'faces': [deepcopy(face)], 'active': 0}
+
+    def store(self, one_face=False): return setup.RecipeStore(path=self.path, titles=False, one_face=one_face)
+    def maps(self): return self.store().read_both()
+
+    def test_validate_takes_one_face_only_when_asked(self):
+        with self.assertRaises(ValueError): setup.RecipeStore.validate(self.lone)
+        setup.RecipeStore.validate(self.lone, fewest=1)
+        setup.RecipeStore.validate(self.pair, fewest=1)
+        for broken in ({'faces': [], 'active': 0}, {'faces': self.lone['faces'], 'active': 1}):
+            with self.subTest(broken=broken), self.assertRaises(ValueError):
+                setup.RecipeStore.validate(broken, fewest=1)
+
+    def test_one_face_goes_to_its_own_map_and_keeps_the_fallback(self):
+        self.store().update('Comms', self.pair, None)
+        flagged = self.store(one_face=True)
+        flagged.update('Comms', self.lone, self.pair)
+        self.assertEqual(self.maps(), ({'Comms': self.pair}, {'Comms': self.lone}))
+        # The flag's view sees the definition of one face, the plain view the fallback.
+        self.assertEqual((flagged.read(), self.store().read()), ({'Comms': self.lone}, {'Comms': self.pair}))
+        # A plain view's write keeps the other map; two faces pop the one of one face.
+        self.store().update('Other', self.pair, None)
+        self.assertEqual(self.maps()[1], {'Comms': self.lone})
+        flagged.update('Comms', self.pair, self.lone)
+        self.assertEqual(self.maps(), ({'Comms': self.pair, 'Other': self.pair}, {}))
+        # A delete, from either view, pops both.
+        flagged.update('Comms', self.lone, self.pair)
+        self.store().update('Comms', None, self.pair)
+        self.assertEqual(self.maps(), ({'Other': self.pair}, {}))
+        flagged.update('New', self.lone, None)
+        self.assertEqual(self.maps(), ({'Other': self.pair}, {'New': self.lone}))
+        flagged.update('New', None, self.lone)
+        self.assertEqual(self.maps(), ({'Other': self.pair}, {}))
+        # Without the flag, one face is refused and nothing is written.
+        before = Path(self.path).read_bytes()
+        with self.assertRaises(ValueError): self.store().update('Lone', self.lone, None)
+        self.assertEqual(Path(self.path).read_bytes(), before)
+        # Each view checks its own: the plain view expects cards' entry.
+        flagged.update('Other', self.lone, self.pair)
+        with self.assertRaisesRegex(setup.SetupError, 'changed in another'): flagged.update('Other', self.pair, self.pair)
+        self.store().update('Other', self.pair, self.pair)
+
+    def test_the_limit_counts_both_maps(self):
+        flagged = self.store(one_face=True)
+        flagged.change({}, {f'Card {i}': self.pair for i in range(60)} | {f'Lone {i}': self.lone for i in range(40)})
+        before = Path(self.path).read_bytes()
+        for store, recipe in ((self.store(), self.pair), (flagged, self.lone)):
+            with self.subTest(recipe=len(recipe['faces'])), self.assertRaisesRegex(setup.SetupError, '100 saved cards'):
+                store.update('One more', recipe, None)
+        self.assertEqual(Path(self.path).read_bytes(), before)
+        # A name in both maps counts once.
+        flagged.update('Card 0', self.lone, self.pair)
+        flagged.update('Lone 0', None, self.lone)
+        self.store().update('One more', self.pair, None)
+        cards, one_face = self.maps()
+        self.assertEqual((len(cards), len(one_face), len(cards.keys() | one_face.keys())), (61, 40, 100))
+
+    def test_a_store_without_one_face_is_written_as_before(self):
+        self.store(one_face=True).update('Comms', self.pair, None)
+        expected = json.dumps({'version': 1, 'cards': {'Comms': self.pair}}, ensure_ascii=False, indent=2) + '\n'
+        self.assertEqual(Path(self.path).read_text(), expected)
+        self.store(one_face=True).update('Lone', self.lone, None)
+        self.store(one_face=True).update('Lone', None, self.lone)
+        self.assertEqual(Path(self.path).read_text(), expected)
+        self.assertNotIn('one_face', json.loads(Path(self.path).read_text()))
+
+    def test_an_older_helper_reads_cards_alone_and_its_writes_drop_one_face(self):
+        flagged = self.store(one_face=True)
+        flagged.update('Comms', self.pair, None)
+        flagged.update('Comms', self.lone, self.pair)
+        flagged.update('Lone', self.lone, None)
+        self.assertEqual(old_read(self.path), {'Comms': self.pair})
+        # An older helper writes {version, cards} back: the definitions of one face go, the fallback stays.
+        Path(self.path).write_text(json.dumps({'version': 1, 'cards': old_read(self.path)}))
+        self.assertEqual(flagged.read(), {'Comms': self.pair})
+        self.assertEqual(setup.Unattended.token(flagged.read()['Comms']), setup.digest(self.pair))
+
+    def test_the_flag_view_tokens_the_recipe_it_returns(self):
+        self.store().update('Comms', self.pair, None)
+        self.store(one_face=True).update('Comms', self.lone, self.pair)
+        self.assertEqual(setup.Unattended.token(self.store(one_face=True).read()['Comms']), setup.digest(self.lone))
+        self.assertEqual(setup.Unattended.token(self.store().read()['Comms']), setup.digest(self.pair))
+
+    def test_a_bad_one_face_entry_makes_the_store_unreadable(self):
+        good = {'version': 1, 'cards': {'Comms': self.pair}}
+        for one_face in ([], {'Comms': self.pair}, {'': self.lone}, {'Comms': {'faces': [], 'active': 0}},
+                         {'Comms': dict(self.lone, active=1)}, {f'L{i}': self.lone for i in range(100)}):
+            with self.subTest(one_face=str(one_face)[:40]):
+                Path(self.path).write_text(json.dumps(good | {'one_face': one_face}))
+                for flag in (False, True):
+                    with self.assertRaisesRegex(setup.SetupError, 'not been overwritten'): self.store(flag).read()
+                with self.assertRaisesRegex(setup.SetupError, 'not been overwritten'):
+                    self.store(True).update('Other', self.lone, None)
+        # A store with titles, such as the library, never reads the map, and its writes leave it out.
+        library = setup.RecipeStore(path=self.path, one_face=True)
+        Path(self.path).write_text(json.dumps(good | {'one_face': {'Comms': self.lone}}))
+        self.assertFalse(library.one_face)
+        self.assertEqual(library.read(), {'Comms': self.pair})
+        with self.assertRaises(ValueError): library.update('Lone', self.lone, None)
+        library.update('Other', self.pair, None)
+        self.assertNotIn('one_face', json.loads(Path(self.path).read_text()))
+
+    def test_the_user_library_never_keeps_one_face(self):
+        directory = tempfile.TemporaryDirectory(); self.addCleanup(directory.cleanup)
+        library = setup.RecipeStore({'XDG_STATE_HOME': directory.name}, one_face=True)
+        library.update('Comms', self.pair, None)
+        with self.assertRaises(ValueError): library.update('Comms', self.lone, self.pair)
+        self.assertEqual(set(json.loads(library.path.read_text())), {'version', 'cards'})
+
 
 if __name__ == '__main__': unittest.main()
