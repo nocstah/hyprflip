@@ -6,6 +6,8 @@
   set the cover beside its face: "This card has one face of its own.", as for
   moving an app to the other side. Folding a card that is already unfolded
   still works.
+- `scripts/release.py --trailer TEXT` adds a trailer, such as a co-author, to
+  the release commit and the pin commit.
 
 ## 0.3.0-rc.27 — 2026-11-18
 

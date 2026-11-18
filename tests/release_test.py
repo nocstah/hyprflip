@@ -51,15 +51,19 @@ class ReleaseTest(unittest.TestCase):
 
     def test_a_release_commits_tags_and_pins_hyprpm_to_the_tag(self):
         body = self.root.parent / (self.root.name + '-body')
-        body.write_text('Cards say who manages them.\n\nCo-Authored-By: Someone <someone@example.invalid>\n')
+        body.write_text('Cards say who manages them.\n')
         self.addCleanup(body.unlink)
-        result = self.release('0.3.0-rc.27', '--date', '2026-11-19', '--body', str(body), '--no-test')
+        result = self.release('0.3.0-rc.27', '--date', '2026-11-19', '--body', str(body), '--no-test',
+                              '--trailer', 'Co-Authored-By: Someone <someone@example.invalid>')
         self.assertEqual(result.returncode, 0, result.stderr)
         tagged = self.git('rev-parse', 'v0.3.0-rc.27^{commit}')
         self.assertEqual(self.git('log', '--format=%s', '-2').splitlines(),
                          ['Pin Hyprland 0.56.2 to 0.3.0-rc.27', 'Release Hyprflip 0.3.0-rc.27'])
         self.assertEqual(self.git('rev-parse', 'HEAD~1'), tagged)
-        self.assertIn('Co-Authored-By: Someone', self.git('log', '-1', '--format=%b', tagged))
+        # Both commits carry the trailer, the release after its body.
+        self.assertEqual(self.git('log', '-1', '--format=%b', tagged),
+                         'Cards say who manages them.\n\nCo-Authored-By: Someone <someone@example.invalid>')
+        self.assertEqual(self.git('log', '-1', '--format=%b'), 'Co-Authored-By: Someone <someone@example.invalid>')
         self.assertIn(PIN.format(tagged), (self.root / 'hyprpm.toml').read_text())
         self.assertIn('## 0.3.0-rc.27 — 2026-11-19\n\n- Cards say who manages them.', (self.root / 'CHANGELOG.md').read_text())
         self.assertIn('**0.3.0-rc.27 preview**', (self.root / 'README.md').read_text())

@@ -37,7 +37,8 @@ unit tests, commits "Release Hyprflip <version>", tags it, and pins
 `hyprpm.toml` to that commit in a second commit. It refuses until TESTING.md has
 a heading naming the version, and pushes nothing: it prints the push and `gh
 release create` commands. `--dry-run` shows the changes, and `--body FILE` gives
-the release commit a message body.
+the release commit a message body, and `--trailer "Co-Authored-By: …"` adds a
+trailer to both commits.
 
 ## Bug reports
 

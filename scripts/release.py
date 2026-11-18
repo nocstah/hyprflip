@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Release Hyprflip: the release commit, its tag and the hyprpm pin, in one command.
 
-  python3 scripts/release.py 0.3.0-rc.27 [--body FILE] [--date YYYY-MM-DD] [--dry-run] [--no-test]
+  python3 scripts/release.py 0.3.0-rc.27 [--body FILE] [--trailer TEXT]... [--date YYYY-MM-DD] [--dry-run] [--no-test]
 
 Before it changes anything it checks that the tracked files are clean, the tag is new, CHANGELOG.md has an
 Unreleased section with entries, and TESTING.md has a heading naming the version (the release checks are
@@ -14,7 +14,8 @@ recorded first). Then:
 4. Commit "Release Hyprflip <version>" (the body from --body), then the lightweight tag v<version>.
 5. hyprpm.toml pins the targeted Hyprland commit to the tagged commit: commit "Pin Hyprland <x.y.z> to <version>".
 
-Nothing is pushed. It prints the push and GitHub release commands. --dry-run prints what would change.
+Nothing is pushed. It prints the push and GitHub release commands. --dry-run prints what would change. --trailer
+adds a trailer, such as "Co-Authored-By: Name <address>", to both commits; repeat it for more.
 """
 import argparse
 import datetime
@@ -91,9 +92,9 @@ def show(path, old, new):
     sys.stdout.writelines(difflib.unified_diff(old.splitlines(True), new.splitlines(True), f'a/{path}', f'b/{path}'))
 
 
-def commit(message, paths):
+def commit(message, paths, trailers=()):
     git('add', '--', *paths)
-    git('commit', '--quiet', '-m', message)
+    git('commit', '--quiet', '-m', message, *(arg for trailer in trailers for arg in ('--trailer', trailer)))
     return git('rev-parse', 'HEAD')
 
 
@@ -101,6 +102,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('version', help='such as 0.3.0-rc.27')
     parser.add_argument('--body', type=Path, help="the release commit's message body, from this file")
+    parser.add_argument('--trailer', action='append', default=[], help='a trailer for both commits, such as Co-Authored-By: …')
     parser.add_argument('--date', default=datetime.date.today().isoformat(), help='the date in the changelog heading')
     parser.add_argument('--dry-run', action='store_true', help='print what would change, and change nothing')
     parser.add_argument('--no-test', action='store_true', help='skip the unit tests')
@@ -133,11 +135,11 @@ def main():
                 for path, (old, _) in edits.items():
                     (ROOT / path).write_text(old)
                 raise Refused('the unit tests fail; nothing was committed:\n' + tests.stderr[-2000:])
-        released = commit(f'Release Hyprflip {version}' + (f'\n\n{body}' if body else ''), list(edits))
+        released = commit(f'Release Hyprflip {version}' + (f'\n\n{body}' if body else ''), list(edits), args.trailer)
         git('tag', tag, released)
         old, new, hyprland = pin_edit(released)
         (ROOT / 'hyprpm.toml').write_text(new)
-        pinned = commit(f'Pin Hyprland {hyprland} to {version}', ['hyprpm.toml'])
+        pinned = commit(f'Pin Hyprland {hyprland} to {version}', ['hyprpm.toml'], args.trailer)
     except Refused as error:
         print(f'Not released: {error}', file=sys.stderr)
         return 1
