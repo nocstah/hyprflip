@@ -1,5 +1,63 @@
 # Validation
 
+## Face previews at their focused look (2026-11-18)
+
+In `switcher_workflows.py`'s six-face screenshot, the previews of faces 5 and 6
+were darker than those of faces 1 to 4: face 5 (211,84,0) drew as (128,54,8)
+and face 6 (22,160,133) as (17,75,65), while faces 1 to 4 matched their apps.
+The six-face shader is not the cause: the switcher draws every preview with
+one program from texture unit 0. The previews are snapshots that
+`FlipShader::captureFace` takes as the switcher opens, and Hyprland's
+`makeSnapshotFB` draws an app as it is at that moment. The suite opens the
+switcher about half a second after the apps of faces 5 and 6 open, while
+Hyprland still fades them in (`fadeIn`, from 0) and undims them (`fadeDim`,
+from `dim_strength`, where a new window that takes the focus starts even with
+`dim_inactive` off).
+
+A probe build that logged each app's values at the capture, on a card of six
+identical grey apps (`c0c0c0`, 192) whose switcher opened as fast as the
+suite's: fade 0.87, 0.84, 0.80, 0.75, 0.66 and 0.51 for faces 1 to 6, dim 0.07
+to 0.24, and mean preview brightness 158, 152, 143, 133, 116 and 85. Waiting
+3 s before opening, animations off, or the six restored 2 s after they opened:
+all six at 192. With `inactive_opacity=0.5` and `dim_inactive` (strength 0.4),
+3 s later, every face but the one shown read 76 for as long as the switcher
+stayed open, because the apps on hidden faces are unfocused. Turns already show
+every face at its focused opacity, undimmed, because they set that on the apps
+before their snapshots; the switcher did not.
+
+Now each face snapshot draws its apps as they look at rest and focused: done
+fading in (also after coming from another workspace), at their focused opacity
+and undimmed. Only the values drawn change, for the snapshot only, and each
+animation goes on from where it was. The change is in `src/FlipTransformer.cpp`
+(`RestingLook`, used by `FlipShader::captureFace`), so turns that use
+snapshots draw the same way. With it, the fast probe reads 192 for all six,
+measured on each preview's right part (its apps are still moving into place,
+see the end of this section), and the probe with `inactive_opacity` and
+`dim_inactive` reads 192 for all six.
+
+Checked on fix/face-preview-shade, each nested suite in its own fresh session
+(Hyprland 0.56.2, Aquamarine 0.15.1 with the render-node patch,
+`--notify-recorder`), every launcher exiting cleanly:
+- `make test`: all 3 CTest checks pass. All 518 Python unit tests pass.
+- `tests/switcher_workflows.py`: all 13 checks pass. The new one slows
+  `fadeIn` to ten seconds and sets `inactive_opacity=0.6` and `dim_inactive`
+  before faces 5 and 6 open, and requires the middle of every preview to be
+  within 12 of its app's colour on each channel. Control: the same suite
+  against the 9e8d7f5 build fails there, reading (108,35,28), (27,87,52),
+  (28,66,94), (75,38,88), (35,23,25) and (18,19,22) for (192,57,43),
+  (39,174,96), (41,128,185), (142,68,173), (211,84,0) and (22,160,133). The
+  suite as it was, at 9e8d7f5, passes its 12 checks with the dark faces 5 and
+  6 above.
+- `tests/multiface_workflows.py`: all 18 checks pass, the frames mid-slide
+  among them.
+- `tests/transitions.py`: all 15 checks pass.
+
+Not changed: an app still moving or growing into place is captured where it
+is. On a card restored straight after its apps open, the fast probe's previews
+show each app shifted right by about a fifth of the tile, with the background
+to its left. Not run: `tests/key_suites.py`, OmaRelay's `ovis.py
+cards-nested` and the other compositor suites.
+
 ## Card owners; release checks for 0.3.0-rc.27 (2026-11-18)
 
 A program that keeps its own cards can now mark them: `card <id> owner
