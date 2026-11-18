@@ -24,10 +24,11 @@ Before tagging a release, run these on a desktop with the matching Hyprland, and
 ```sh
 make test
 python -m unittest discover -s tests -p '*_test.py'
-python tests/key_suites.py --hyprglass /path/to/hyprglass.so
+python tests/release_suites.py --hyprglass /path/to/hyprglass.so \
+    --protocol /path/to/wlr-virtual-pointer-unstable-v1.xml --omacards /path/to/omacards
 ```
 
-`tests/key_suites.py` runs every compositor suite that loads the shipped key modules (`examples/containers-navigation.lua` and `examples/containers-setup.lua`), each in its own disposable nested session. Run it for every release, including those that change only the core: a core change can alter what those modules see. Add `--aquamarine` on NVIDIA, as TESTING.md describes. A release that changes a module also needs the nested suites for that change.
+`tests/release_suites.py` runs every compositor suite a release needs, each in its own disposable nested session, and prints a summary: updates and uninstall, restores and close reasons with the close hooks on and off, covers, fullscreen cards, the layouts, the switcher, the key module suites of `tests/key_suites.py` (which load `examples/containers-navigation.lua` and `examples/containers-setup.lua`), and, with `--omacards`, OmaCards' native panel checks against this checkout. Run all of it for every release, including those that change only the core: a core change can alter what the modules and the panel see. `--protocol` adds the real pointer checks; without it, or without `--omacards`, the summary notes what did not run. Add `--aquamarine` on NVIDIA, as TESTING.md describes. `--only` and `--skip` choose suites while you work; `tests/key_suites.py` still runs the key module suites alone.
 
 When the checks pass and TESTING.md records them, `python3 scripts/release.py
 <version>` makes the release: it turns the changelog's Unreleased section into
