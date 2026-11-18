@@ -28,7 +28,7 @@ the ids again.
 ```sh
 hyprctl hyprflip restore [quiet] <tiled|floating> <active> <unfolded> <x> <y> <w> <h> \
   front <axis> <focused> <address:ratio>... back <axis> <focused> <address:ratio>... \
-  [face <axis> <focused> <address:ratio>...]...
+  [face <axis> <focused> <address:ratio>...]... [cover <address>]
 ```
 
 `restore` turns open windows on one workspace into a native card. `active` is
@@ -56,6 +56,44 @@ hyprctl hyprflip restore quiet tiled 0 0 0 0 1200 900 \
   front horizontal 0x55d0a1b2c3d0 0x55d0a1b2c3d0:1 \
   back horizontal 0x55d0a1b2c4e0 0x55d0a1b2c4e0:1
 ```
+
+A `face …` group comes after the back: one before it is refused with "Each
+face needs an axis and a focused app address."
+
+### Build a card under a cover
+
+`cover <address>`, last in the line, builds the card under that window as its
+[cover](#cover-a-card-with-a-window) in the same call, so a program never shows
+the card on its own first. Cores that have it report `"restore_cover": true`
+in `status`. With a cover:
+
+- The back may be left out. The card then has one face of its own, the front,
+  and turns between it and the cover. With the cover, a card has at most six
+  faces: "A card has at most 6 faces, its cover included."
+- The card is tiled and folded, and `active` is one of its own faces: the one
+  it shows when the cover is turned over, or when the cover leaves. A floating
+  or unfolded line is refused: "A covered card is restored tiled.", "Fold the
+  card before covering it."
+- The card is built on the cover's tile: it takes that tile exactly, wherever
+  the card's apps were tiled, and the cover never moves. The box only checks
+  that the size limits fit, as for any tiled card.
+- The card shows the cover from its first frame. With `quiet`, the cover
+  counts as one of the card's apps: when the cover or one of the apps had the
+  keyboard, the cover has it afterwards.
+- The card's apps must already be on the cover's workspace. A program moves
+  them there earlier in the same batch, from a special workspace for example.
+- The cover is refused with the sentences `card <id> cover` gives: when it is
+  gone, in a card, pair or group, fullscreen, on a special workspace, or not on
+  the apps' workspace. `cover` comes once, after the faces: "Use cover <0x
+  address> once, after the faces, in a card description."
+
+```sh
+hyprctl --batch "dispatch hl.dsp.window.move({window=\"address:0x55d0a1b2c3d0\",workspace=\"3\",follow=false}) ; \
+  hyprflip restore quiet tiled 0 0 0 0 1200 900 \
+  front vertical 0x55d0a1b2c3d0 0x55d0a1b2c3d0:1 cover 0x55d0a1b2c5f0"
+```
+
+A core without it refuses the whole line, and the apps stay where they are.
 
 ## Act on a card by id
 
@@ -147,6 +185,10 @@ Uncovering:
 - If the cover was showing, the card shows the face it showed before, or its
   front if that face has gone.
 - The keyboard stays on the cover if it had it.
+- A card with one face of its own comes apart where it is, since a card keeps
+  two faces: its apps and the cover stay open as ordinary windows on its
+  workspace, as after `card <id> ungroup`. A program that turns such a card
+  back into tiles beside its window can rely on this.
 - A card with no cover replies `ok` and nothing changes.
 
 Out of sight, a card never takes its cover along. `card <id> workspace
@@ -166,7 +208,8 @@ hyprctl --batch "hyprflip card 12 workspace special:park silent ; \
 The cover can also leave without the program:
 
 - If the person releases or closes the cover, the card has no cover any more
-  (`"cover": null`) and shows the face it showed before.
+  (`"cover": null`) and shows the face it showed before. A card with one face
+  of its own comes apart instead, as when it is uncovered.
 - Releasing the last app of one of the card's two own faces takes the card
   apart, as it does without a cover.
 - Closing the last app of one of the card's own faces takes only that face
@@ -176,17 +219,22 @@ The cover can also leave without the program:
   Without a cover, a face's last app closing takes the card apart.
 - A card with one face of its own and its cover comes apart when it is moved
   to a special workspace, since a card keeps two faces: its apps go there as
-  ordinary windows and the cover stays where the card was.
+  ordinary windows and the cover stays where the card was. The program that
+  built it builds it again under the same cover when it comes back, with
+  [`restore … cover`](#build-a-card-under-a-cover); that card has a new id.
 - `card <id> ungroup` and unloading the plugin leave the cover as an ordinary
   window, like the card's apps. So does uninstalling, the cover shown or not.
 - An update with `scripts/install.py` takes each cover off before it unloads
   the plugin. Once the card is back in its tile, the update puts the cover back
   on, and the card shows what it showed: its cover, or the same face. A card
-  with one face of its own is no card without its cover. It comes apart into
-  ordinary tiles, and the program that built it builds it again. If the cover
+  with one face of its own is no card without its cover, so it keeps it: the
+  update rebuilds it under its cover with `restore … cover`, in the cover's
+  tile, and the card shows its cover or its face as before. If the cover
   closed meanwhile, or the core refuses it, the update says so, leaves the card
   without it, and goes on. Should a covered card refuse to give up its cover,
-  for example during a drag, the update stops before it changes anything.
+  for example during a drag, the update stops before it changes anything. Going
+  back to a core without `restore_cover`, the line for a card of one face is
+  refused and its apps stay open as separate windows.
 
 The cover's face takes no other app. Attaching an app to it, dropping one on
 it and the menus' edits are refused: "This face is the card's cover and holds
@@ -198,6 +246,12 @@ flip, vertical or slide.
 
 `save` in [`control.py unattended`](#save-a-card) saves the card's own faces;
 its `members` leave the cover out.
+
+Not yet: a parked card with one face of its own comes apart, so it comes back
+as a new card with a new id. A later core may keep a record of such a card
+while it is apart, with its id and faces, and put it together again with
+`card <id> cover`. Programs should read the id again after each visit, as they
+do now.
 
 ## Swap with an animation
 
@@ -441,11 +495,12 @@ A request is a JSON object of at most 65536 bytes with `"protocol": 1`, an
 
 | Action | Fields (optional in brackets) | Reply |
 | --- | --- | --- |
-| `capabilities` | none | `actions`, `core`, `max_panes`, `max_faces` |
-| `list` | `store` [`name`] | `cards` |
-| `delete` | `store`, `name`, `token` [`lock_ms`] | `result`: `deleted` or `absent` |
-| `open` | `workspace`; `name` and `store`, or `recipe` [`bind`, `owned`, `focus`, `launch`, `timeout_ms`, `lock_ms`] | `result`: `opened`, and the card |
-| `save` | `store`, `name`, `card`, `members`, `previous` [`base`, `keep`, `floating`, `owned`, `lock_ms`] | `result`: `saved` or `unchanged` |
+| `capabilities` | none | `actions`, `core`, `max_panes`, `max_faces`, `one_face` |
+| `list` | `store` [`name`, `one_face`] | `cards` |
+| `delete` | `store`, `name`, `token` [`one_face`, `lock_ms`] | `result`: `deleted` or `absent` |
+| `open` | `workspace`; `name` and `store`, or `recipe` [`bind`, `owned`, `focus`, `launch`, `timeout_ms`, `lock_ms`, `one_face`, `cover` or `tiles`] | `result`: `opened`, and the card; or `tiles` |
+| `save` | `store`, `name`, `card`, `members`, `previous` [`base`, `keep`, `floating`, `owned`, `one_face`, `lock_ms`] | `result`: `saved` or `unchanged` |
+| `put` | `store`, `name`, `recipe`, `previous` [`one_face`, `lock_ms`] | `result`: `saved` or `unchanged` |
 
 A reply that succeeds carries `protocol`, `"ok": true` and a `result` named
 after its action, or after what happened.
@@ -456,7 +511,11 @@ Hyprland answers without such a core; when Hyprland does not answer, the reply
 is the `hyprland` error. `max_panes` is the core's limit of apps per face, 0
 without a core. `max_faces` is the most faces the core lets a card hold, a
 cover included: the status's `container_max_faces`, and 2 for a core that does
-not say or no core.
+not say or no core. `one_face` is true when the loaded core builds a card
+under a cover (`"restore_cover": true` in `status`), so that `open` can bring
+back [a definition of one face](#cards-of-one-face) under one. A helper that
+lists `put` accepts the `one_face`, `cover` and `tiles` fields whatever the
+core; an older one answers `invalid_request` to any of them.
 
 `list` gives each definition in the store, or only `name`, with its `token`,
 its `active` face, whether it is `floating` and its `faces`. Each app there has
@@ -577,6 +636,38 @@ false when the write failed. The card stays open either way.
 (null if none came in time), so a caller can still find a window that comes
 late. `card` is the new card's id, ready for `card <id> …` calls.
 
+### Cards of one face
+
+A [covered card](#cover-a-card-with-a-window) can have one face of its own,
+and its apps can also sit as plain tiles beside the caller's window. Requests
+for these take three fields:
+
+- `one_face: true`, in any request with a store, asks for the store's view
+  that holds definitions of one face ([the store](#the-store)). Without it a
+  request sees, and is answered, exactly as by a helper before them.
+- `cover` names a window on `workspace` to build the card under, with
+  [`restore … cover`](#build-a-card-under-a-cover): the card takes the cover's
+  tile and shows the cover, and the keyboard stays there. The cover must be
+  open on `workspace` (`changed`), in no card, pair or group (`in_card`) and
+  not fullscreen (`fullscreen`); the core checks the rest. It is never bound,
+  never moved and never counted as a copy of an app open elsewhere, and a cover
+  in `bind` is `invalid_request`. It takes a face of the core's `max_faces`
+  (`too_many_faces`). A covered card is tiled: a definition's `floating` is
+  ignored. A core without `restore_cover` answers `unavailable` before
+  anything moves. At the commit the cover must still have the same process,
+  class and workspace and be in no card (`changed`), and the batch ends with
+  the restore under it.
+- `tiles: true` binds and launches as usual, then moves and groups nothing.
+  The reply is `"result": "tiles"` with the definition's `token`, `slots`
+  with the windows found, `launched`, `unused` and, when a launcher was written
+  back, `remembered`. Launched apps open where their launchers put them,
+  usually the active workspace, and arranging them is the caller's job.
+
+`cover` and `tiles` exclude each other. A definition of one face opens only
+with one of them: a stored one without either is `needs_cover`, and a
+`recipe` of one face without either is `invalid_request`. A definition of two
+faces or more opens under a cover or as tiles too.
+
 ### Save a card
 
 ```json
@@ -592,6 +683,10 @@ touches the user's library.
 
 - `members` must be exactly the card's apps, without its cover (`changed`). An unknown id is
   `no_card`, a pair `not_native`, and a fullscreen card `fullscreen`.
+- A covered card with one face of its own saves as a definition of one face,
+  written only with `one_face: true`. Without it the reply is
+  `one_face_store` and the store is left as it was. `base` may have one face
+  only with `one_face`.
 - `previous` is the token the caller last read for `name`, or null for a new
   name. A token that no longer matches, or null for a name that exists, is
   `conflict`. A new name is always written. An existing one is written only
@@ -618,6 +713,23 @@ touches the user's library.
 The reply carries `name`, the definition's `token`, `dropped` and `slots`,
 where a kept app's `address` is null.
 
+### Put a definition
+
+```json
+{"protocol": 1, "action": "put", "store": "/home/me/.local/state/example/cards.json",
+ "name": "acme", "recipe": {"active": 0, "faces": [{"apps": [{"class": "example-browser",
+ "initial_class": "example-browser", "title": "", "label": "Browser"}], "ratios": [1],
+ "axis": "horizontal", "focus": 0}]}, "previous": "<token>", "one_face": true}
+```
+
+`put` writes a definition without a card, such as one the caller keeps for
+apps it shows as tiles. `recipe` is [a definition](#a-definition) with every
+`title` empty, and one of one face needs `one_face` (`invalid_request`).
+`previous` works as in `save`: null for a new name, else the name's current
+token (`conflict`). A definition equal to the stored one is `unchanged`. It
+never asks Hyprland anything. The reply is the one `save` gives, with
+`dropped` empty and every `address` null.
+
 ### A definition
 
 A store keeps a definition under each name, and `recipe` and `base` carry one in
@@ -639,7 +751,8 @@ it by these rules:
 
 - `active` is the face shown, from 0. `floating` (true or false) and `workspace`
   (1 to 2147483647) are optional.
-- `faces` holds two to six faces, front first. Each has `apps` (1 to 5),
+- `faces` holds two to six faces, front first, or one in the `one_face` view
+  ([cards of one face](#cards-of-one-face)). Each has `apps` (1 to 5),
   `ratios`, `axis` (`horizontal` or `vertical`) and `focus`, the index of the
   app that has the face's focus. A store or request is read with up to eight,
   so that a later core's definitions stay readable; `open` refuses a definition
@@ -674,6 +787,24 @@ beside it. It never keeps a window title: titles are blanked before anything is
 compared, digested or written. A file the helper cannot read is
 `store_unreadable`, and it is never overwritten.
 
+Definitions of one face sit in a second map beside the cards:
+`{"version": 1, "cards": {…}, "one_face": {…}}`.
+
+- Only a request with `one_face: true` sees them. Its view is `cards` with
+  `one_face` laid over it by name, and its tokens are those of the
+  definitions it sees. Any other request sees `cards` alone.
+- A write of one face goes to `one_face` and leaves the name's entry in
+  `cards`, when it has one, as the fallback the other view goes on reading. A
+  write of two faces or more goes to `cards` and takes the name out of
+  `one_face`. A delete, from either view, takes the name out of both.
+- The 100 definitions count each name once, in either map.
+- The map is written only while it holds something, so a store without one is
+  written byte for byte as before.
+- A helper from before cards of one face reads `cards` alone and writes back
+  only `cards`: its first write drops the map, and the fallbacks stay.
+- A bad entry in `one_face` makes the store `store_unreadable`, as one in
+  `cards` does. The user's library never has the map.
+
 ### Errors
 
 ```json
@@ -694,15 +825,17 @@ apps it started in `launched`; they stay open.
 | `store_unreadable` | The store could not be read or written; a damaged file is never overwritten | Repair or move the file |
 | `invalid_name` | The name is empty, longer than 64 characters, or has control characters or extra spaces | Fix the name |
 | `not_found` | The store has no definition by that name | List again, or send a `recipe` |
-| `unavailable` | Hyprland answered without a core that has native cards and `card <id> ungroup`, or the session variables are missing | Wait until such a core is loaded, or run the helper inside the Hyprland session |
+| `unavailable` | Hyprland answered without a core that has native cards and `card <id> ungroup`, or without `restore_cover` for a `cover`, or the session variables are missing | Wait until such a core is loaded, or run the helper inside the Hyprland session |
 | `hyprland` | Hyprland did not answer, or refused one of the helper's own steps | Try again soon |
 | `unsupported_workspace` | The workspace is not an existing numbered dwindle workspace | Choose another one |
-| `too_many_faces` | The definition has more faces than the loaded core's `container_max_faces` (`max_faces` in `capabilities`); nothing changed | Open a definition with fewer faces, or update Hyprflip |
+| `too_many_faces` | The definition has more faces than the loaded core's `container_max_faces` (`max_faces` in `capabilities`), a cover counted; nothing changed | Open a definition with fewer faces, or update Hyprflip |
+| `needs_cover` | A definition of one face was opened with neither `cover` nor `tiles`; nothing changed | Open it under a cover window, or as tiles |
+| `one_face_store` | A card with one face of its own was saved without `one_face`; the store is unchanged | Save it with `one_face: true` |
 | `fullscreen` | A window on that workspace, a bound window or the card to save is fullscreen | Try again after fullscreen ends |
 | `incomplete` | A face has no app to show; `slots` says why | Bind, allow or install the missing apps |
-| `in_card` | A bound window already belongs to a card, pair or group | Bind another window |
+| `in_card` | A bound window or the cover already belongs to a card, pair or group | Bind another window, or choose another cover |
 | `busy` | The lock stayed taken for `lock_ms`, or the core refused for input in progress | Try again in a moment |
-| `changed` | A bound window closed, changed or cannot be bound, or `members` no longer match the card | Read the windows again |
+| `changed` | A bound window or the cover closed, changed or cannot be used, or `members` no longer match the card | Read the windows again |
 | `conflict` | The definition changed since the caller read it, or a new name already exists | List again and use the current token |
 | `refused` | The core refused the card; every app went back | Do not repeat the request unchanged |
 | `rollback_failed` | The core refused the card, and the apps in `stranded` could not go back | Move those windows back, or tell the user |
@@ -715,8 +848,8 @@ apps it started in `launched`; they stay open.
 ### Locking and cancelling
 
 `open` takes the menus' request lock while it checks the request and again for
-its commit, never while it waits for launched apps. `save` and `delete` hold it
-throughout. Each waits up to `lock_ms` for the lock and then replies `busy`.
+its commit, never while it waits for launched apps. `save`, `put` and `delete`
+hold it throughout. Each waits up to `lock_ms` for the lock and then replies `busy`.
 An unattended request never supersedes a menu or panel request that waits for
 an answer, as a newer menu request does: it only waits its turn. Store writes
 also take the store's own lock. `list` and `capabilities` take no lock.

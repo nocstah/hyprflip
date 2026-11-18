@@ -1,5 +1,33 @@
 # Changelog
 
+## Unreleased
+
+- A card can be built under its cover in one call: `restore … cover
+  <address>`. With a cover the back may be left out, so the card has one face
+  of its own and turns between it and the cover. The card is built on the
+  cover's tile, so it takes that tile exactly and the cover never moves, and
+  it shows the cover from its first frame, the keyboard staying there. Cores
+  that have it report `"restore_cover": true`. A `face …` group before the
+  back is now refused. See
+  [Build a card under a cover](docs/SCRIPTING.md#build-a-card-under-a-cover).
+- An update with `scripts/install.py` keeps a covered card with one face of
+  its own under its cover, on the face it showed. Before, it took the card
+  apart and left it to the program that built it.
+- The card helper's unattended requests handle cards of one face: `open`
+  takes `cover` (build the card under that window, in its tile, in the same
+  batch) or `tiles` (bind and launch the apps, then leave them as tiles), and
+  a definition of one face opened with neither is `needs_cover`. `save` and
+  the new `put` action keep definitions of one face in a `one_face` map of the
+  caller's store, only for requests that send `one_face: true`; others get
+  `one_face_store` and the store is left alone. Older helpers ignore the map
+  and keep reading the card of two faces saved under the same name.
+  `capabilities` lists `put` and says `one_face`. See
+  [Cards of one face](docs/SCRIPTING.md#cards-of-one-face).
+- Fix: on a covered card with one face of its own, Edit card no longer offers
+  to move an app to another face, and the core refuses it with "This card has
+  one face of its own."; saving it from the menu says saved cards keep two
+  faces or more instead of failing with an empty message.
+
 ## 0.3.0-rc.24 — 2026-11-18
 
 - Another module can take one of Hyprflip's keys. It claims the key in the

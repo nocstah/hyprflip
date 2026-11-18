@@ -4,6 +4,19 @@ The optional guided card menu saves arrangements for later reuse. It prefers
 Omarchy’s running shell and automatically falls back to Fuzzel, Rofi or Wofi. A card
 has two to six faces, with one to five apps in a row or column on each face.
 
+Saved cards keep two faces or more. A covered card with one face of its own
+(a program's window over one face of apps) cannot be saved from the menu:
+**Save card…** says "Saved cards keep two faces or more; this card has one of
+its own.", and **Edit card** offers no move to another face on it. A program
+keeps such cards in a store of its own, in a `one_face` map beside its cards;
+[Scripting](SCRIPTING.md#the-store) describes it. Each definition of one face
+can have a card of two faces under the same name as its fallback, which a
+request without `one_face` and an older helper read instead. Going back to a
+Hyprflip from before cards of one face: its helper reads only the cards, so
+the program falls back to those, and its first write drops the `one_face`
+map; its core cannot rebuild a covered card of one face after the reinstall,
+so its apps stay open as separate windows.
+
 Going back to a Hyprflip from before six-face cards: its helper refuses a whole
 library that holds a card with five or six faces ("Saved cards could not be
 read"), and its core leaves the apps of such open cards apart after the
