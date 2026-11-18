@@ -256,6 +256,9 @@ class Controller {
     UP<SEventLoopDoLaterLock> m_reconcileLater, m_keyLater, m_frameLater, m_dropLater;
     std::vector<CHyprSignalListener> m_listeners;
     std::optional<uint32_t> m_eventKey;
+    // Keys down now, and the last release, to tell a held key's repeat from a new press.
+    std::vector<uint32_t> m_keysDown;
+    std::optional<std::pair<uint32_t, uint32_t>> m_lastRelease; // keycode, time in ms
     bool m_mutating = false;
     bool m_stopping = false;
     // The plugin file this core was loaded from, as status reports it, so that a helper can tell whether the

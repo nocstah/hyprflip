@@ -2111,8 +2111,10 @@ Chill work. The next change adds named saved arrangements and hold-to-peek.
   recover from a failed plugin load. Forced focus changes between IPC requests
   now exercise both the updater and saved-card helper. Both select, verify and
   act in one Lua callback, with mark and pair/attach kept together.
-- `tests/peek.py` passes 19 checks: every transition in both directions, early
+- `tests/peek.py` passes 21 checks: every transition in both directions, early
   reversal, an actual synthetic key press/release with modifiers released first,
+  a held key repeating (release and press at once) during a turn F8 began, which
+  keeps the turn, and another key during it, which finishes it,
   typing, focus, unfold, workspace changes, config reload, a real GTK popup,
   pane closure, virtual monitor removal during Portal, virtual DPMS off/on,
   unload while holding, and native two-window pairs.

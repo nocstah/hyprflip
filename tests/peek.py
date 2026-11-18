@@ -60,6 +60,7 @@ try:
 -- the user's existing resolver setting; this override is only in this fixture.
 hl.config({input={resolve_binds_by_sym=true}})
 hl.bind("SUPER + CTRL + ALT + SPACE", function() hl.plugin.hyprflip.peek() end)
+hl.bind("F8", function() hl.plugin.hyprflip.flip() end)
 ''')
     ctl('reload'); assert not ctl('configerrors')
     busy = {w['id'] for w in data('-j', 'workspaces')}
@@ -97,6 +98,26 @@ hl.bind("SUPER + CTRL + ALT + SPACE", function() hl.plugin.hyprflip.peek() end)
     process.wait(timeout=5); assert process.returncode == 0, process.stderr.read()
     wait(lambda: not state()['peeking']); settled(); assert card()['active'] == 0
     passed('actual shortcut release returns even when all modifiers are released before Space')
+
+    # A held key that repeats is no other key: on a MacBook a held Fn repeats as a release and a press at once,
+    # and that ended the turn F8 had just begun, so the first Fn+F8 flipped without its animation.
+    setting('flip', 1200); focus(a); time.sleep(.2); before = card()['active']
+    process = subprocess.Popen(['wtype', '-P', 'F9', '-s', '300', '-k', 'F8', '-s', '150', '-p', 'F9', '-P', 'F9',
+                                '-s', '500', '-p', 'F9'], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+    processes.append(process)
+    wait(lambda: state()['animating']); time.sleep(.35)
+    assert state()['animating'], 'the repeat of a held key ended the turn: ' + json.dumps(state())
+    process.wait(timeout=5); assert process.returncode == 0, process.stderr.read()
+    settled(); assert card()['active'] == 1 - before
+    passed('a held key repeating as a release and a press keeps the turn the flip key began')
+    focus(a); time.sleep(.2); before = card()['active']
+    process = subprocess.Popen(['wtype', '-k', 'F8', '-s', '150', '-k', 'F9'], env=env,
+                               stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+    processes.append(process)
+    wait(lambda: state()['animating']); process.wait(timeout=5); time.sleep(.1)
+    assert not state()['animating'] and card()['active'] == 1 - before, state()
+    passed('another key pressed during the turn still finishes it at once')
+    setting('flip')
 
     focus(a); action('peek'); settled(); type_keys('x')
     wait(lambda: not state()['peeking']); action('peek end'); settled(); assert card()['active'] == 1

@@ -320,6 +320,19 @@ Controller::Controller(HANDLE handle, Settings settings)
         e.input.tablet.tip.listen([this](const CTablet::STipEvent &, Event::SCallbackInfo &) { settleInput(); }));
     m_listeners.emplace_back(
         e.input.keyboard.key.listen([this](const IKeyboard::SKeyEvent &key, Event::SCallbackInfo &info) {
+            // A held key that repeats does not end a turn or a peek as another key does: a
+            // keyboard can send its repeat as another press, or (an input method's virtual
+            // keyboard) as a release and a press at once. A held Fn repeats so on a MacBook,
+            // and ended the turn F8 began. A key whose release went missing only stops ending them.
+            const bool pressed = key.state == WL_KEYBOARD_KEY_STATE_PRESSED;
+            const bool repeat = pressed && (std::ranges::contains(m_keysDown, key.keycode) ||
+                                            (m_lastRelease && m_lastRelease->first == key.keycode &&
+                                             key.timeMs - m_lastRelease->second <= 1));
+            if (!pressed) {
+                std::erase(m_keysDown, key.keycode);
+                m_lastRelease = {key.keycode, key.timeMs};
+            } else if (!std::ranges::contains(m_keysDown, key.keycode))
+                m_keysDown.push_back(key.keycode);
             if (m_switch && switcherKey(key)) {
                 info.cancelled = true;
                 return;
@@ -330,11 +343,13 @@ Controller::Controller(HANDLE handle, Settings settings)
                 endPeek();
                 return;
             }
-            if (key.state != WL_KEYBOARD_KEY_STATE_PRESSED)
+            if (!pressed)
                 return;
-            if (m_peek && m_peek->triggerKey != key.keycode) m_peek.reset();
-            if (m_turn && m_turn->triggerKey != key.keycode)
-                finish();
+            if (!repeat) {
+                if (m_peek && m_peek->triggerKey != key.keycode) m_peek.reset();
+                if (m_turn && m_turn->triggerKey != key.keycode)
+                    finish();
+            }
             m_eventKey = key.keycode;
             m_keyLater = g_pEventLoopManager->doLaterLock([this]() { m_eventKey.reset(); });
         }));

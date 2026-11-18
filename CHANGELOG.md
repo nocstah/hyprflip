@@ -6,6 +6,11 @@
   set the cover beside its face: "This card has one face of its own.", as for
   moving an app to the other side. Folding a card that is already unfolded
   still works.
+- A held key that repeats no longer ends a turn as another key does. On a
+  MacBook a held Fn repeats as a release and a press at once, so the first
+  Fn+F8 (a key bound to `flip`) flipped without its animation; further presses
+  with Fn still held animated. A different key pressed during a turn still
+  finishes it at once.
 - `scripts/release.py --trailer TEXT` adds a trailer, such as a co-author, to
   the release commit and the pin commit.
 
