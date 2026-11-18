@@ -282,12 +282,19 @@ class RestingLook {
     explicit RestingLook(const PHLWINDOW &window) {
         using namespace Desktop::View;
         static auto activeOpacity = CConfigValue<Config::FLOAT>("decoration:active_opacity");
+        static auto fullscreenOpacity = CConfigValue<Config::FLOAT>("decoration:fullscreen_opacity");
         hold(window->alpha(WINDOW_ALPHA_FADE), window->alpha(WINDOW_ALPHA_FADE)->goal());
         hold(window->alpha(WINDOW_ALPHA_MOVE_FROM_WORKSPACE), window->alpha(WINDOW_ALPHA_MOVE_FROM_WORKSPACE)->goal());
         hold(window->m_dimPercent, 0.F);
-        if (!Fullscreen::controller()->isFullscreen(window))
-            hold(window->alpha(WINDOW_ALPHA_ACTIVE),
-                 window->m_ruleApplicator->alpha().valueOrDefault().applyAlpha(*activeOpacity));
+        // The opacity Hyprland gives a focused app: fullscreen_opacity in
+        // fullscreen, active_opacity otherwise, maximized included. On a
+        // fullscreen card the switcher moves fullscreen to each face's app just
+        // before its snapshot, and Hyprland only sets the goal of its opacity.
+        auto &rules = *window->m_ruleApplicator;
+        hold(window->alpha(WINDOW_ALPHA_ACTIVE),
+             Fullscreen::controller()->getFullscreenModes(window).internal == Fullscreen::FSMODE_FULLSCREEN
+                 ? rules.alphaFullscreen().valueOrDefault().applyAlpha(*fullscreenOpacity)
+                 : rules.alpha().valueOrDefault().applyAlpha(*activeOpacity));
     }
     ~RestingLook() {
         for (const auto &[variable, value] : std::views::reverse(m_held))

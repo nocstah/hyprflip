@@ -173,5 +173,19 @@ try:
         assert 'from 1 to 6' in str(error), error
     ok('a six-face switcher opens with six previews inside the screen, and switcher pick 6 turns to the sixth face')
     ok('each preview shows its face as it looks when turned to, with apps still fading in, unfocused or dimmed')
+
+    # A fullscreen or maximized card: before each snapshot the switcher moves fullscreen to that face's app, which
+    # Hyprland brings to its focused opacity only on a later frame.
+    for mode in ('fullscreen', 'maximized'):
+        ipc.call('dispatch', f'hl.dsp.window.fullscreen({{mode="{mode}"}})'); wait(lambda: card()['fullscreen'], mode)
+        time.sleep(.3)
+        assert ipc.action('switcher open').startswith('ok')
+        s = st()['switcher']; assert s['open'] and s['previews'] == 6, s
+        time.sleep(.2); shot(mode + '.png', output)
+        ipc.action('switcher cancel'); assert not st()['switcher']['open']
+        seen = previews(Image.open(out / (mode + '.png')).convert('RGB'), s, card()['box'], m)
+        assert all(abs(a - b) <= 12 for got, want in zip(seen, wanted) for a, b in zip(got, want)), (mode, seen, wanted)
+        ipc.call('dispatch', f'hl.dsp.window.fullscreen({{mode="{mode}"}})'); wait(lambda: not card()['fullscreen'], mode + ' off')
+    ok('a fullscreen or maximized card shows every face at its focused look in the switcher')
 finally:
     for p in procs: p.terminate()
