@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.0-rc.29 — 2026-11-18
 
 - The face switcher shows each face as it looks when turned to. An app still
   fading in, after it opened or came from another workspace, made its face's

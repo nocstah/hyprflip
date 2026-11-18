@@ -22,6 +22,9 @@ exited cleanly. All three CTest checks and all 518 Python unit tests pass.
   navigation-native.py pass.
 - `tests/peek.py`: passes, with the held-key checks, in its own session.
 
+Released from 912280f. The release commit changes only the changelog, the
+README, the beta guide and this note.
+
 ## Fullscreen and maximized cards after review; checks for fix/rc28-edges (2026-11-18)
 
 A review of b6594bc, the two fixes below combined, found two minor issues.
