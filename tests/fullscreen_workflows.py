@@ -92,7 +92,8 @@ def fills(area, strict=True):
     hidden = [x for face in c['faces'] for x in face if x not in shown]
     assert any(windows[x]['fullscreen'] for x in shown), [windows[x] for x in shown]
     assert not any(windows[x]['fullscreen'] for x in hidden)
-    focused = ipc.data('-j', 'activewindow')['address']
+    focused = ipc.data('-j', 'activewindow').get('address')
+    assert focused, 'no window has the keyboard'
     assert focused in shown and windows[focused]['fullscreen'], (focused, shown)
     for x in shown:
         assert windows[x]['acceptsInput'], windows[x]
