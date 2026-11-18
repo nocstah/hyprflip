@@ -27,6 +27,9 @@ Not checked:
   stops at its first check, as expected here; it needs an x86_64 machine.
   The close-hook code has not changed since rc.27, where it passed.
 
+Released from 211f54e. The release commit changes only the changelog, the
+README, the beta guide and this note.
+
 ## Card owners; release checks for 0.3.0-rc.27 (2026-11-18)
 
 A program that keeps its own cards can now mark them: `card <id> owner
