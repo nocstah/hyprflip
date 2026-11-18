@@ -154,14 +154,16 @@ hyprctl hyprflip card 12 ungroup
 
 ```sh
 hyprctl hyprflip card 12 owner OmaRelay
-hyprctl hyprflip card 12 owner -
+hyprctl -- hyprflip card 12 owner -
 ```
 
 A program that keeps its own cards marks them, so that a panel can say who
 manages a card and what that program does with an edit. The mark is never a
 lock: the card works as before, and every action by anyone still applies. A
 name is one word of letters, digits, `.`, `_` and `-`, at most 32 characters;
-`-` clears the mark. It replies `ok: ok`, never notifies, and takes no focus.
+`-` clears the mark. hyprctl reads a lone `-` as one of its own options, so
+clear a mark after `--`, as above, or in a batch:
+`hyprctl --batch "hyprflip card 12 owner -"`. It replies `ok: ok`, never notifies, and takes no focus.
 A plain pair cannot be marked: "Only a card made by Hyprflip can have an
 owner."
 
