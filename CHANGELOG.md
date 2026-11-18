@@ -14,6 +14,11 @@
 - An update names the program that rebuilds the cards it left apart: "OmaRelay
   rebuilds them", "Could not keep a card OmaRelay manages", and each `apart`
   entry of `update-result.json` has its `owner`.
+- `scripts/release.py <version>` makes a release in one command: the
+  changelog heading, README and beta guide, the unit tests, the release commit
+  and tag, and the `hyprpm.toml` pin. It refuses until TESTING.md records the
+  release's checks, and pushes nothing.
+
 ## 0.3.0-rc.26 — 2026-11-18
 
 - An update with `scripts/install.py` keeps parked cards: the new core

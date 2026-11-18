@@ -29,6 +29,16 @@ python tests/key_suites.py --hyprglass /path/to/hyprglass.so
 
 `tests/key_suites.py` runs every compositor suite that loads the shipped key modules (`examples/containers-navigation.lua` and `examples/containers-setup.lua`), each in its own disposable nested session. Run it for every release, including those that change only the core: a core change can alter what those modules see. Add `--aquamarine` on NVIDIA, as TESTING.md describes. A release that changes a module also needs the nested suites for that change.
 
+When the checks pass and TESTING.md records them, `python3 scripts/release.py
+<version>` makes the release: it turns the changelog's Unreleased section into
+the version's heading, names the version in the README and the beta guide, ends
+the version's TESTING.md section with the commit it was released from, runs the
+unit tests, commits "Release Hyprflip <version>", tags it, and pins
+`hyprpm.toml` to that commit in a second commit. It refuses until TESTING.md has
+a heading naming the version, and pushes nothing: it prints the push and `gh
+release create` commands. `--dry-run` shows the changes, and `--body FILE` gives
+the release commit a message body.
+
 ## Bug reports
 
 Include reproduction steps, Hyprland and plugin versions, compiler version, layout, monitor scale/rotation and other loaded plugins. For rendering issues, indicate whether the problem happens with an opaque terminal pair and whether it occurs in a nested session.
