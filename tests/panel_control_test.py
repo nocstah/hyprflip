@@ -293,6 +293,15 @@ class PanelControlTest(unittest.TestCase):
         card['faces'].pop()
         self.assertEqual(control.edit_prefix('add_face', None, 1, card, {'container_max_faces': 4}), ['add_face'])
 
+    def test_a_card_with_one_face_of_its_own_has_no_other_side(self):
+        card = self.covered()
+        card['faces'] = [['0xb', '0xc']]
+        with self.assertRaisesRegex(setup.SetupError, r'^This card has one face of its own\.$'):
+            control.edit_prefix('other_side', '0xc', 0, card, {})
+        # Its other edits route as on any card.
+        self.assertEqual(control.edit_prefix('remove', '0xc', 0, card, {}), ['release:0xc'])
+        self.assertEqual(control.edit_prefix('horizontal', None, 0, card, {}), ['layout', 'layout horizontal'])
+
     def test_named_open_has_no_extra_confirmation(self):
         recipe = {'example': 'definition'}
         plan = setup.SavedPlan('goto', 'Mail', recipe, None)

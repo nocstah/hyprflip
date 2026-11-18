@@ -245,6 +245,23 @@ class MultiFaceEditTest(unittest.TestCase):
         flow.apply(plan)
         self.assertEqual(ipc.mutations, [('focus', '0xb'), ('action', 'other_side 0xc')])
 
+    def test_a_card_with_one_face_of_its_own_offers_no_move_to_another_face(self):
+        """A covered card with one face of its own: status lists that face alone, and the cover beside."""
+        ipc = CardIPC(full=True)
+        for index, w in enumerate(ipc.clients.values()): w['at'] = [index * 600, 0]
+        ipc.snapshot.update(layout_controls=True, container_max_faces=6)
+        ipc.snapshot['containers'][0].update(faces=[['0xb', '0xc']], active=0, cover='0xa', covered=False)
+        picker = Picker(None)
+        with self.assertRaises(setup.Cancelled): setup.Edit(ipc, picker).prepare('0xb')
+        values = [c.value for c in picker.prompts[0][1]]
+        self.assertNotIn('other_side', values)
+        self.assertIn('layout', values)
+        self.assertFalse(any(c.label.startswith('Move an app') for c in picker.prompts[0][1]))
+        # Picked all the same, it is no longer available.
+        with self.assertRaisesRegex(setup.SetupError, 'no longer available'):
+            setup.Edit(ipc, Picker('other_side')).prepare('0xb')
+        self.assertEqual(ipc.mutations, [])
+
     def test_two_face_cards_keep_the_other_side_wording(self):
         ipc = CardIPC(full=True)
         for index, w in enumerate(ipc.clients.values()): w['at'] = [index * 600, 0]

@@ -1354,7 +1354,8 @@ class Edit(Setup):
                 choices.append(Choice('layout', 'Layout of this side…', 'Beside · Stacked · Equal sizes' +
                                       (' · App order' if state.get('repair_cards') and card.get('layouts') else '')))
                 other = card['faces'][following]
-                if len(other) < limit:
+                # A covered card with one face of its own has no other face to move an app to.
+                if count > 1 and len(other) < limit:
                     choices.append(Choice('other_side', 'Move an app to the other side…' if count == 2 else
                                           f'Move an app to {face_name(following)}…',
                                           clean('Join ' + ', '.join(app_name(windows[a]) for a in other), 100)))
@@ -1942,9 +1943,13 @@ class Saved(Setup):
         if card.get('floating'): recipe['floating'] = True
         return recipe
 
+    ONE_FACE = 'Saved cards keep two faces or more; this card has one of its own.'
+
     def prepare_save(self, edit):
         windows, _ = Edit(self.ipc, self.menu).validate(edit)
         recipe = self.capture(edit.card, windows)
+        # A covered card with one face of its own: status leaves the cover out, and the library keeps two faces.
+        if len(recipe['faces']) < 2: raise SetupError(self.ONE_FACE)
         name = self.menu.input('Name this card (e.g. Communications)').strip()
         if not self.store.valid_name(name): raise SetupError('Use a card name between 1 and 64 characters.')
         previous = self.store.read().get(name)
@@ -2653,6 +2658,7 @@ class Saved(Setup):
             windows, _ = Edit(self.ipc, self.menu).validate(plan.edit)
             # A resize while naming the card must not save stale proportions.
             recipe = self.capture(plan.edit.card, windows)
+            if len(recipe['faces']) < 2: raise SetupError(self.ONE_FACE)
             if (plan.previous or {}).get('workspace'): recipe['workspace'] = plan.previous['workspace']
             self.remember_launchers(recipe, plan.previous, DesktopApps(getattr(self.ipc, 'env', None)))
             self.store.update(plan.name, recipe, plan.previous)

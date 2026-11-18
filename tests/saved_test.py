@@ -548,4 +548,27 @@ class OneFaceStoreTest(unittest.TestCase):
         self.assertEqual(set(json.loads(library.path.read_text())), {'version', 'cards'})
 
 
+class OneFaceMenuTest(unittest.TestCase):
+    """The menus on a covered card with one face of its own."""
+    setUp, saved = SavedTest.setUp, SavedTest.saved
+
+    def test_saving_it_from_the_menu_says_why_not(self):
+        card = self.ipc.snapshot['containers'][0]
+        card.update(faces=[['0xb', '0xc']], active=0, cover='0xa', covered=False, current='0xb')
+        self.ipc.active = '0xb'
+        flow = setup.Edit(self.ipc, Menu('save', 'Comms'))
+        with self.assertRaisesRegex(setup.SetupError, r'^Saved cards keep two faces or more; this card has one of its own\.$'):
+            flow.prepare('0xb')
+        self.assertFalse(self.store.path.exists())
+        # A plan made while it had two faces is refused the same way when it is applied.
+        card.update(faces=[['0xa'], ['0xb', '0xc']], active=1, cover=None)
+        plan = setup.Edit(self.ipc, Menu('save', 'Comms')).prepare('0xb')
+        for shown in (card, plan.edit.card):
+            shown.update(faces=[['0xb', '0xc']], active=0, cover='0xa')
+        with self.assertRaisesRegex(setup.SetupError, 'Saved cards keep two faces or more'):
+            setup.Saved(self.ipc, Menu()).apply(plan)
+        self.assertFalse(self.store.path.exists())
+        self.assertEqual(self.ipc.mutations, [])
+
+
 if __name__ == '__main__': unittest.main()

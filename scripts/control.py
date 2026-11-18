@@ -374,6 +374,9 @@ def edit_prefix(intent, pane, face, card, state):
     if intent == 'replace' and pane:
         return ['replace'] + ([pane] if len(members) > 1 else [])
     if intent == 'other_side' and pane:
+        # A covered card with one face of its own has no other face to move an app to.
+        if len(card['faces']) < 2:
+            raise w.SetupError('This card has one face of its own.')
         return ['other_side', pane]
     if intent in ('horizontal', 'vertical', 'balance'):
         return ['layout', 'layout ' + intent]
