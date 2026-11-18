@@ -1,5 +1,74 @@
 # Validation
 
+## Card owners; release checks for 0.3.0-rc.27 (2026-11-18)
+
+A program that keeps its own cards can now mark them: `card <id> owner
+<name>`, or `owner <name>` in the restore that builds the card. `status`, the
+helper's snapshot and `update-result.json` report the owner, and the helper's
+`open` takes `owner`. OmaRelay asked for this so that OmaCards can say
+"Managed by OmaRelay" and, before an edit, what OmaRelay does with it. The
+mark is never a lock. `scripts/release.py` makes a release in one command.
+
+Checked on feat/card-owner at 4918d99. The next commit (416d339) adds only
+`scripts/release.py`, its tests and notes. All three CTest checks and all 518
+Python unit tests pass (506 at rc.26). Twelve tests are new:
+- `tests/unattended_test.py` (3): an open marks its card in the same restore;
+  a core without marks opens it unmarked and says so; an invalid owner, and
+  an owner with `tiles`, are refused;
+- `tests/install_test.py` (3): an update keeps each card's owner; a core
+  without marks keeps the card unmarked, through a rollback too; cards left
+  apart name their owner in the result and the message;
+- `tests/card_restore_test.py` (2): the owner comes after the faces and before
+  the cover, and is read back or stripped;
+- `tests/panel_control_test.py` (1): snapshot cards say which program manages
+  them;
+- `tests/release_test.py` (3): the release commit, its tag and the hyprpm pin;
+  a dry run that changes nothing; and each refusal.
+
+Each nested suite ran in its own fresh session (Hyprland 0.56.2, Aquamarine
+0.15.1 with the render-node patch, `--notify-recorder`), and every launcher
+exited cleanly:
+- `tests/card_id_workflows.py`: all 15 checks pass. The two new ones cover
+  `card <id> owner` (the mark stays through parking and turns, `-` clears it,
+  and a malformed name or a plain pair is refused, all without taking the
+  focus or moving the pointer) and a restore with `owner`, which marks the
+  card it builds and refuses an owner before the faces, given twice, followed
+  by a face, or malformed.
+- `tests/install_cards.py`: all 66 checks pass. The parked card is marked
+  `OmaRelay` before the update and is kept with that owner; the other cards
+  stay unmarked.
+- `tests/unattended_workflows.py`: all 14 pass. `capabilities` reports
+  `card_owner`, and the open that binds parked apps passes
+  `"owner": "OmaRelay"`; the card is marked in its one batch.
+- `tests/restore_cover_workflows.py` 10, and 10 with `--hooks-off`;
+  `tests/reveal_workflows.py` 19; `tests/cover_workflows.py` 15 with
+  `--protocol`; `tests/uninstall_session.py` 3.
+- `tests/key_suites.py` with Hyprglass: all seven suites pass (workflows 10,
+  nearby 15, setup 7, edit 14, pane 12, switch 5, claim 5).
+- Planted: a core whose restore drops the owner fails `card_id_workflows` at
+  the restore check (`card(id)['owner'] == 'OmaRelay'`) after 6 passes; it
+  passes 15 again once rebuilt from 4918d99. A helper that leaves the owner
+  out of a card's description fails four unit tests.
+
+OmaCards at its feat/owner-and-pin branch (88061f8), against this checkout:
+`tests/render.py` passes with new checks on OmaRelay's card (Cards, Edit,
+Ungroup's confirmation, Remove), another program's card (only "Managed by
+Tiler", and "Tiler may build this card again"), and an unmarked one (nothing
+said). Without the owner in the card's details, or without Ungroup's note,
+it fails with that check's message. `tests/installer_test.py`,
+`tests/pin_check.py`, `tests/release_tool_test.py` (5) and
+`omarchy plugin validate .` pass. In a session started with
+`--native-cards`, `tests/run-native.py --dwindle` passes 9 of 9 and
+`tests/navigation-native.py` 5 of 5.
+
+The release tools ran on throwaway clones of both repositories. Hyprflip's
+made the release commit, the tag and the pin commit with the same files the
+rc.25 and rc.26 releases changed by hand. OmaCards' `pin` then `release` did
+the same against its rc.30 and rc.31 commits.
+
+Not run: `tests/menu_workflows.py` and the other compositor suites, which
+neither the mark nor the installer's handling of it reaches.
+
 ## Parked cards through an update; release checks for 0.3.0-rc.26 (2026-11-18)
 
 An update used to take every card OmaRelay had parked on a special workspace
