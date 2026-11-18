@@ -1,5 +1,86 @@
 # Validation
 
+## Parked cards through an update; release checks for 0.3.0-rc.26 (2026-11-18)
+
+An update used to take every card OmaRelay had parked on a special workspace
+apart. The core refused to build a card there, so the restore failed with
+"Those apps no longer fit in one card". Now a quiet restore without a cover
+builds such a card in place, unseen, and `scripts/install.py` keeps parked
+cards. The installer also holds the card request lock for the update, marks it
+in `updating`, writes `update-result.json`, and has the new core post
+`hyprflip>>updated,<release>`. The snapshot gains `install_check` (from the
+core's `loaded_file` and bootstrap's `installed-files.json`) and `has_cover`.
+
+Checked on feat/park-updates at 5031715. All three CTest checks and all 506
+Python unit tests pass (494 at rc.25). Twelve tests are new and three
+rewritten:
+- `tests/install_test.py`: the three tests that left parked cards out (restore
+  and recovery, the dry run's count, a card parked while the update settles)
+  now keep them. New: a parked fullscreen card stays separate windows, a
+  parked card gets no tile correction, the marker, result and event (marker
+  present and lock held at the unload, the result's `kept` and `apart`, one
+  announcement, none after a refusal or a rollback), and an update that stops,
+  changing nothing, while another program holds the request lock;
+- `tests/install_check_test.py` (5): no record, the install as recorded, a
+  helper copied over (a touch alone does not count), a file gone or added (a
+  backup does not count), and a core loaded from elsewhere or from a copy
+  since replaced;
+- `tests/bootstrap_test.py` (1, and the parked summary cases): each installed
+  file is recorded;
+- `tests/panel_control_test.py` (2): `has_cover` while the card shows its own
+  face, and `install_check` in the snapshot.
+
+Each nested suite ran in its own fresh session (Hyprland 0.56.2, Aquamarine
+0.15.1 with the render-node patch, `--notify-recorder`), and every launcher
+exited cleanly:
+- `tests/install_cards.py`: all 66 checks pass. Its parked check now has an
+  update keep the card on `special:park` with the same faces and shown face,
+  its apps grouped and unseen, no marker left, a result of `ok` with 3 kept
+  and none apart, and exactly one `hyprflip>>updated,<release>` per update.
+  A new check brings the kept card back to a workspace, finds it laid out as a
+  card, and parks it again.
+- Planted: with the old refusal put back (a parked card's apps not usable
+  for a restore), the suite fails at the parked check after 59 passes. The
+  installer prints "Keeping 3 open card(s) through this update, 1 of them
+  parked out of sight", then "Could not keep a card; its apps stay open as
+  separate windows: Those apps no longer fit in one card", the sentence that
+  hid the cause before.
+- `tests/restore_cover_workflows.py`: 10 checks, and 10 again with
+  `--hooks-off` in a session started with `HYPRFLIP_CLOSE_HOOKS=0`.
+- `tests/unattended_workflows.py` (14), `tests/card_id_workflows.py` (13),
+  `tests/reveal_workflows.py` (19), `tests/cover_workflows.py` (15, with
+  `--protocol`) and `tests/uninstall_session.py` (3, with its own home) all
+  pass.
+- `tests/key_suites.py` with Hyprglass: all seven suites pass (workflows 10,
+  nearby 15, setup 7, edit 14, pane 12, switch 5, claim 5).
+
+OmaCards at its feat/install-check branch (de320ae), against this checkout:
+`tests/render.py` passes, with new checks for the Settings row (said only when
+the core differs or files changed, naming them) and for **Add as new face…**
+on a card of three faces and a cover. Each check fails when its condition is
+removed. `tests/installer_test.py` and `omarchy plugin validate .` pass. In a
+session started with `--native-cards`, `tests/run-native.py --dwindle`
+passes 9 of 9 and `tests/navigation-native.py` 5 of 5.
+
+OmaRelay's cards-nested at its main (ba851b3), run by the Agenttrail session
+against its own build of 5031715 in a fresh nested session, passes 31 of 31
+with cleanup complete. That includes its install case, which runs this
+`scripts/install.py` with a covered card of one face and parked cards. After
+the reload OmaRelay takes back each kept parked card by its members, under its
+new id, instead of rebuilding it.
+
+The OmaRelay session ran cards-nested from its cards/update-marker branch
+(672424a, the helper half of the update hold) against its own clone of 5031715.
+It passes 32 of 32. Its helper ticks every 200 ms while `scripts/install.py`
+runs, logs that cards wait while the update runs and go on after it, and never
+finds the core missing. The shown covered card of one face is kept, nothing is
+rebuilt, and the result says `ok` with 2 kept and none apart. Before the
+release tag, the result names the newest release the commit contains,
+0.3.0-rc.25, as `installed-release` does.
+
+Not run: the other compositor suites, which neither the core change (only
+quiet restores of apps on one special workspace) nor the installer reaches.
+
 ## A covered card with one face of its own; release checks for 0.3.0-rc.25 (2026-11-18)
 
 When a close would leave a card behind Herdr's window with one face of its
