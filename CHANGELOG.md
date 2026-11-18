@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.0-rc.25 — 2026-11-18
 
 - A card can be built under its cover in one call: `restore … cover
   <address>`. With a cover the back may be left out, so the card has one face

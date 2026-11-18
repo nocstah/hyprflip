@@ -1,6 +1,6 @@
 # Validation
 
-## A covered card with one face of its own (2026-11-18)
+## A covered card with one face of its own; release checks for 0.3.0-rc.25 (2026-11-18)
 
 When a close would leave a card behind Herdr's window with one face of its
 own, OmaRelay keeps that face under the cover. The core can now build that
@@ -81,6 +81,14 @@ label and the Other side of a card with one face of its own.
 
 Not run: `tests/menu_workflows.py` (portable pickers; the Edit menu change is
 covered by the unit tests) and the other compositor suites.
+
+
+Rerun at cc2b719 for the release, each nested suite in its own fresh session
+(Hyprland 0.56.2, Aquamarine 0.15.1 with the render-node patch): `make test`
+3/3, all 494 Python unit tests, `tests/restore_cover_workflows.py` 10/10 and
+`tests/install_cards.py` 65/65. OmaCards' panel at its 0.2.0-rc.30 candidate
+on this core: `tests/render.py` and `tests/installer_test.py` pass,
+`tests/run-native.py --dwindle` 9 of 9 and `tests/navigation-native.py` 5 of 5.
 
 ## A module claims one of Hyprflip's keys; release checks for 0.3.0-rc.24 (2026-11-18)
 
