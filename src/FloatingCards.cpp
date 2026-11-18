@@ -1111,8 +1111,8 @@ std::string fitProblem(const ContainerSnapshot &snapshot, bool floating) {
            px(own * available / std::max(1., needed)) + " px " + dimension +
            ". Float the card or close a window on this workspace, then open it again.";
 }
-uint64_t create(const ContainerSnapshot &snapshot, bool floating, bool focus) {
-    if (!canCreate(snapshot))
+uint64_t create(const ContainerSnapshot &snapshot, bool floating, bool focus, unsigned root) {
+    if (!canCreate(snapshot) || root >= snapshot.faces)
         return 0;
     auto c = std::make_shared<Card>();
     c->initial = {snapshot.x, snapshot.y, snapshot.width, snapshot.height};
@@ -1162,7 +1162,7 @@ uint64_t create(const ContainerSnapshot &snapshot, bool floating, bool focus) {
     if (!c->fits(c->initial))
         return 0;
     c->changing = true;
-    auto front = c->faces[0][0].lock();
+    auto front = c->faces[root][0].lock();
     if (front->m_isFloating != floating)
         g_layoutManager->changeFloatingMode(front->layoutTarget());
     c->group = CGroup::create({front});
