@@ -2458,6 +2458,9 @@ Result Controller::restore(const std::string &arguments) {
             continue;
         }
         if (token == "front" || token == "back" || token == "face") {
+            // The cover comes last: a face after it would put apps in a card the line already closed.
+            if (coverAddress)
+                return {false, "Use cover <0x address> once, after the faces, in a card description."};
             // A further face comes after the back: before it, its number would be taken from the back's.
             if (token == "face" && !sawBack)
                 return {false, "Each face needs an axis and a focused app address."};

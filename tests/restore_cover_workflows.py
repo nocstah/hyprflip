@@ -362,14 +362,18 @@ hl.config({animations={enabled=false},plugin={hyprflip={duration_ms=0,notificati
     refused(f'restore quiet tiled 0 0 {" ".join(map(str, box))} front horizontal {a} {a}:1 face horizontal {a} {a}:1 '
             f'cover {x}', 'Each face needs an axis and a focused app address.')
     refused(line(box, [[a]], x, tail=f' {a}:1'), 'Invalid app in the card description.')
+    refused(line(box, [[a]], x, tail=f' back horizontal {a} {a}:1'),
+            'Use cover <0x address> once, after the faces, in a card description.')
+    refused(line(box, [[a]], x, tail=f' front horizontal {a} {a}:1'),
+            'Use cover <0x address> once, after the faces, in a card description.')
     refused(line(box, [[a]], x, active=1), "The shown face is not one of the card's faces.")
     refused(line(box, [[a]], x, tail=f' cover {x}'), 'Use cover <0x address> once, after the faces, in a card description.')
     refused(line(box, [[a]]), 'A card needs apps on both faces.')
     loose(x, PLACE); loose(a, PLACE)
     passed('restore with a cover refuses, each with its sentence: an unmapped cover, a cover in a card, on a special '
            'workspace or another workspace, a fullscreen cover, an unfolded or floating card, more than six faces '
-           'with the cover, a face before the back, an app after the cover, a second cover, and a shown face that is '
-           'not one of the card\'s own; without a cover one face is refused as before')
+           'with the cover, a face before the back, an app or a face after the cover, a second cover, and a shown face '
+           'that is not one of the card\'s own; without a cover one face is refused as before')
 
     # 4. Parking still takes a card of one face of its own apart and leaves the cover in its tile; the same restore
     # with the cover builds it again from the parked app.

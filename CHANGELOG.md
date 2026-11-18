@@ -8,7 +8,7 @@
   cover's tile, so it takes that tile exactly and the cover never moves, and
   it shows the cover from its first frame, the keyboard staying there. Cores
   that have it report `"restore_cover": true`. A `face …` group before the
-  back is now refused. See
+  back, or any face after the cover, is refused. See
   [Build a card under a cover](docs/SCRIPTING.md#build-a-card-under-a-cover).
 - An update with `scripts/install.py` keeps a covered card with one face of
   its own under its cover, on the face it showed. Before, it took the card
