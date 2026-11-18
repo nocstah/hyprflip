@@ -725,8 +725,10 @@ def covered_cards():
     A covered card of two faces beside a neighbour, a card that shows one of its
     two faces under its cover, and a card with one face of its own under a cover.
     Two updates, with the keyboard on the first card's cover, then on an app of
-    the second: the first two come back with their covers, as they were, and the
-    third comes apart into ordinary tiles, as it is no card without its cover.
+    the second: all three come back with their covers, as they were. The third
+    keeps its cover through the update (its description names it, and the core
+    restores it under it), showing its cover at the first update and its own face
+    at the second.
     """
     to_monitor(output)
     made = {}
@@ -746,6 +748,7 @@ def covered_cards():
     # The back's only app closes: the card keeps its one face of its own under the cover.
     close(alone[1])
     wait(lambda: len(card_of(alone[0])['faces']) == 1 and card_of(alone[0])['cover'] == alone[2])
+    made['alone'] = alone[0], alone[2]
 
     def covers():
         return {tag: (shape(card_of(front)), card_of(front)['box'], card_of(front)['cover'], card_of(front)['covered'])
@@ -759,20 +762,21 @@ def covered_cards():
         return tile(cover)
 
     before = covers()
-    assert [before[tag][2:] for tag in made] == [(made['covered'][1], True), (made['shows'][1], False)], before
-    assert before['shows'][0]['active'] == 1, before
+    assert [before[tag][2:] for tag in made] == [(made['covered'][1], True), (made['shows'][1], False),
+                                                 (made['alone'][1], True)], before
+    assert before['shows'][0]['active'] == 1 and before['alone'][0]['faces'] == [[alone[0]]], before
     cover_tile = fills(made['covered'][1], before['covered'][1])
+    alone_tile = fills(made['alone'][1], before['alone'][1])
 
-    def update(keyboard, first):
+    def update(keyboard):
         give_keyboard(keyboard)
         rest(keyboard)
-        at, monitors = pointer(), shown()
+        at, monitors, before = pointer(), shown(), covers()
         out = install()
         time.sleep(.3)
         print('covered update: pointer', at, pointer(), 'monitors', monitors, shown(), 'keyboard', keyboard, active(), flush=True)
-        assert 'Keeping 2 open card(s)' in out and 'Taking the cover off 2 card(s)' in out, out
-        assert ('Leaving 1 covered card(s) with one face of their own as separate windows' in out) == first, out
-        for word in ('could not be put back', 'A card was kept', 'Could not keep', 'not as it was'):
+        assert 'Keeping 3 open card(s)' in out and 'Taking the cover off 2 card(s)' in out, out
+        for word in ('Leaving', 'could not be put back', 'A card was kept', 'Could not keep', 'not as it was'):
             assert word not in out, out
         assert (pointer(), shown(), active()) == (at, monitors, keyboard), (at, pointer(), monitors, shown(), keyboard, active())
         after = covers()
@@ -780,16 +784,19 @@ def covered_cards():
             assert (after[tag][0], after[tag][2:]) == (before[tag][0], before[tag][2:]), (tag, before[tag], after[tag])
             assert all(abs(p - q) <= 4 for p, q in zip(after[tag][1], before[tag][1])), (tag, before[tag][1], after[tag][1])
         assert all(abs(p - q) <= 4 for p, q in zip(fills(made['covered'][1], after['covered'][1]), cover_tile)), (cover_tile, tile(made['covered'][1]))
+        if after['alone'][3]:
+            assert all(abs(p - q) <= 4 for p, q in zip(fills(made['alone'][1], after['alone'][1]), alone_tile)), (alone_tile, tile(made['alone'][1]))
         windows = ipc.windows()
-        for address in (alone[0], alone[2]):
-            window = windows[address]
-            assert (window['workspace']['id'], window['grouped'], window['floating'], window['acceptsInput'],
-                    window.get('hidden', False)) == (88, [], False, True, False), window
-        assert not any(alone[0] in sum(card['faces'], []) for card in ipc.status()['containers'])
+        covered = card_of(alone[0])['covered']
+        assert [windows[a]['acceptsInput'] for a in (alone[0], alone[2])] == [not covered, covered], windows
 
     to_workspace(86)
-    update(made['covered'][1], True)
-    update(card_of(made['shows'][0])['current'], False)
+    update(made['covered'][1])
+    # The card of one face of its own shows that face, under its cover, for the second update.
+    assert ipc.action(f"card {card_of(alone[0])['id']} show 1") == 'ok: ok'
+    wait(lambda: not card_of(alone[0])['covered'])
+    update(card_of(made['shows'][0])['current'])
+    assert not card_of(alone[0])['covered'] and card_of(alone[0])['cover'] == alone[2], card_of(alone[0])
 
 
 try:
@@ -841,7 +848,7 @@ hl.config({{animations={{enabled=false}},general={{gaps_in=14,gaps_out=24}},inpu
     check('a recovery run after a crash keeps the saved side, and a keyboard left on the other side does not turn the card', a_recovery_run)
     check('an update keeps a covered card and one that shows a face under its cover with their covers, faces and tiles, '
           'the cover filling the card\'s place, the keyboard and the pointer where they were; a covered card with one '
-          'face of its own comes apart into ordinary tiles', covered_cards)
+          'face of its own keeps its cover too, on the face it showed', covered_cards)
     assert not open_cards(), open_cards()
     to_monitor(output)
 

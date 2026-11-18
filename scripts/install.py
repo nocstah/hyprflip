@@ -77,10 +77,10 @@ if any(card.get("fullscreen") for card in cards):
 saved_pairs = installed_state.get("pairs", [])
 # A window a program put over a card comes off it for the update and goes back
 # on after, as the card's description names only the card's own apps. A card
-# with one face of its own under its cover is no card without it.
+# with one face of its own under its cover is no card without it: it keeps its
+# cover, which its description names, and is restored under it.
 covering = installed_state.get("card_cover")
-apart = [card for card in cards if covering and alone(card)]
-saved_cards = [describe(card) for card in cards if card not in apart]
+saved_cards = [describe(card) for card in cards]
 saved_covers = []
 if not saved_pairs and not containers and recovery.is_file():
     pending = json.loads(recovery.read_text())
@@ -92,12 +92,15 @@ if saved_pairs:
     print(f"Preserving {len(saved_pairs)} existing pair(s) through this update.")
 if saved_cards:
     print(f"Keeping {len(saved_cards)} open card(s) through this update.")
-covers = len(saved_covers) or sum(1 for card in cards if covering and card.get("cover") and card not in apart)
+def restored_under(item, lines):
+    """Whether a card's description names its cover, so that the restore builds it under the cover again."""
+    return any(line.split()[-2:] == ["cover", item["cover"]] for line in lines)
+
+
+covers = (sum(1 for item in saved_covers if not restored_under(item, saved_cards)) if saved_covers else
+          sum(1 for card in cards if covering and card.get("cover") and not alone(card)))
 if covers:
     print(f"Taking the cover off {covers} card(s) for this update, and putting it back after.")
-if apart:
-    print(f"Leaving {len(apart)} covered card(s) with one face of their own as separate windows; "
-          "the program that built them rebuilds them.")
 if len(cards) < len(containers):
     print(f"Leaving {len(containers) - len(cards)} hidden card(s) as separate windows; "
           "the program that parked them rebuilds them.")
@@ -139,12 +142,12 @@ try:
             if current.get("card_cover"):
                 # Before the unload: it would leave each cover a face that no description names.
                 try:
-                    saved_covers, _ = uncover(answer, shown(current["containers"]))
+                    saved_covers = uncover(answer, shown(current["containers"]))
                 except Exception as refused:
                     raise SystemExit(f"A covered card kept its cover, so nothing was updated: {refused} "
                                      "Then update again.") from None
                 current = json.loads(ctl("hyprflip", "status"))
-            saved_cards = [describe(card) for card in shown(current["containers"]) if not alone(card)]
+            saved_cards = [describe(card) for card in shown(current["containers"])]
     if saved_pairs or saved_cards:
         record = {"instance": os.environ.get("HYPRLAND_INSTANCE_SIGNATURE"), "pairs": saved_pairs, "cards": saved_cards}
         if saved_covers:

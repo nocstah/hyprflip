@@ -24,7 +24,12 @@ def ctl(*args):
 
 
 def describe(card):
-    """A native card as the core's restore action expects it."""
+    """A native card as the core's restore action expects it.
+
+    A cover still in place is named last, so the card is built under it again:
+    a card with one face of its own keeps its cover through an update (cores
+    with restore_cover). An older core refuses the line, and the apps stay open.
+    """
     x, y, width, height = card["box"]
     line = [("floating" if card.get("floating") else "tiled"), str(card["active"]), str(int(bool(card.get("unfolded")))),
             f"{x:.12g}", f"{y:.12g}", f"{width:.12g}", f"{height:.12g}"]
@@ -33,6 +38,8 @@ def describe(card):
     for name, face, layout in zip(words, card["faces"], card["layouts"]):
         line += [name, layout["axis"], layout["focused"]] + [f"{w}:{r:.12g}" for w, r in zip(face, layout["ratios"])]
     line += name_words(card.get("names") or [])
+    if isinstance(card.get("cover"), str) and ADDRESS.fullmatch(card["cover"]):
+        line += ["cover", card["cover"]]
     return " ".join(line)
 
 
@@ -43,43 +50,43 @@ def own_apps(card):
 
 
 def alone(card):
-    """A card with one face of its own under a cover: without the cover it is no card, so it comes apart."""
+    """A card with one face of its own under a cover: without the cover it is no card."""
     return bool(card.get("cover")) and len(card["faces"]) < 2
 
 
 def uncover(answer, cards):
-    """Takes the cover off each card that has one, so that its description names every app it has.
+    """Takes the cover off each card with two or more faces of its own, so that its description names every app it has.
 
     An unload leaves a cover a face of its card that no description names, and
-    the card cannot be restored with it. A card with two or more faces of its own
-    stays a card. One with a single face comes apart into ordinary tiles, as it
-    is no card without its cover, and the program that built it builds it again.
-    Returns what puts the covers back on the cards that stay, and how many came
-    apart. A refusal, or no answer, puts back the covers already taken off and
-    raises: RuntimeError with the core's reply for a refusal.
+    the card cannot be restored with it. A card with one face of its own keeps
+    its cover, as it is no card without it: describe names the cover, and the
+    restore builds the card under it again. Returns what puts each card back
+    under its cover and on the face it showed, for both kinds. A refusal, or no
+    answer, puts back the covers already taken off and raises: RuntimeError with
+    the core's reply for a refusal.
     """
-    covers, apart = [], 0
+    covers = []
     try:
         for card in cards:
             if not card.get("cover"):
                 continue
-            reply = answer("hyprflip", f"card {int(card['id'])} uncover")
-            if not reply.startswith("ok"):
-                raise RuntimeError(reply.removeprefix("error: "))
-            if alone(card):
-                apart += 1
-            else:
-                covers.append({"cover": window_address(card["cover"]), "covered": bool(card.get("covered")),
-                               "active": int(card["active"]), "apps": own_apps(card)})
+            item = {"cover": window_address(card["cover"]), "covered": bool(card.get("covered")),
+                    "active": int(card["active"]), "apps": own_apps(card)}
+            if not alone(card):
+                reply = answer("hyprflip", f"card {int(card['id'])} uncover")
+                if not reply.startswith("ok"):
+                    raise RuntimeError(reply.removeprefix("error: "))
+            covers.append(item)
     except Exception:
         cover_again(answer, covers)
         raise
-    return covers, apart
+    return covers
 
 
 def cover_again(answer, covers):
     """Puts each cover back on its card, found by the card's own apps, and shows the face the card showed. Never raises.
 
+    A card restored under its cover already has it, and only turns to its face.
     The card shows its cover again if it did, else the face that was shown.
     Returns a sentence for each cover that stays off, as when its card was not
     kept or its window closed. A core with no covers gets no request.

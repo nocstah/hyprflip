@@ -695,17 +695,56 @@ class InstallerTest(unittest.TestCase):
         self.run_installer()
         self.assertEqual(self.card_calls(), ["card 7 uncover", "card 9 cover 0x1f", "card 9 show 2"])
 
-    def test_a_covered_card_with_one_face_of_its_own_comes_apart_and_says_so(self):
-        self.covered(faces=1)
+    LONE = "tiled 0 0 10 20 800 600 front horizontal 0xc 0xc:1 cover 0x1f"
+
+    def lone(self, covered=True):
+        """A covered card with one face of its own, kept under its cover by a restore that names it, and another card."""
+        made = self.covered(covered=covered, faces=1)
+        self.rebuilt = {self.LONE: dict(made, id=9, covered=True)}
         self.containers.append(card("0xe", "0xf", SHOWN, id=8))
+        return made
+
+    def test_a_covered_card_with_one_face_of_its_own_keeps_its_cover_through_the_update(self):
+        self.lone()
         self.run_installer()
-        self.assertEqual(self.card_calls(), ["card 7 uncover"])
-        self.assertEqual(self.restored, [line("0xe", "0xf")])
-        self.assertNotIn("covers", self.recovery_at_unload)
-        self.assertIn("Keeping 1 open card(s) through this update.\n"
-                      "Leaving 1 covered card(s) with one face of their own as separate windows; "
-                      "the program that built them rebuilds them.\n", self.output.getvalue())
+        # Never uncovered: its description names the cover, and the core restores the card under it.
+        self.assertEqual(self.restored, [self.LONE, line("0xe", "0xf")])
+        self.assertEqual(self.recovery_at_unload["cards"], [self.LONE, line("0xe", "0xf")])
+        self.assertEqual(self.recovery_at_unload["covers"], [{"cover": "0x1f", "covered": True, "active": 0, "apps": ["0xc"]}])
+        self.assertEqual(self.card_calls(), ["card 9 show cover"])
+        self.assertEqual((self.containers[0]["id"], self.containers[0]["cover"], self.containers[0]["covered"]), (9, "0x1f", True))
+        out = self.output.getvalue()
+        self.assertIn("Keeping 2 open card(s) through this update.\n", out)
+        for word in ("Leaving", "Taking the cover off", "Could not keep", "could not be put back"):
+            self.assertNotIn(word, out)
         self.assertEqual(self.library.read_bytes(), b"new plugin")
+        self.assertFalse(self.recovery.exists())
+
+    def test_a_covered_card_with_one_face_of_its_own_that_showed_that_face_shows_it_again(self):
+        self.lone(covered=False)
+        self.run_installer()
+        self.assertEqual(self.card_calls(), ["card 9 show 1"])
+        self.assertFalse(self.containers[0]["covered"])
+
+    def test_a_rollback_to_a_core_without_restore_under_a_cover_leaves_its_apps_open(self):
+        # The older core refuses the cover word, as it refuses any line it cannot read.
+        self.lone()
+        self.fail_adoption, self.refused = True, {self.LONE}
+        with self.assertRaisesRegex(RuntimeError, "Could not restore pair"):
+            self.run_installer()
+        self.assertIn("Could not keep a card; its apps stay open as separate windows", self.output.getvalue())
+        self.assertEqual(json.loads(self.recovery.read_text())["cards"], [self.LONE, line("0xe", "0xf")])
+
+    def test_a_recovery_run_restores_a_card_of_one_face_under_its_cover(self):
+        self.covered(faces=1)
+        self.rebuilt = {self.LONE: dict(self.containers[0], id=9)}
+        self.containers, self.loaded, self.pairs = [], False, []
+        self.recovery.write_text(json.dumps({"instance": "test-instance", "pairs": [], "cards": [self.LONE],
+                                             "covers": [{"cover": "0x1f", "covered": True, "active": 0, "apps": ["0xc"]}]}))
+        self.run_installer()
+        self.assertEqual((self.restored, self.card_calls()), ([self.LONE], ["card 9 show cover"]))
+        self.assertNotIn("Taking the cover off", self.output.getvalue())
+        self.assertFalse(self.recovery.exists())
 
     def test_a_refused_uncover_puts_back_the_covers_taken_off_and_changes_nothing(self):
         self.covered()
