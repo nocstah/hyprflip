@@ -1,5 +1,32 @@
 # Validation
 
+## Held keys and one-face unfold; release checks for 0.3.0-rc.28 (2026-11-18)
+
+Since rc.27: a held key that repeats no longer ends a turn (65e5bbe, the
+MacBook's Fn+F8), a card with one face of its own under a cover refuses to
+unfold (2b82032), `hyprctl`'s `card <id> owner -- …` clears the owner
+(c173f98, documentation only) and `scripts/release.py --trailer` (9e8d7f5).
+
+Checked at 65e5bbe on omac (aarch64, Asahi, Hyprland 0.56.2), each nested
+suite in its own fresh session (`--notify-recorder`, no Aquamarine patch: no
+NVIDIA GPU here), and every launcher exited cleanly. All three CTest checks and
+all 518 Python unit tests pass.
+- `tests/peek.py`: all 21 checks pass, with the two held-key checks.
+- `tests/card_id_workflows.py` 15; `tests/install_cards.py` 66;
+  `tests/unattended_workflows.py` 14; `tests/reveal_workflows.py` 19;
+  `tests/cover_workflows.py` 15 with `--protocol`;
+  `tests/uninstall_session.py` 3.
+- `tests/restore_cover_workflows.py --hooks-off`: all 10 pass in a session
+  started with `HYPRFLIP_CLOSE_HOOKS=0`.
+- `tests/key_suites.py` with Hyprglass: all seven suites pass (workflows,
+  nearby, setup, edit, pane, switch, claim).
+
+Not checked:
+- `tests/restore_cover_workflows.py` with the close hooks on. No hook can
+  install on aarch64, so status reports `close_reasons` false and the suite
+  stops at its first check, as expected here; it needs an x86_64 machine.
+  The close-hook code has not changed since rc.27, where it passed.
+
 ## Card owners; release checks for 0.3.0-rc.27 (2026-11-18)
 
 A program that keeps its own cards can now mark them: `card <id> owner
