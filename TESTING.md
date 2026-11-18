@@ -1,5 +1,27 @@
 # Validation
 
+## Fullscreen keyboard and face previews; release checks for 0.3.0-rc.29 (2026-11-18)
+
+Since rc.28: the keyboard stays in a fullscreen or maximized card that releases
+an app, or whose cover is taken away (6e0b44b, 774fe8e), the switcher shows each
+face at its focused look (5fa424b, dde4813), and `tests/release_suites.py` runs
+every release suite with one command (2492bf0). The candidate merged these onto
+main at 469d0aa.
+
+Checked at 469d0aa on cypherpunk (x86_64, NVIDIA RTX 5090, Hyprland 0.56.2), with
+`tests/release_suites.py --hyprglass … --protocol … --omacards ~/code/omacards
+--aquamarine …`: each suite in its own fresh nested session, and every launcher
+exited cleanly. All three CTest checks and all 518 Python unit tests pass.
+- All 25 release suites pass: install 66, uninstall 3, restore-cover 10 (close
+  hooks on, which rc.28 could not check on aarch64), restore-cover-hooks-off 10,
+  card-id 15, unattended 14, reveal 19, cover 15, fullscreen 14, close-reason 15,
+  close-reason-hooks-off 3, multiface 18, dwindle 7, floating 10, switcher 14,
+  repair 10, opening 6, and the seven key suites (workflows 10, nearby 15, setup
+  7, edit 14, pane 12, switch 5, claim 5) with Hyprglass.
+- OmaCards' native panel checks at 0.2.0-rc.34 (81910c3): run-native.py and
+  navigation-native.py pass.
+- `tests/peek.py`: passes, with the held-key checks, in its own session.
+
 ## Fullscreen and maximized cards after review; checks for fix/rc28-edges (2026-11-18)
 
 A review of b6594bc, the two fixes below combined, found two minor issues.
