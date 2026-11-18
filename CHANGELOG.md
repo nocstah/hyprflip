@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- The face switcher shows each face as it looks when turned to. An app still
+  fading in, after it opened or came from another workspace, made its face's
+  preview dark for as long as the switcher stayed open, and with
+  `inactive_opacity` or `dim_inactive` set every face but the one shown was
+  dimmed or see-through. Turns that use snapshots draw such apps the same way.
 - A card with one face of its own under a cover no longer unfolds, which only
   set the cover beside its face: "This card has one face of its own.", as for
   moving an app to the other side. Folding a card that is already unfolded
