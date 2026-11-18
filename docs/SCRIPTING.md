@@ -76,7 +76,9 @@ in `status`. With a cover:
 
 - The back may be left out. The card then has one face of its own, the front,
   and turns between it and the cover. With the cover, a card has at most six
-  faces: "A card has at most 6 faces, its cover included."
+  faces: "A card has at most 6 faces, its cover included." Such a card cannot
+  unfold, which would only set the cover beside its face, or move an app to
+  another side: "This card has one face of its own."
 - The card is tiled and folded, and `active` is one of its own faces: the one
   it shows when the cover is turned over, or, for a card with two faces of its
   own or more, when the cover leaves; a card with one face of its own comes

@@ -2235,6 +2235,10 @@ Result Controller::unfold() {
     auto s = state(*p);
     if (!s)
         return {false, "This card changed. Pair its windows again."};
+    // A cover's face is not the card's own: with one face of its own, unfolding would only set the cover beside
+    // it, which the cover is there to avoid. Folding stays allowed.
+    if (!s->unfolded && ownFaces(*s, coverFace(*p, *s)).size() < 2)
+        return {false, "This card has one face of its own."};
     for (const auto &w : s->windows())
         if (p->providerEpoch != FloatingCards::EPOCH && Fullscreen::controller()->isFullscreen(w.lock()))
             return {false, "Leave fullscreen before unfolding this container."};

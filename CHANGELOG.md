@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- A card with one face of its own under a cover no longer unfolds, which only
+  set the cover beside its face: "This card has one face of its own.", as for
+  moving an app to the other side. Folding a card that is already unfolded
+  still works.
+
 ## 0.3.0-rc.27 — 2026-11-18
 
 - A card can be marked with the program that manages it: `card <id> owner

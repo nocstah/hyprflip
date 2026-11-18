@@ -420,8 +420,10 @@ try:
     wait(lambda: not card(pair)['covered'])
     assert 'This card has one face of its own.' in lua_refused((a, 'other_side'))
     assert 'This card has one face of its own.' in lua_refused((a, f'other_side {a2}'))
-    passed('moving an app to the other side of a card with one face of its own is refused with "This card has one '
-           'face of its own."')
+    # Unfolding would only set the cover beside the card's one face, which the cover is there to avoid.
+    assert 'This card has one face of its own.' in lua_refused((a, 'unfold'))
+    passed('moving an app to the other side of a card with one face of its own, or unfolding it, is refused with '
+           '"This card has one face of its own."')
     assert ipc.action(f'card {pair} ungroup') == 'ok: ok' and gone(pair)
     processes.pop(a2).terminate()
     wait(lambda: a2 not in ipc.windows())
