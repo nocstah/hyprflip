@@ -1,5 +1,74 @@
 # Validation
 
+## Fullscreen and maximized cards after review; checks for fix/rc28-edges (2026-11-18)
+
+A review of b6594bc, the two fixes below combined, found two minor issues.
+
+A fullscreen or maximized card still showed one app of each hidden face
+see-through in the switcher, at `inactive_opacity`: the app that face used
+last. `RestingLook` left the focused opacity alone for any app Hyprland calls
+fullscreen, maximized included. But before each snapshot the switcher selects
+the face, which on a fullscreen card moves fullscreen to that app, and
+Hyprland 0.56.2's `CWindow::updateDecorationValues` sets only the goal of its
+opacity; the value changes on a later frame, after the snapshot. Now
+`RestingLook` always holds the opacity Hyprland gives a focused app:
+`fullscreen_opacity` (with the window's fullscreen opacity rule) when the app
+is fullscreen, otherwise `active_opacity` (with its opacity rule), maximized
+included, as Hyprland does. `tests/switcher_workflows.py` checks it: with the
+six-face card's `inactive_opacity=0.6` and `dim_inactive` still set, it opens
+the switcher on the card fullscreen, then maximized, and requires every
+preview within 12 of its app's colour. Control: against the b6594bc build it
+fails at fullscreen, reading (128,43,36), (30,113,67), (32,85,120),
+(92,49,113) and (134,58,9) for faces 1 to 5, whose apps are (192,57,43),
+(39,174,96), (41,128,185), (142,68,173) and (211,84,0); face 6, the one shown,
+read (21,156,130) for (22,160,133). With the fix all 14 checks pass.
+
+Releasing the app you are using from a maximized card left no window with the
+keyboard too, as from a fullscreen card: Hyprland blocks input to a tile under
+a maximized window as well, and the release fix already covers both, since the
+card counts a maximized app as fullscreen. `tests/fullscreen_workflows.py` now
+maximizes the card, adds an app to the shown face, focuses it and takes it
+out: the card must stay maximized on the same box, a pane it shows must have
+the keyboard and accept input, and the released app must not accept input.
+Control: against the 9e8d7f5 build, in a copy of the suite where the earlier
+fullscreen release focuses a pane after it (that bug is known there), 9 checks
+pass and the new one fails with "no window has the keyboard". The CHANGELOG
+entry and docs/CONTAINERS.md now name maximized cards.
+
+docs/SCRIPTING.md said that an uncovered cover keeps the keyboard if it had
+it. On a fullscreen or maximized card the keyboard now stays in the card, on
+the face it shows, since the cover is then a window under fullscreen; the docs
+and the comment in `Controller::uncover` say so. No code changed there.
+
+Checked on fix/rc28-edges at 774fe8e (later commits change only this file),
+each nested suite in its own fresh session (Hyprland 0.56.2, Aquamarine 0.15.1
+with the render-node patch, `--notify-recorder`), every launcher exiting
+cleanly:
+- `make test`: all 3 CTest checks pass. All 518 Python unit tests pass.
+- `tests/fullscreen_workflows.py` 13, and 14 with `--protocol` (the XML from
+  Hyprland v0.56.2); `tests/switcher_workflows.py` 14;
+  `tests/multiface_workflows.py` 18; `tests/transitions.py` 15;
+  `tests/card_id_workflows.py` 15; `tests/cover_workflows.py` 15 with
+  `--protocol`; `tests/restore_cover_workflows.py` 10, and 10 with
+  `--hooks-off` in a session started with `HYPRFLIP_CLOSE_HOOKS=0`;
+  `tests/close_reason_workflows.py` 15 with `--protocol`, all 72 status
+  replies JSON; `tests/unattended_workflows.py` 14;
+  `tests/floating_workflows.py` 10; `tests/install_cards.py` 66.
+- `tests/key_suites.py` with Hyprglass: all seven suites pass (workflows 10,
+  nearby 15, setup 7, edit 14, pane 12, switch 5, claim 5).
+- OmaRelay's `ovis.py cards-nested`, from a detached worktree at its main
+  (71001d9), against this tree, close hooks on: all 34 checks pass, and its
+  cleanup completes.
+
+Not run: the switcher check against a b6594bc build with the card maximized
+(the run stopped at fullscreen; the review measured maximized wrong too), a
+`fullscreen_opacity` different from `active_opacity` (the turn setup in
+`Controller.cpp` still leaves fullscreen apps' opacity alone, which matters
+only then), a visual check of turns with an app fading in, releasing the last
+app of a two-face fullscreen card (dissolve, unchanged),
+`close_reason_workflows.py --hooks-off`, OmaRelay's card suite with the close
+hooks off, and the other compositor suites.
+
 ## Face previews at their focused look (2026-11-18)
 
 In `switcher_workflows.py`'s six-face screenshot, the previews of faces 5 and 6
