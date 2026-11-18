@@ -4,7 +4,9 @@ manager builds its card again under Herdr's window on a visit: the apps come fro
 special workspace in the same batch, and the card may have one face of its own. The
 card is founded on the cover, so it takes the cover's tile exactly, wherever dwindle
 split to make room for the apps that came in; the keyboard stays on the cover and the
-card shows it. Also each refusal's sentence, parking (which still takes a card of one
+card shows it. Without card frames the cover keeps its tile's box; with them, as by
+default, it sits under the card's header and keeps the tile's left edge, width and
+bottom. Also each refusal's sentence, parking (which still takes a card of one
 face of its own apart and leaves the cover in place), closes, and the face move of a
 card with one face of its own. Only the Hyprflip core is loaded; no call may move the
 pointer.
@@ -210,6 +212,24 @@ def why(record):
     assert (record['reason'], record['via']) == expected, record
 
 
+def configure(frame):
+    """Only the fixtures' virtual keyboard: the parent's keyboard can keep a modifier held. Card frames on or off."""
+    config.write_text(original + '''
+hl.device({name="wl_keyboard",enabled=false})
+hl.config({input={resolve_binds_by_sym=true}})
+hl.bind("SUPER + F9", hl.dsp.window.close())
+hl.config({animations={enabled=false},plugin={hyprflip={duration_ms=0,notifications=false,card_frame=%s}}})
+''' % str(frame).lower())
+    ipc.call('reload'); assert not ipc.call('configerrors')
+    assert ipc.status()['card_frame'] is frame, ipc.status()['card_frame']
+
+
+def edges(a, b, slack=10):
+    """Two [x, y, w, h] boxes whose four edges lie within `slack` of each other."""
+    return all(abs(p - q) <= slack for p, q in zip((a[0], a[1], a[0] + a[2], a[1] + a[3]),
+                                                    (b[0], b[1], b[0] + b[2], b[1] + b[3])))
+
+
 def close_key(address):
     """Super+F9 on the window: hl.dsp.window.close() from a key bind."""
     ipc.focus(address)
@@ -225,15 +245,8 @@ try:
     home.mkdir(mode=0o700, parents=True)
     shutil.copy2(project / 'build/hyprflip.so', library)
     ipc.call('plugin', 'load', str(library)); loaded = True
-    # Only the fixtures' virtual keyboard: the parent's keyboard can keep a modifier held. No card frame, so the
-    # cover's window keeps exactly the box its tile had.
-    config.write_text(original + '''
-hl.device({name="wl_keyboard",enabled=false})
-hl.config({input={resolve_binds_by_sym=true}})
-hl.bind("SUPER + F9", hl.dsp.window.close())
-hl.config({animations={enabled=false},plugin={hyprflip={duration_ms=0,notifications=false,card_frame=false}}})
-''')
-    ipc.call('reload'); assert not ipc.call('configerrors')
+    # No card frame until case 7, so the cover's window keeps exactly the box its tile had.
+    configure(frame=False)
     ipc.call('dispatch', f'hl.dsp.focus({{workspace={PLACE}}})')
     state = ipc.status()
     assert state['restore_cover'] is True and state['card_cover'] is True, state
@@ -445,6 +458,33 @@ hl.config({animations={enabled=false},plugin={hyprflip={duration_ms=0,notificati
     passed('a key close of the only app of a card with one face of its own takes the card apart and reads face 0 '
            'of 1, dissolved; a key close of its cover takes it apart too and reads cover, dissolved' +
            (' (reasons unknown with the hooks off)' if args.hooks_off else ''))
+
+    # 7. With card frames on, as by default: the card still takes the cover's tile, and the cover sits under the
+    # card's header there, as with card <id> cover. Its left edge, width and bottom stay those of its tile.
+    # Case 5 closed X, so a new stand-in covers the card here.
+    configure(frame=True)
+    x = spawn('herdr-framed')
+    move(c1, PARK)
+    ipc.focus(x)
+    wait(lambda: active() == x)
+    loose(x, PLACE)
+    box = tile(x)
+    rest(x)
+    framed = build([[c1]], x)
+    c = card(framed)
+    assert (c['faces'], c['cover'], c['covered'], c['active']) == ([[c1]], x, True, 0), c
+    frame = next((f for f in ipc.status()['card_frames'] if f['id'] == framed), None)
+    shown = tile(x)
+    print('frames on: tile', box, 'card', c['box'], 'frame', frame and frame['box'], 'cover', shown, flush=True)
+    assert frame is not None and edges(frame['box'], box) and edges(c['box'], box), (frame, c['box'], box)
+    assert same((shown[0], shown[2], shown[1] + shown[3]), (box[0], box[2], box[1] + box[3])), (shown, box)
+    assert shown[1] > box[1] and shown[3] < box[3], (shown, box)
+    assert active() == x and c['workspace']['id'] == PLACE, (active(), c)
+    visible(framed, x)
+    passed('with card frames on, the card still takes the cover\'s tile, its frame on the tile\'s edges, and the '
+           'cover sits under the card\'s header with its tile\'s left edge, width and bottom; the keyboard stays on it')
+    assert ipc.action(f'card {framed} ungroup') == 'ok: ok' and gone(framed)
+    loose(x, PLACE); loose(c1, PLACE)
 finally:
     for process in processes.values():
         if process and process.poll() is None: process.terminate()

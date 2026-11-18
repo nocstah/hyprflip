@@ -5,7 +5,8 @@
 - A card can be built under its cover in one call: `restore … cover
   <address>`. With a cover the back may be left out, so the card has one face
   of its own and turns between it and the cover. The card is built on the
-  cover's tile, so it takes that tile exactly and the cover never moves, and
+  cover's tile, so it takes that tile exactly and the cover stays in it (with
+  card frames on, under the card's header, as with `card <id> cover`), and
   it shows the cover from its first frame, the keyboard staying there. Cores
   that have it report `"restore_cover": true`. A `face …` group before the
   back, or any face after the cover, is refused. See

@@ -71,12 +71,18 @@ in `status`. With a cover:
   and turns between it and the cover. With the cover, a card has at most six
   faces: "A card has at most 6 faces, its cover included."
 - The card is tiled and folded, and `active` is one of its own faces: the one
-  it shows when the cover is turned over, or when the cover leaves. A floating
-  or unfolded line is refused: "A covered card is restored tiled.", "Fold the
+  it shows when the cover is turned over, or, for a card with two faces of its
+  own or more, when the cover leaves; a card with one face of its own comes
+  apart then ([uncovering](#cover-a-card-with-a-window)). A floating or
+  unfolded line is refused: "A covered card is restored tiled.", "Fold the
   card before covering it."
 - The card is built on the cover's tile: it takes that tile exactly, wherever
-  the card's apps were tiled, and the cover never moves. The box only checks
-  that the size limits fit, as for any tiled card.
+  the card's apps were tiled, and the cover stays in it. With card frames on
+  (`card_frame`, the default), the cover sits under the card's header, as
+  after `card <id> cover`: its window is shorter by the header and keeps its
+  tile's left edge, width and bottom. A program that checks the place should
+  compare the card's `box` with the tile, not the cover's window. The box only
+  checks that the size limits fit, as for any tiled card.
 - The card shows the cover from its first frame. With `quiet`, the cover
   counts as one of the card's apps: when the cover or one of the apps had the
   keyboard, the cover has it afterwards.
