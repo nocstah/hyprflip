@@ -14,11 +14,13 @@
   still works.
 - `scripts/release.py --trailer TEXT` adds a trailer, such as a co-author, to
   the release commit and the pin commit.
-- Taking the focused app out of a fullscreen card left no window with the
-  keyboard, so keys went nowhere. The card stays fullscreen over the app it
-  released, and Hyprland takes the keyboard from a window under fullscreen
-  without giving it to another. The keyboard now stays in the card, on the side
-  it shows. Out of fullscreen it still stays on the released app.
+- Taking the focused app out of a fullscreen or maximized card left no window
+  with the keyboard, so keys went nowhere. The card stays fullscreen or
+  maximized over the app it released, and Hyprland takes the keyboard from a
+  window under it without giving it to another. The keyboard now stays in the
+  card, on the side it shows. Out of fullscreen it still stays on the released
+  app. Uncovering a fullscreen or maximized card whose cover had the keyboard
+  leaves it in the card the same way.
 
 ## 0.3.0-rc.27 — 2026-11-18
 

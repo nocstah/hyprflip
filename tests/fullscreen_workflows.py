@@ -248,7 +248,22 @@ hl.config({{general={{gaps_in=14,gaps_out=24}},animations={{enabled=false}},
     assert fills(screen) == back and ipc.status()['card_dividers'][0]['color'] == '#FF0000'
     passed('divider width and color follow their settings; zero lets apps touch')
 
+    # Hyprland blocks input to a tile under a maximized window too, so the
+    # app taken out of a maximized card cannot keep the keyboard.
     ipc.call('dispatch', FULL)
+    ipc.focus(b); ipc.call('dispatch', MAXIMIZE)
+    work = tuple(card()['box']); maximized = fills(work, strict=False)
+    ipc.action(f'mark {spare}'); ipc.focused((b, 'attach horizontal'))
+    assert card()['faces'][1] == [b, c, spare] and card()['fullscreen'], card()
+    assert len(fills(work, strict=False)) == 3
+    ipc.focus(spare); ipc.action('release')
+    assert card()['faces'][1] == [b, c] and card()['fullscreen'] and tuple(card()['box']) == work, card()
+    assert fills(work, strict=False) == maximized
+    assert not ipc.windows()[spare]['acceptsInput'], ipc.windows()[spare]
+    ipc.call('dispatch', MAXIMIZE)
+    assert not any(ipc.windows()[x]['fullscreen'] for x in (a, b, c))
+    passed('the app you are using leaves a maximized card and the keyboard stays in the card')
+
     for x in (extra, spare):
         ipc.call('dispatch', f'hl.dsp.window.close({{window="address:{x}"}})')
     wait(lambda: not any(x in ipc.windows() for x in (extra, spare)))
