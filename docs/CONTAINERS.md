@@ -267,7 +267,9 @@ app on the side you want to change, then open the menu:
 - On a side with two to five apps, **Remove [app] from card** is available for each app.
   It releases the chosen app into its own tile and keeps it open. The keyboard
   stays where it was: on the released app if you were using it, otherwise on
-  the app you were using. The other apps remain in the card. The menu
+  the app you were using. A fullscreen card stays fullscreen over the released
+  app, so there the keyboard stays in the card, on the side it shows. The other
+  apps remain in the card. The menu
   states that the side is full at five apps and omits Add until there is room.
 - When the focused app is alone on its side, the option is **Ungroup card**.
   This explicitly dissolves the card and leaves all its apps open.

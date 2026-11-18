@@ -679,7 +679,11 @@ bool release(uint64_t id, uintptr_t address) {
     const bool drop = c->faces[*s].size() == 1;
     // The keyboard stays where it was: on the released app when it had it, so
     // the app just taken out is the one you are using, else where the user left it.
+    // A fullscreen card stays fullscreen over the released app, and Hyprland
+    // drops the keyboard from a window under fullscreen, leaving no window
+    // focused: there the keyboard goes to the face the card shows.
     const auto had = Desktop::focusState()->window();
+    const bool fullscreen = c->fullscreen() != nullptr;
     return c->keepFullscreen([&] {
         c->changing = true;
         c->restore(w);
@@ -698,8 +702,8 @@ bool release(uint64_t id, uintptr_t address) {
         }
         c->changing = false;
         c->refresh();
-        select(id, c->active, false);
-        if (had == w)
+        select(id, c->active, had == w && fullscreen);
+        if (had == w && !fullscreen)
             Desktop::focusState()->fullWindowFocus(w, Desktop::FOCUS_REASON_KEYBIND);
         else if (had && c->side(had))
             Desktop::focusState()->fullWindowFocus(had, Desktop::FOCUS_REASON_KEYBIND);

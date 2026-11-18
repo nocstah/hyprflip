@@ -1,5 +1,47 @@
 # Validation
 
+## An app released from a fullscreen card (2026-11-18)
+
+`tests/fullscreen_workflows.py` failed after its first 7 checks: once an app
+left a fullscreen card, no window had the keyboard (`KeyError: 'address'` at
+line 236, an empty `activewindow`). The core was at fault, not the test, and
+keys went nowhere. Since c99fa50 (0.3.0-rc.14), `release` gives the keyboard
+back to the released app when it had it. On a fullscreen card the release
+leaves fullscreen, takes the app out, focuses it, then makes the card's pane
+fullscreen again. The released app is then a tile under fullscreen: Hyprland
+0.56.2 blocks its input there and drops the keyboard without giving it to
+another window (`CWindow::setInputBlocked` calls `fullWindowFocus(nullptr)`).
+The keyboard now stays in the card, on the pane its shown side last used,
+which the card makes fullscreen again. Out of fullscreen it still stays on the
+released app.
+
+Each in a fresh nested session (Hyprland 0.56.2, Aquamarine 0.15.1 with the
+render-node patch, `--notify-recorder`):
+- Hyprland's events during the release, before the change: `fullscreen>>0`,
+  the released app focused, `activewindow>>,`, `fullscreen>>1`, and no window
+  focused after. After it, the card's pane is focused instead and keeps the
+  keyboard, with `misc:on_focus_under_fullscreen` 0 and 2 alike.
+- With no plugin loaded, fullscreening a window while another tile on its
+  workspace has the keyboard leaves no window focused too, under each of the
+  three `misc:on_focus_under_fullscreen` policies. That part is Hyprland's.
+- A build of ca9ac04, the commit before c99fa50, passes all 12 checks. A build
+  of c99fa50 fails at line 236 after 7, as every build since has.
+
+The suite now says "no window has the keyboard" there instead of a KeyError.
+
+All three CTest checks and all 518 Python unit tests pass. Nested suites, each
+in its own fresh session, with no launcher left running:
+`tests/fullscreen_workflows.py` 12, and 13 with `--protocol`;
+`tests/card_id_workflows.py` 15; `tests/multiface_workflows.py` 18;
+`tests/switcher_workflows.py` 12; `tests/cover_workflows.py` 15 with
+`--protocol`; `tests/restore_cover_workflows.py` 10; `tests/unattended_workflows.py`
+14; `tests/floating_workflows.py` 10; and `tests/key_suites.py --only workflows
+pane` with Hyprglass (workflows 10, pane 12). `workflows.py` checks that a
+release out of fullscreen keeps the keyboard on the released app.
+
+Not run: the other key suites, sessions with `HYPRFLIP_CLOSE_HOOKS=0` and the
+other compositor suites.
+
 ## Card owners; release checks for 0.3.0-rc.27 (2026-11-18)
 
 A program that keeps its own cards can now mark them: `card <id> owner
