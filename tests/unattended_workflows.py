@@ -230,9 +230,12 @@ hl.config({general={gaps_in=14,gaps_out=24},animations={enabled=false},
     reply, _ = helper({'action': 'capabilities'})
     state = ipc.status()
     assert state['container_max_faces'] == 6, state['container_max_faces']
-    assert reply == {'protocol': 1, 'ok': True, 'result': 'capabilities', 'actions': ['capabilities', 'list', 'delete', 'open', 'save'],
-                     'core': True, 'max_panes': state['container_max_panes'], 'max_faces': 6}, reply
-    passed('the helper finds a core with native cards and ungroup by id, and reports the six faces a card may have')
+    assert state['restore_cover'] is True, state
+    assert reply == {'protocol': 1, 'ok': True, 'result': 'capabilities',
+                     'actions': ['capabilities', 'list', 'delete', 'open', 'save', 'put'],
+                     'core': True, 'max_panes': state['container_max_panes'], 'max_faces': 6, 'one_face': True}, reply
+    passed('the helper finds a core with native cards and ungroup by id, reports the six faces a card may have, '
+           'and says it opens cards of one face under a cover')
 
     # A definition with more faces than the core holds is refused before anything changes.
     seven = definition([app('seven-0', 'Seven')], [app('seven-1', 'Seven')])
@@ -427,6 +430,60 @@ hl.config({general={gaps_in=14,gaps_out=24},animations={enabled=false},
     assert library_state() == state
     passed('saving a parked card by id keeps no title and leaves the card and the library alone; '
            'saving it again is unchanged')
+
+    # 6b. A card of one face of its own under the working tile, as OmaRelay keeps one behind Herdr.
+    assert tile(herdr) == full
+    show(84)
+    lone = spawn('lone')
+    ipc.move(lone, 'special:park')
+    show(81); ipc.focus(herdr)
+    one = {'active': 0, 'faces': [{'apps': [app('lone', 'Lone')], 'axis': 'horizontal', 'ratios': [1], 'focus': 0}]}
+    reply, sent = helper({'action': 'put', 'store': str(store), 'name': 'Behind', 'recipe': one, 'previous': None,
+                          'one_face': True}, herdr)
+    assert (reply['ok'], reply['result'], reply['token']) == (True, 'saved', w.Unattended.token(one)) and not changes(sent), reply
+    assert 'Behind' not in keeper.read() and keeper.read_both()[1] == {'Behind': one}
+    opening = {'action': 'open', 'store': str(store), 'name': 'Behind', 'workspace': 81, 'bind': [lone], 'focus': herdr,
+               'launch': False, 'one_face': True}
+    reply, sent = helper(opening, herdr)
+    assert (reply['ok'], reply['code']) == (False, 'needs_cover') and not changes(sent), reply
+    reply, sent = helper(opening | {'cover': herdr}, herdr)
+    assert reply['ok'] and reply['result'] == 'opened', reply
+    covered = card(reply['card'])
+    assert (covered['faces'], covered['cover'], covered['covered']) == ([[lone]], herdr, True), covered
+    # The card takes the working tile: its frame sits on the tile's edges, and the cover keeps the tile's width and
+    # bottom under the card's header.
+    framed, shown = covered['box'], tile(herdr)
+    assert all(abs(a - b) <= 10 for a, b in zip((framed[0], framed[1], framed[0] + framed[2], framed[1] + framed[3]),
+                                                (full[0], full[1], full[0] + full[2], full[1] + full[3]))), (framed, full)
+    assert (shown[0], shown[2], shown[1] + shown[3]) == (full[0], full[2], full[1] + full[3]), (shown, full)
+    assert active() == herdr and workspace() == 81, active()
+    assert ipc.windows()[lone]['workspace']['id'] == 81 and not ipc.windows()[lone]['acceptsInput']
+    batches = [c[1] for c in changes(sent)]
+    assert [c[0] for c in changes(sent)] == ['--batch'] and batches[0].count('follow=false') == 1, sent
+    assert batches[0].endswith(f' cover {herdr}') and f'address:{herdr}' not in batches[0], batches
+    # Saving it needs the one_face view; without it the store is left alone.
+    written = store.read_bytes()
+    request = {'action': 'save', 'store': str(store), 'name': 'Behind', 'card': covered['id'], 'members': [lone],
+               'previous': reply['token']}
+    refused, sent = helper(request, herdr)
+    assert (refused['ok'], refused['code']) == (False, 'one_face_store') and store.read_bytes() == written, refused
+    saved, sent = helper(request | {'one_face': True}, herdr)
+    assert saved['ok'] and saved['result'] in ('saved', 'unchanged') and not changes(sent), saved
+    assert len(keeper.read_both()[1]['Behind']['faces']) == 1 and 'Behind' not in keeper.read()
+    # Parking takes it apart; the working tile keeps its place and the keyboard.
+    ipc.action(f'card {covered["id"]} workspace special:park silent')
+    assert all(lone not in face for c in ipc.status()['containers'] for face in c['faces'])
+    assert ipc.windows()[lone]['workspace']['name'] == 'special:park' and tile(herdr) == full and active() == herdr
+    # As tiles, the app is bound where it is: nothing moves and no card is made.
+    cards = [(c['id'], c['faces']) for c in ipc.status()['containers']]
+    reply, sent = helper(opening | {'tiles': True}, herdr)
+    assert (reply['ok'], reply['result'], reply['slots'][0][0]['address']) == (True, 'tiles', lone), reply
+    assert not changes(sent) and [(c['id'], c['faces']) for c in ipc.status()['containers']] == cards, sent
+    assert ipc.windows()[lone]['workspace']['name'] == 'special:park' and tile(herdr) == full and active() == herdr
+    close(lone)
+    passed('the helper puts a definition of one face, opens it under the working tile in one batch, which keeps its '
+           'tile, the keyboard and the pointer, saves it only in the one_face view, and binds it as tiles without '
+           'moving anything; parking takes the card apart')
 
     # 7. Positive controls: refusals of a Lua call and of a plain restore sent with
     # hyprctl are recorded. Refusals of calls by id and of quiet restores, complete
