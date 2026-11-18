@@ -11,6 +11,7 @@ from pathlib import Path
 project = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(project / 'tests'), str(project / 'scripts')]
 from control import environment
+from PIL import Image, ImageStat
 import workflow as w
 session = Path(sys.argv[1]); root = session.parent; out = root
 env = environment(session) | {'XDG_STATE_HOME': str(root / 'state'), 'XDG_DATA_HOME': str(root / 'data')}
@@ -34,6 +35,16 @@ def spawn(n):
 def st(): return ipc.status()
 def card(): return st()['containers'][0]
 def shot(name, output): subprocess.run(['grim', '-l', '1', '-o', output, str(out / name)], env=env, check=True, timeout=8)
+def previews(image, s, card_box, monitor):
+    """The mean colour of the middle of each preview, in face order."""
+    x, y, width, _ = s['panel']; n = s['faces']; pad = 14
+    w_ = (width - pad * (n + 1)) / n; h_ = w_ * card_box[3] / card_box[2]
+    found = []
+    for i in range(n):
+        left = x - monitor['x'] + pad + i * (w_ + pad); top = y - monitor['y'] + pad
+        box = tuple(round(v) for v in (left + w_ * .25, top + h_ * .3, left + w_ * .75, top + h_ * .75))
+        found.append(tuple(round(c) for c in ImageStat.Stat(image.crop(box)).mean))
+    return found
 config = root / 'hyprland.lua'; original = config.read_text()
 try:
     names = {m['name'] for m in ipc.data('-j', 'monitors')}
@@ -133,6 +144,10 @@ try:
     ok('faces take names, keep them through the description updates restore from, and clear them')
 
     # Six faces: the switcher's tiles still fit the screen, and picking the sixth turns to it.
+    # Apps fade in for ten seconds, so faces 5 and 6 are still fading in when the switcher opens, and the apps on
+    # hidden faces are unfocused, at inactive_opacity and dimmed.
+    ipc.call('eval', 'hl.animation({leaf="fadeIn",enabled=true,speed=100,bezier="linear"}) '
+                     'hl.config({decoration={inactive_opacity=0.6,dim_inactive=true,dim_strength=0.5}})')
     e, f = spawn('e'), spawn('f')
     ipc.focused((e, 'mark'), (apps[0], 'attach face')); wait(lambda: len(card()['faces']) == 5, 'face 5')
     ipc.focused((f, 'mark'), (e, 'attach face')); wait(lambda: len(card()['faces']) == 6, 'face 6')
@@ -147,6 +162,9 @@ try:
     x, y, width, height = s['panel']
     assert m['x'] <= x and x + width <= m['x'] + m['width'] and m['y'] <= y and y + height <= m['y'] + m['height'], (s, m)
     time.sleep(.2); shot('six.png', output)
+    seen = previews(Image.open(out / 'six.png').convert('RGB'), s, card()['box'], m)
+    wanted = [tuple(int(colours[n][i:i + 2], 16) for i in (0, 2, 4)) for n in 'abcdef']
+    assert all(abs(a - b) <= 12 for got, want in zip(seen, wanted) for a, b in zip(got, want)), (seen, wanted)
     assert ipc.action('switcher pick 6').startswith('ok')
     wait(lambda: card()['active'] == 5, 'pick 6'); assert not st()['switcher']['open']
     try:
@@ -154,5 +172,20 @@ try:
     except w.SetupError as error:
         assert 'from 1 to 6' in str(error), error
     ok('a six-face switcher opens with six previews inside the screen, and switcher pick 6 turns to the sixth face')
+    ok('each preview shows its face as it looks when turned to, with apps still fading in, unfocused or dimmed')
+
+    # A fullscreen or maximized card: before each snapshot the switcher moves fullscreen to that face's app, which
+    # Hyprland brings to its focused opacity only on a later frame.
+    for mode in ('fullscreen', 'maximized'):
+        ipc.call('dispatch', f'hl.dsp.window.fullscreen({{mode="{mode}"}})'); wait(lambda: card()['fullscreen'], mode)
+        time.sleep(.3)
+        assert ipc.action('switcher open').startswith('ok')
+        s = st()['switcher']; assert s['open'] and s['previews'] == 6, s
+        time.sleep(.2); shot(mode + '.png', output)
+        ipc.action('switcher cancel'); assert not st()['switcher']['open']
+        seen = previews(Image.open(out / (mode + '.png')).convert('RGB'), s, card()['box'], m)
+        assert all(abs(a - b) <= 12 for got, want in zip(seen, wanted) for a, b in zip(got, want)), (mode, seen, wanted)
+        ipc.call('dispatch', f'hl.dsp.window.fullscreen({{mode="{mode}"}})'); wait(lambda: not card()['fullscreen'], mode + ' off')
+    ok('a fullscreen or maximized card shows every face at its focused look in the switcher')
 finally:
     for p in procs: p.terminate()

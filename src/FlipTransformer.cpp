@@ -3,11 +3,14 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <hyprland/src/config/ConfigValue.hpp>
 #include <hyprland/src/desktop/Workspace.hpp>
 #include <hyprland/src/desktop/view/Window.hpp>
+#include <hyprland/src/managers/fullscreen/FullscreenController.hpp>
 #include <hyprland/src/output/MonitorResources.hpp>
 #include <hyprland/src/render/OpenGL.hpp>
 #include <hyprland/src/render/Renderer.hpp>
+#include <ranges>
 
 namespace Hyprflip {
 namespace {
@@ -267,6 +270,47 @@ struct GLState {
         glColorMask(colorMask[0], colorMask[1], colorMask[2], colorMask[3]);
     }
 };
+
+// A face snapshot shows the face as it looks once it is turned to: every app
+// at its focused opacity, undimmed and done fading in. Captured as they are, an
+// app still fading in after it opened or came from another workspace, or any
+// app on a hidden face when inactive_opacity or dim_inactive is set, stays dark
+// in the switcher for as long as it is open. Only the drawn values change, and
+// only for the snapshot: each animation carries on from where it was.
+class RestingLook {
+  public:
+    explicit RestingLook(const PHLWINDOW &window) {
+        using namespace Desktop::View;
+        static auto activeOpacity = CConfigValue<Config::FLOAT>("decoration:active_opacity");
+        static auto fullscreenOpacity = CConfigValue<Config::FLOAT>("decoration:fullscreen_opacity");
+        hold(window->alpha(WINDOW_ALPHA_FADE), window->alpha(WINDOW_ALPHA_FADE)->goal());
+        hold(window->alpha(WINDOW_ALPHA_MOVE_FROM_WORKSPACE), window->alpha(WINDOW_ALPHA_MOVE_FROM_WORKSPACE)->goal());
+        hold(window->m_dimPercent, 0.F);
+        // The opacity Hyprland gives a focused app: fullscreen_opacity in
+        // fullscreen, active_opacity otherwise, maximized included. On a
+        // fullscreen card the switcher moves fullscreen to each face's app just
+        // before its snapshot, and Hyprland only sets the goal of its opacity.
+        auto &rules = *window->m_ruleApplicator;
+        hold(window->alpha(WINDOW_ALPHA_ACTIVE),
+             Fullscreen::controller()->getFullscreenModes(window).internal == Fullscreen::FSMODE_FULLSCREEN
+                 ? rules.alphaFullscreen().valueOrDefault().applyAlpha(*fullscreenOpacity)
+                 : rules.alpha().valueOrDefault().applyAlpha(*activeOpacity));
+    }
+    ~RestingLook() {
+        for (const auto &[variable, value] : std::views::reverse(m_held))
+            (*variable)->value() = value;
+    }
+    RestingLook(const RestingLook &) = delete;
+    RestingLook &operator=(const RestingLook &) = delete;
+
+  private:
+    // The window owns its variables and outlives the snapshot.
+    void hold(PHLANIMVAR<float> &variable, float shown) {
+        m_held.emplace_back(&variable, variable->value());
+        variable->value() = shown;
+    }
+    std::vector<std::pair<PHLANIMVAR<float> *, float>> m_held;
+};
 } // namespace
 
 FlipShader::~FlipShader() {
@@ -359,7 +403,10 @@ SP<Render::IFramebuffer> FlipShader::captureFace(const std::vector<PHLWINDOW> &w
     if (!initialize(error)) return nullptr;
     SP<Render::IFramebuffer> face;
     for (const auto &window : windows) {
-        auto pane = g_pHyprRenderer->makeSnapshotFB(window);
+        const auto pane = [&] {
+            const RestingLook look(window);
+            return g_pHyprRenderer->makeSnapshotFB(window);
+        }();
         if (!pane || !pane->isAllocated() || !pane->getTexture()) {
             error = "A face could not be captured";
             return nullptr;

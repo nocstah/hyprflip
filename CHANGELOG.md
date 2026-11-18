@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+- The face switcher shows each face as it looks when turned to. An app still
+  fading in, after it opened or came from another workspace, made its face's
+  preview dark for as long as the switcher stayed open, and with
+  `inactive_opacity` or `dim_inactive` set every face but the one shown was
+  dimmed or see-through, on a fullscreen or maximized card too. Turns that use
+  snapshots draw such apps the same way.
+- Taking the focused app out of a fullscreen or maximized card left no window
+  with the keyboard, so keys went nowhere. The card stays fullscreen or
+  maximized over the app it released, and Hyprland takes the keyboard from a
+  window under it without giving it to another. The keyboard now stays in the
+  card, on the side it shows. Out of fullscreen it still stays on the released
+  app. Uncovering a fullscreen or maximized card whose cover had the keyboard
+  leaves it in the card the same way.
+
 ## 0.3.0-rc.28 — 2026-11-18
 
 - A card with one face of its own under a cover no longer unfolds, which only

@@ -227,7 +227,9 @@ Uncovering:
   workspace, in a tile of its own beside the card.
 - If the cover was showing, the card shows the face it showed before, or its
   front if that face has gone.
-- The keyboard stays on the cover if it had it.
+- The keyboard stays on the cover if it had it. On a fullscreen or maximized
+  card the keyboard stays in the card, on the face it shows, since the cover is
+  then a window under fullscreen.
 - A card with one face of its own comes apart where it is, since a card keeps
   two faces: its apps and the cover stay open as ordinary windows on its
   workspace, as after `card <id> ungroup`. A program that turns such a card

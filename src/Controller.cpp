@@ -1973,7 +1973,8 @@ Result Controller::uncover(Pair &p) {
     const auto back = s->focused[returnFace(p, *s, *face)];
     auto api = provider(p.providerEpoch);
     m_mutating = true;
-    // The engine's release keeps the keyboard on the cover when it had it.
+    // The engine's release keeps the keyboard on the cover when it had it, or,
+    // on a fullscreen or maximized card, in the card on the face it shows.
     const bool ok = api && api->release(p.containerID, reinterpret_cast<uintptr_t>(w.get()));
     m_mutating = false;
     p.cover.reset();

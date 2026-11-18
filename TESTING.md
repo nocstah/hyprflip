@@ -1,5 +1,174 @@
 # Validation
 
+## Fullscreen and maximized cards after review; checks for fix/rc28-edges (2026-11-18)
+
+A review of b6594bc, the two fixes below combined, found two minor issues.
+
+A fullscreen or maximized card still showed one app of each hidden face
+see-through in the switcher, at `inactive_opacity`: the app that face used
+last. `RestingLook` left the focused opacity alone for any app Hyprland calls
+fullscreen, maximized included. But before each snapshot the switcher selects
+the face, which on a fullscreen card moves fullscreen to that app, and
+Hyprland 0.56.2's `CWindow::updateDecorationValues` sets only the goal of its
+opacity; the value changes on a later frame, after the snapshot. Now
+`RestingLook` always holds the opacity Hyprland gives a focused app:
+`fullscreen_opacity` (with the window's fullscreen opacity rule) when the app
+is fullscreen, otherwise `active_opacity` (with its opacity rule), maximized
+included, as Hyprland does. `tests/switcher_workflows.py` checks it: with the
+six-face card's `inactive_opacity=0.6` and `dim_inactive` still set, it opens
+the switcher on the card fullscreen, then maximized, and requires every
+preview within 12 of its app's colour. Control: against the b6594bc build it
+fails at fullscreen, reading (128,43,36), (30,113,67), (32,85,120),
+(92,49,113) and (134,58,9) for faces 1 to 5, whose apps are (192,57,43),
+(39,174,96), (41,128,185), (142,68,173) and (211,84,0); face 6, the one shown,
+read (21,156,130) for (22,160,133). With the fix all 14 checks pass.
+
+Releasing the app you are using from a maximized card left no window with the
+keyboard too, as from a fullscreen card: Hyprland blocks input to a tile under
+a maximized window as well, and the release fix already covers both, since the
+card counts a maximized app as fullscreen. `tests/fullscreen_workflows.py` now
+maximizes the card, adds an app to the shown face, focuses it and takes it
+out: the card must stay maximized on the same box, a pane it shows must have
+the keyboard and accept input, and the released app must not accept input.
+Control: against the 9e8d7f5 build, in a copy of the suite where the earlier
+fullscreen release focuses a pane after it (that bug is known there), 9 checks
+pass and the new one fails with "no window has the keyboard". The CHANGELOG
+entry and docs/CONTAINERS.md now name maximized cards.
+
+docs/SCRIPTING.md said that an uncovered cover keeps the keyboard if it had
+it. On a fullscreen or maximized card the keyboard now stays in the card, on
+the face it shows, since the cover is then a window under fullscreen; the docs
+and the comment in `Controller::uncover` say so. No code changed there.
+
+Checked on fix/rc28-edges at 774fe8e (later commits change only this file),
+each nested suite in its own fresh session (Hyprland 0.56.2, Aquamarine 0.15.1
+with the render-node patch, `--notify-recorder`), every launcher exiting
+cleanly:
+- `make test`: all 3 CTest checks pass. All 518 Python unit tests pass.
+- `tests/fullscreen_workflows.py` 13, and 14 with `--protocol` (the XML from
+  Hyprland v0.56.2); `tests/switcher_workflows.py` 14;
+  `tests/multiface_workflows.py` 18; `tests/transitions.py` 15;
+  `tests/card_id_workflows.py` 15; `tests/cover_workflows.py` 15 with
+  `--protocol`; `tests/restore_cover_workflows.py` 10, and 10 with
+  `--hooks-off` in a session started with `HYPRFLIP_CLOSE_HOOKS=0`;
+  `tests/close_reason_workflows.py` 15 with `--protocol`, all 72 status
+  replies JSON; `tests/unattended_workflows.py` 14;
+  `tests/floating_workflows.py` 10; `tests/install_cards.py` 66.
+- `tests/key_suites.py` with Hyprglass: all seven suites pass (workflows 10,
+  nearby 15, setup 7, edit 14, pane 12, switch 5, claim 5).
+- OmaRelay's `ovis.py cards-nested`, from a detached worktree at its main
+  (71001d9), against this tree, close hooks on: all 34 checks pass, and its
+  cleanup completes.
+
+Not run: the switcher check against a b6594bc build with the card maximized
+(the run stopped at fullscreen; the review measured maximized wrong too), a
+`fullscreen_opacity` different from `active_opacity` (the turn setup in
+`Controller.cpp` still leaves fullscreen apps' opacity alone, which matters
+only then), a visual check of turns with an app fading in, releasing the last
+app of a two-face fullscreen card (dissolve, unchanged),
+`close_reason_workflows.py --hooks-off`, OmaRelay's card suite with the close
+hooks off, and the other compositor suites.
+
+## Face previews at their focused look (2026-11-18)
+
+In `switcher_workflows.py`'s six-face screenshot, the previews of faces 5 and 6
+were darker than those of faces 1 to 4: face 5 (211,84,0) drew as (128,54,8)
+and face 6 (22,160,133) as (17,75,65), while faces 1 to 4 matched their apps.
+The six-face shader is not the cause: the switcher draws every preview with
+one program from texture unit 0. The previews are snapshots that
+`FlipShader::captureFace` takes as the switcher opens, and Hyprland's
+`makeSnapshotFB` draws an app as it is at that moment. The suite opens the
+switcher about half a second after the apps of faces 5 and 6 open, while
+Hyprland still fades them in (`fadeIn`, from 0) and undims them (`fadeDim`,
+from `dim_strength`, where a new window that takes the focus starts even with
+`dim_inactive` off).
+
+A probe build that logged each app's values at the capture, on a card of six
+identical grey apps (`c0c0c0`, 192) whose switcher opened as fast as the
+suite's: fade 0.87, 0.84, 0.80, 0.75, 0.66 and 0.51 for faces 1 to 6, dim 0.07
+to 0.24, and mean preview brightness 158, 152, 143, 133, 116 and 85. Waiting
+3 s before opening, animations off, or the six restored 2 s after they opened:
+all six at 192. With `inactive_opacity=0.5` and `dim_inactive` (strength 0.4),
+3 s later, every face but the one shown read 76 for as long as the switcher
+stayed open, because the apps on hidden faces are unfocused. Turns already show
+every face at its focused opacity, undimmed, because they set that on the apps
+before their snapshots; the switcher did not.
+
+Now each face snapshot draws its apps as they look at rest and focused: done
+fading in (also after coming from another workspace), at their focused opacity
+and undimmed. Only the values drawn change, for the snapshot only, and each
+animation goes on from where it was. The change is in `src/FlipTransformer.cpp`
+(`RestingLook`, used by `FlipShader::captureFace`), so turns that use
+snapshots draw the same way. With it, the fast probe reads 192 for all six,
+measured on each preview's right part (its apps are still moving into place,
+see the end of this section), and the probe with `inactive_opacity` and
+`dim_inactive` reads 192 for all six.
+
+Checked on fix/face-preview-shade, each nested suite in its own fresh session
+(Hyprland 0.56.2, Aquamarine 0.15.1 with the render-node patch,
+`--notify-recorder`), every launcher exiting cleanly:
+- `make test`: all 3 CTest checks pass. All 518 Python unit tests pass.
+- `tests/switcher_workflows.py`: all 13 checks pass. The new one slows
+  `fadeIn` to ten seconds and sets `inactive_opacity=0.6` and `dim_inactive`
+  before faces 5 and 6 open, and requires the middle of every preview to be
+  within 12 of its app's colour on each channel. Control: the same suite
+  against the 9e8d7f5 build fails there, reading (108,35,28), (27,87,52),
+  (28,66,94), (75,38,88), (35,23,25) and (18,19,22) for (192,57,43),
+  (39,174,96), (41,128,185), (142,68,173), (211,84,0) and (22,160,133). The
+  suite as it was, at 9e8d7f5, passes its 12 checks with the dark faces 5 and
+  6 above.
+- `tests/multiface_workflows.py`: all 18 checks pass, the frames mid-slide
+  among them.
+- `tests/transitions.py`: all 15 checks pass.
+
+Not changed: an app still moving or growing into place is captured where it
+is. On a card restored straight after its apps open, the fast probe's previews
+show each app shifted right by about a fifth of the tile, with the background
+to its left. Not run: `tests/key_suites.py`, OmaRelay's `ovis.py
+cards-nested` and the other compositor suites.
+
+## An app released from a fullscreen card (2026-11-18)
+
+`tests/fullscreen_workflows.py` failed after its first 7 checks: once an app
+left a fullscreen card, no window had the keyboard (`KeyError: 'address'` at
+line 236, an empty `activewindow`). The core was at fault, not the test, and
+keys went nowhere. Since c99fa50 (0.3.0-rc.14), `release` gives the keyboard
+back to the released app when it had it. On a fullscreen card the release
+leaves fullscreen, takes the app out, focuses it, then makes the card's pane
+fullscreen again. The released app is then a tile under fullscreen: Hyprland
+0.56.2 blocks its input there and drops the keyboard without giving it to
+another window (`CWindow::setInputBlocked` calls `fullWindowFocus(nullptr)`).
+The keyboard now stays in the card, on the pane its shown side last used,
+which the card makes fullscreen again. Out of fullscreen it still stays on the
+released app.
+
+Each in a fresh nested session (Hyprland 0.56.2, Aquamarine 0.15.1 with the
+render-node patch, `--notify-recorder`):
+- Hyprland's events during the release, before the change: `fullscreen>>0`,
+  the released app focused, `activewindow>>,`, `fullscreen>>1`, and no window
+  focused after. After it, the card's pane is focused instead and keeps the
+  keyboard, with `misc:on_focus_under_fullscreen` 0 and 2 alike.
+- With no plugin loaded, fullscreening a window while another tile on its
+  workspace has the keyboard leaves no window focused too, under each of the
+  three `misc:on_focus_under_fullscreen` policies. That part is Hyprland's.
+- A build of ca9ac04, the commit before c99fa50, passes all 12 checks. A build
+  of c99fa50 fails at line 236 after 7, as every build since has.
+
+The suite now says "no window has the keyboard" there instead of a KeyError.
+
+All three CTest checks and all 518 Python unit tests pass. Nested suites, each
+in its own fresh session, with no launcher left running:
+`tests/fullscreen_workflows.py` 12, and 13 with `--protocol`;
+`tests/card_id_workflows.py` 15; `tests/multiface_workflows.py` 18;
+`tests/switcher_workflows.py` 12; `tests/cover_workflows.py` 15 with
+`--protocol`; `tests/restore_cover_workflows.py` 10; `tests/unattended_workflows.py`
+14; `tests/floating_workflows.py` 10; and `tests/key_suites.py --only workflows
+pane` with Hyprglass (workflows 10, pane 12). `workflows.py` checks that a
+release out of fullscreen keeps the keyboard on the released app.
+
+Not run: the other key suites, sessions with `HYPRFLIP_CLOSE_HOOKS=0` and the
+other compositor suites.
+
 ## Held keys and one-face unfold; release checks for 0.3.0-rc.28 (2026-11-18)
 
 Since rc.27: a held key that repeats no longer ends a turn (65e5bbe, the
