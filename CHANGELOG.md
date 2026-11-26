@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.0-rc.30 — 2026-11-26
 
 - `card <id or address> reveal … still`, for a window that has already taken
   the place at once, such as Herdr's window standing over the place of the card

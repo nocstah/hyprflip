@@ -24,6 +24,9 @@ windows get their blur under them. Checked on cypherpunk (x86_64, NVIDIA RTX 509
 - A still picture first froze part way when nothing else on the monitor was drawing: `frame()` runs inside a
   render, so its damage asked for no next frame. Its own animation now asks for each frame and one more at its end.
 
+Released from 4eb640f. The release commit changes only the changelog, the
+README, the beta guide and this note.
+
 ## Fullscreen keyboard and face previews; release checks for 0.3.0-rc.29 (2026-11-18)
 
 Since rc.28: the keyboard stays in a fullscreen or maximized card that releases
