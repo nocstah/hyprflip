@@ -1,6 +1,6 @@
 # Validation
 
-## Still reveals and parks that go at once; checks for feat/place-transitions (2026-11-26)
+## Still reveals and parks that go at once; release checks for 0.3.0-rc.30 (2026-11-26)
 
 `reveal … still` sends held pictures off over a window already in place, a park in the batch of its `hold` or
 `leave` (or of a covered card's own apps) ends Hyprland's fade of the moved windows, and pictures of see-through
@@ -16,6 +16,11 @@ windows get their blur under them. Checked on cypherpunk (x86_64, NVIDIA RTX 509
 - `tests/release_suites.py --hyprglass … --protocol … --aquamarine …` (no `--omacards`): the other 23 suites pass
   (install, uninstall, restore-cover and its hooks-off run, card-id, unattended, cover, fullscreen, close-reason and
   its hooks-off run, multiface, dwindle, floating, switcher, repair, opening, and the seven key suites).
+- `tests/release_suites.py --only omacards-panel --omacards ~/code/omacards` (OmaCards 0.2.0-rc.36, ce7efdd):
+  run-native.py and navigation-native.py, 14 checks.
+- Installed on cypherpunk with `scripts/install.py` from d1a9365 (7 cards kept whole, none apart) and used for the
+  Herdr app's Ctrl+Super+Up/Down switches beside and behind Herdr: 58 real switches, the card moving a median 14 ms
+  after Herdr's.
 - A still picture first froze part way when nothing else on the monitor was drawing: `frame()` runs inside a
   render, so its damage asked for no next frame. Its own animation now asks for each frame and one more at its end.
 
