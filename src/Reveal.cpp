@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <hyprland/src/animation/AnimationManager.hpp>
+#include <hyprland/src/config/ConfigValue.hpp>
 #include <hyprland/src/managers/eventLoop/EventLoopManager.hpp>
 #include <hyprland/src/config/shared/animation/AnimationTree.hpp>
 #include <hyprland/src/desktop/Workspace.hpp>
@@ -34,6 +35,7 @@ struct Active {
     // another size otherwise shows its old layout for a few frames, then reflows on the way in.
     std::optional<double> slideBy;
     std::chrono::steady_clock::time_point until{};
+    bool still = false; // in place under pictures that go by themselves: never moved, hidden or faded here
 };
 std::vector<Active> active;
 constexpr auto SLIDE_WAIT = std::chrono::milliseconds(200);
@@ -96,6 +98,8 @@ bool solid(const PHLWINDOW &w) {
 }
 
 void handBack(const Active &entry, const PHLWINDOW &w) {
+    if (entry.still && !entry.tookBlur)
+        return;
     if (entry.tookBlur) {
         auto &noBlur = w->m_ruleApplicator->noBlur();
         // Omaglass writes this property too. If it wrote during the fade, its word stands.
@@ -119,6 +123,25 @@ bool animating(const PHLWINDOW &w) {
            w->alpha(WINDOW_ALPHA_FADE)->isBeingAnimated();
 }
 
+// What a picture of a window that can be seen through needs under it to look as the window does: Hyprland's blur, as its
+// own close animation gives it a closing window's picture (WindowFadeout.cpp's shouldBlurWindow), or the glass Hyprglass
+// draws for the windows it tags, which blurs the wallpaper alone (it sets their no_blur, its glass being its own). A
+// snapshot has neither, so without this the picture shows whatever is under it, sharp: the wallpaper, or the window it
+// slides over.
+std::optional<bool> backdrop(const PHLWINDOW &w) {
+    static auto blur = CConfigValue<Config::INTEGER>("decoration:blur:enabled");
+    if (!*blur || solid(w))
+        return std::nullopt;
+    auto &rules = *w->m_ruleApplicator;
+    if (rules.m_tagKeeper.isTagged("hyprglass_enabled"))
+        return true;
+    if (rules.noBlur().valueOrDefault() || rules.RGBX().valueOrDefault() || w->opaque())
+        return std::nullopt;
+    if (const auto surface = w->wlSurface(); surface && surface->m_hasBackgroundEffect && surface->m_blurRegion.empty())
+        return std::nullopt;
+    return rules.xray().valueOr(false);
+}
+
 // A still picture under every window. Its alpha follows the window that comes in over it, so nothing but that window's
 // own fade changes what shows in the tile.
 class Picture final : public Desktop::IFadeout {
@@ -135,6 +158,10 @@ class Picture final : public Desktop::IFadeout {
         picture->m_box.h += card.extraTop;
         picture->m_framed = card.extraTop > 0;
         picture->m_generation = generation;
+        picture->m_backdrop = backdrop(window);
+        picture->m_rounding = window->rounding();
+        picture->m_roundingPower = window->roundingPower();
+        picture->m_window = window->getWindowMainSurfaceBox();
         Animation::mgr()->createAnimation(window->position(IGeometric::GEOMETRIC_CURRENT), picture->m_realPosition,
                                           tree("windowsOut"), AVARDAMAGE_NONE);
         Animation::mgr()->createAnimation(window->size(IGeometric::GEOMETRIC_CURRENT), picture->m_realSize,
@@ -142,25 +169,63 @@ class Picture final : public Desktop::IFadeout {
         return picture;
     }
     PHLMONITORREF monitor() const override { return m_monitor; }
-    Desktop::eFadeoutPlane plane() const override { return Desktop::FADEOUT_PLANE_LAYER_BOTTOM; }
+    // A still one is over the windows of its workspace, where it was taken: what it uncovers is under it.
+    Desktop::eFadeoutPlane plane() const override {
+        return m_still ? Desktop::FADEOUT_PLANE_WINDOW_FLOATING : Desktop::FADEOUT_PLANE_LAYER_BOTTOM;
+    }
     int zIndex() const override { return 0; }
     CBox renderBox() const override { return renderBoxSlid(); }
+    Desktop::SFadeoutRenderEffects effects() const override {
+        auto effects = Desktop::IFadeout::effects();
+        const auto monitor = m_monitor.lock();
+        if (!m_backdrop || !monitor)
+            return effects;
+        effects.preBlur = Desktop::SFadeoutPreBlur{
+            .box = CBox{m_window.x, m_window.y + offset(), m_window.w, m_window.h}
+                       .translate(-monitor->m_position)
+                       .scale(monitor->m_scale)
+                       .round(),
+            .round = static_cast<int>(m_rounding),
+            .roundingPower = m_roundingPower,
+            .xray = *m_backdrop,
+            .alpha = std::sqrt(std::max(alpha(), 0.F)),
+        };
+        return effects;
+    }
     CBox renderBoxSlid() const {
         const auto monitor = m_monitor.lock();
         if (!monitor)
             return {};
+        return CBox{Vector2D{0., offset() * monitor->m_scale}, monitor->m_transformedSize};
+    }
+    // How far it is from where it was taken, in layout pixels.
+    double offset() const {
         // Moves with what arrives, a fixed distance ahead of it: they go along together, and it is out when that is in.
+        // A still one moves by itself, from where it was to its whole height and a gap away.
         double offset = 0;
-        if (const auto over = m_over.lock(); m_sign && over && !waitingToSlide(over)) {
+        if (m_still) {
+            if (m_started && m_away)
+                offset = -m_sign * m_distance * m_away->value();
+        } else if (const auto over = m_over.lock(); m_sign && over && !waitingToSlide(over)) {
             const auto &position = over->positionAnimation();
             offset = position->value().y - position->goal().y - m_sign * m_distance;
         }
-        return CBox{Vector2D{0., offset * monitor->m_scale}, monitor->m_transformedSize};
+        return offset;
     }
     float alpha() const override {
         if (m_gone || m_monitor.expired())
             return 0.F;
         const auto over = m_over.lock();
+        if (m_still) {
+            if (!over || !over->m_workspace || !over->m_workspace->isVisible())
+                return 0.F;
+            if (!m_started)
+                return 1.F;
+            const float progress = m_away->value();
+            if (progress >= 1.F && !m_away->isBeingAnimated())
+                return 0.F;
+            return m_sign ? 1.F : 1.F - progress;
+        }
         if (m_sign)
             return over && over->m_workspace && over->m_workspace->isVisible() &&
                            (over->positionAnimation()->isBeingAnimated() || waitingToSlide(over))
@@ -179,6 +244,29 @@ class Picture final : public Desktop::IFadeout {
     void slide(Slide slide, double distance) {
         m_sign = slide == Slide::Up ? 1 : slide == Slide::Down ? -1 : 0;
         m_distance = distance;
+    }
+    // Still over what came in under it (reveal's still), until it goes by itself (go).
+    void still(const PHLWINDOW &lead, Slide slide, double gap, SP<AnimConfig> config) {
+        m_over = lead;
+        m_still = true;
+        m_workspace = lead->m_workspace;
+        m_sign = slide == Slide::Up ? 1 : slide == Slide::Down ? -1 : 0;
+        m_distance = m_sign ? m_box.h + gap : 0;
+        m_config = config; // animated variables hold their config weakly
+        Animation::mgr()->createAnimation(0.F, m_away, config, AVARDAMAGE_NONE);
+        // Nothing else need draw while it goes: the window under it is still, and frame() runs inside a render, where
+        // the damage it adds is that frame's. So each step of its way asks for the next frame, and its end for one
+        // without it. The variable is the picture's own, so this goes with it.
+        m_away->setUpdateCallback([this](auto) { damage(); });
+        m_away->setCallbackOnEnd([this](auto) { damage(); }, false);
+    }
+    bool stillWaiting() const { return m_still && !m_started && !m_gone; }
+    bool isStill() const { return m_still; }
+    void go() {
+        if (!stillWaiting())
+            return;
+        m_started = true;
+        *m_away = 1.F;
     }
     bool waiting() const { return !m_over && !m_gone; }
     bool alive() const { return !m_gone; }
@@ -200,7 +288,12 @@ class Picture final : public Desktop::IFadeout {
     PHLMONITORREF m_monitor;
     PHLWINDOWREF m_over;
     CBox m_box;
-    bool m_gone = false, m_framed = false;
+    bool m_gone = false, m_framed = false, m_still = false, m_started = false;
+    PHLANIMVAR<float> m_away; // a still one's way out: 0 where it was taken, 1 gone
+    SP<AnimConfig> m_config;
+    std::optional<bool> m_backdrop; // blur under it (true: of the wallpaper alone), for a window seen through
+    CBox m_window;                  // the window's own box, where its backdrop goes
+    float m_rounding = 0, m_roundingPower = 2;
     int m_generation = 0, m_sign = 0;
     double m_distance = 0;
 };
@@ -223,6 +316,15 @@ template <typename Which> void drop(Which which) {
         });
         return true;
     });
+}
+
+// The windows a picture was taken of in this request (hold or leave): a request's commands run one after another before
+// the event loop goes on, so the list is cleared after them.
+std::vector<PHLWINDOWREF> standIns;
+void standIn(const PHLWINDOW &w) {
+    if (standIns.empty())
+        g_pEventLoopManager->doLater([] { standIns.clear(); });
+    standIns.emplace_back(w);
 }
 
 bool drawable(const PHLWINDOW &w) {
@@ -270,21 +372,49 @@ bool slideIn(const std::vector<PHLWINDOW> &shown, float speed, Card card, Slide 
     }
     if (!lead)
         return true;
+    // (a still one goes its own way)
     for (const auto &picture : pictures)
-        if (picture->alive() && picture->monitor() == lead->m_monitor) {
+        if (picture->alive() && !picture->isStill() && picture->monitor() == lead->m_monitor) {
             picture->over(lead);
             picture->slide(slide, distance);
         }
     return true;
 }
 
-bool reveal(const std::vector<PHLWINDOW> &windows, float speed, Card card, Slide slide) {
+// What arrives is in place already, under the pictures held this request: they go over it, by themselves, once it has
+// drawn at its size. It is neither moved, hidden nor faded, and keeps its no_anim: it may still be changing its tile.
+bool stillIn(const std::vector<PHLWINDOW> &shown, float speed, Slide slide) {
+    static constexpr double GAP = 8;
+    const auto own = slide == Slide::None ? scaled("fadeOut", speed) : scaled("windowsMove", speed);
+    const auto config = own ? own : tree(slide == Slide::None ? "fadeOut" : "windowsMove");
+    const auto until = std::chrono::steady_clock::now() + SLIDE_WAIT;
+    for (const auto &w : shown) {
+        const auto previous = std::ranges::find_if(active, [&](const Active &a) { return a.window.lock() == w; });
+        Active entry{.window = w, .in = nullptr, .fade = nullptr, .steady = false, .tookBlur = false, .blur = {},
+                     .slideBy = 0., .until = until, .still = true};
+        if (previous != active.end()) {
+            entry.tookBlur = previous->tookBlur;
+            entry.blur = previous->blur;
+            active.erase(previous);
+        }
+        active.push_back(std::move(entry));
+    }
+    const auto &lead = shown[0];
+    for (const auto &picture : pictures)
+        if (picture->waiting() && picture->monitor() == lead->m_monitor)
+            picture->still(lead, slide, GAP, config);
+    return true;
+}
+
+bool reveal(const std::vector<PHLWINDOW> &windows, float speed, Card card, Slide slide, bool still) {
     std::vector<PHLWINDOW> shown;
     for (const auto &w : windows)
         if (w && w->m_isMapped && w->m_workspace && w->m_workspace->isVisible())
             shown.push_back(w);
     if (shown.empty())
         return false;
+    if (still)
+        return stillIn(shown, speed, slide);
     if (slide != Slide::None)
         return slideIn(shown, speed, card, slide);
     const auto in = scaled("windowsIn", speed), fade = scaled("fadeIn", speed);
@@ -354,7 +484,7 @@ bool reveal(const std::vector<PHLWINDOW> &windows, float speed, Card card, Slide
     for (const auto &picture : pictures) {
         const auto over =
             std::ranges::find_if(shown, [&](const PHLWINDOW &w) { return picture->monitor() == w->m_monitor; });
-        if (picture->alive() && over != shown.end())
+        if (picture->alive() && !picture->isStill() && over != shown.end())
             picture->over(*over);
     }
     return true;
@@ -379,6 +509,7 @@ bool leave(const std::vector<PHLWINDOW> &windows) {
         w->positionAnimation()->setConfig(move);
         w->sizeAnimation()->setConfig(move);
         any = true;
+        standIn(w);
     }
     return any;
 }
@@ -405,11 +536,26 @@ bool hold(const std::vector<PHLWINDOW> &windows, Card card) {
             continue;
         pictures.push_back(picture);
         Desktop::fadingOutState()->add(picture);
+        standIn(w);
         // Even with no reveal to follow: the next frame takes it away.
         picture->damage();
         any = true;
     }
     return any;
+}
+
+void parked(const PHLWINDOW &w, bool unseen) {
+    if (!w || w->m_monitorMovedFrom == -1 || !w->m_workspace || w->m_workspace->isVisible())
+        return;
+    if (!unseen && std::ranges::none_of(standIns, [&](const PHLWINDOWREF &s) { return s.lock() == w; }))
+        return;
+    // where it is drawn now, before it stops being drawn
+    g_pHyprRenderer->damageWindow(w, true);
+    // as Hyprland's own fade ends (Window.cpp): back to 1 for the next move, and no longer moving
+    auto &fade = w->alpha(WINDOW_ALPHA_MOVE_TO_WORKSPACE);
+    fade->resetAllCallbacks();
+    fade->setValueAndWarp(1.F);
+    w->m_monitorMovedFrom = -1;
 }
 
 bool steady(const PHLWINDOW &w) {
@@ -444,12 +590,18 @@ void startSlides() {
         if (!a.slideBy || !w)
             continue;
         lastWait = std::chrono::duration<double, std::milli>(now - (a.until - SLIDE_WAIT)).count();
+        if (a.still) {
+            a.slideBy.reset();
+            continue;
+        }
         const auto goal = w->positionAnimation()->goal();
         w->alpha(WINDOW_ALPHA_FADE)->setValueAndWarp(1.F);
         w->positionAnimation()->setValueAndWarp(goal + Vector2D{0., *a.slideBy});
         *w->positionAnimation() = goal;
         a.slideBy.reset();
     }
+    for (const auto &picture : pictures)
+        picture->go();
 }
 
 void frame() {
@@ -479,6 +631,7 @@ void monitorGone(const PHLMONITOR &monitor) {
 }
 
 void shutdown() {
+    standIns.clear();
     for (const auto &a : active)
         if (const auto w = a.window.lock())
             handBack(a, w);

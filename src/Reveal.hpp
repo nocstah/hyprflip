@@ -18,11 +18,19 @@ struct Card {
 enum class Slide { None, Up, Down };
 // What a map does to windows that have been mapped all along: the user's windowsIn on position and size, fadeIn on the
 // fade, from the style's start box to the tile. speed scales the duration (1 is exactly the user's animation).
-bool reveal(const std::vector<PHLWINDOW> &windows, float speed, Card card, Slide slide = Slide::None);
+// Still: the windows are in place already, under the pictures held for them, and do not move. Those pictures are drawn
+// over the windows of their workspace instead of under every window, and go once the windows have drawn at their size:
+// out of the way the slide says, at the user's window move animation, or fading out with no slide.
+bool reveal(const std::vector<PHLWINDOW> &windows, float speed, Card card, Slide slide = Slide::None, bool still = false);
 // The real close animation (windowsOut, fadeOut) of a live window, drawn from a snapshot: call before it moves away.
 bool leave(const std::vector<PHLWINDOW> &windows);
 // A still picture of a live window, under every window, until what is revealed next has faded in over it.
 bool hold(const std::vector<PHLWINDOW> &windows, Card card);
+// A window moved out of sight from a workspace in view: Hyprland fades it out where it was (fadeOut) and draws it while it
+// does. When a picture held or left for it in this request stands in for it, or nothing of it showed (unseen: under its
+// card's cover), it goes at once instead, so its fade never shows over the picture, nor where the cover was once that
+// moves aside.
+void parked(const PHLWINDOW &w, bool unseen);
 // The window came in over a picture of a card's header: its own card's frame stays where it is, solid, instead of
 // animating.
 bool steady(const PHLWINDOW &w);

@@ -30,7 +30,8 @@ std::vector<std::string> samples;
 bool recording = false, recordWindows = false;
 
 // Every mapped window's animated and goal boxes and fade, the size its app last drew at, whether Hyprland hides it
-// and whether its workspace shows, and how many fadeouts Hyprland holds.
+// and whether its workspace shows, its fade out of a workspace in view it left (Hyprland draws it there while that
+// is above 0; 0 when it is not leaving), and how many fadeouts Hyprland holds.
 std::string windows() {
     using namespace Desktop::View;
     std::string json;
@@ -42,10 +43,11 @@ std::string windows() {
         const auto surface = w->wlSurface() ? w->wlSurface()->resource() : nullptr;
         const auto drawn = surface ? surface->m_current.size : Vector2D{};
         json += std::format("{}{{\"address\":\"0x{:x}\",\"box\":[{},{},{},{}],\"goal\":[{},{},{},{}],\"fade\":{},"
-                            "\"drawn\":[{},{}],\"hidden\":{},\"shown\":{}}}",
+                            "\"drawn\":[{},{}],\"hidden\":{},\"shown\":{},\"moving_out\":{}}}",
                             json.empty() ? "" : ",", reinterpret_cast<uintptr_t>(w.get()), at.x, at.y, size.x, size.y,
                             toAt.x, toAt.y, toSize.x, toSize.y, w->alphaValue(WINDOW_ALPHA_FADE), drawn.x, drawn.y,
-                            w->isHidden(), w->m_workspace && w->m_workspace->isVisible());
+                            w->isHidden(), w->m_workspace && w->m_workspace->isVisible(),
+                            w->m_monitorMovedFrom != -1 ? w->alphaValue(WINDOW_ALPHA_MOVE_TO_WORKSPACE) : 0.F);
     }
     return std::format(",\"fadeouts\":{},\"windows\":[{}]", Desktop::fadingOutState()->fadeouts().size(), json);
 }

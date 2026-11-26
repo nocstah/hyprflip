@@ -1,5 +1,24 @@
 # Validation
 
+## Still reveals and parks that go at once; checks for feat/place-transitions (2026-11-26)
+
+`reveal … still` sends held pictures off over a window already in place, a park in the batch of its `hold` or
+`leave` (or of a covered card's own apps) ends Hyprland's fade of the moved windows, and pictures of see-through
+windows get their blur under them. Checked on cypherpunk (x86_64, NVIDIA RTX 5090, Hyprland 0.56.2, Aquamarine
+0.15.1 with the render-node patch), each nested suite in its own fresh session:
+- `make test`: 3 of 3. Python unit tests: 518.
+- `tests/reveal_workflows.py` (`--notify-recorder`): 22 checks, three of them new (a held card parks at once and
+  an unheld one keeps Hyprland's fade; a still reveal leaves the window in place, its picture over it and gone up
+  once it drew, more than 60 frames over the 1.6 s slide; a covered card of one face parks at once). It passed in
+  three sessions in a row. In the release run below it failed once, in the older check of a card over a card: the
+  first frame recorded showed the card already at its goal (scale 1.0, then 0.92 and rising), a frame drawn between
+  the probe's start and the batch while the parked card kept its tile's box.
+- `tests/release_suites.py --hyprglass … --protocol … --aquamarine …` (no `--omacards`): the other 23 suites pass
+  (install, uninstall, restore-cover and its hooks-off run, card-id, unattended, cover, fullscreen, close-reason and
+  its hooks-off run, multiface, dwindle, floating, switcher, repair, opening, and the seven key suites).
+- A still picture first froze part way when nothing else on the monitor was drawing: `frame()` runs inside a
+  render, so its damage asked for no next frame. Its own animation now asks for each frame and one more at its end.
+
 ## Fullscreen keyboard and face previews; release checks for 0.3.0-rc.29 (2026-11-18)
 
 Since rc.28: the keyboard stays in a fullscreen or maximized card that releases

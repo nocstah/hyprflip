@@ -311,6 +311,7 @@ single window's address with its `0x`.
 | `card <id or address> reveal` | Give it the user's open animation, as it stands in its tile, at the user's speed |
 | `card <id or address> reveal <speed>` | The same with the duration multiplied by `<speed>`, from 0.05 to 4: `0.7` takes 70% as long |
 | `card <id or address> reveal [speed] up` / `down` | Slide it into its tile from below (`up`) or from above (`down`) at the window move animation, with no fade, while the held picture slides out the same way beside it, the card's height and a small gap away. It starts once each app has drawn at its tile's size, waiting at most 200 ms with the picture in place: at once for a card parked from that tile, which kept that size (see [Parked cards](#parked-cards)). Cores that have it report `"reveal_slide": true`, and `"last_slide_wait_ms"`: how long the last slide waited, from its reveal to the frame it began in (`null` before the first) |
+| `card <id or address> reveal [speed] [up\|down] still` | What arrives is in place already and does not move: a window that has just taken the whole place, such as one that stood over it. The held pictures are drawn over the windows of their workspace instead of under them, and go once each window has drawn at its size: off the way given at the window move animation, or fading out at the user's fade out with no way. The window's `no_anim` stays, for the program to lift once the window's place is settled. Cores that have it report `"reveal_still": true` |
 | `card <id or address> leave` | Play the user's close animation from a picture of it, over what comes next |
 
 Send them in one `hyprctl --batch`, so that no frame falls between the requests.
@@ -337,6 +338,11 @@ panes open. A card over a plain window brings its frame in with its panes.
 
 - A `hold` with no `reveal` in its batch leaves nothing behind. Several `hold`s
   before one `reveal` all stay, which suits a swap of more than one window.
+- Moved out of sight in the same batch as its `hold` or `leave`, a window goes
+  at once, since the picture stands in for it. Hyprland would otherwise fade it
+  out where it was, under or over the picture. So does a covered card's own app
+  that `card <id> workspace special… silent` parks: the cover hid it. A window
+  moved away without either fades out as Hyprland fades any window.
 - A new swap during an animation starts over what shows, and never the
   wallpaper. Only the oldest and the newest swap's pictures are kept.
 - While an opaque window fades in over a picture, its `no_blur` reads true. The

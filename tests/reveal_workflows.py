@@ -411,6 +411,84 @@ hl.workspace_rule({{workspace="{PLACE}",monitor="{output}"}})
     passed('a card over a card: its panes open as one, its frame stays still, two pictures come and go, '
            'and the neighbour, the focus and the pointer stay')
 
+    # Parked out of sight, a card's apps go at once when a picture stands in for them. With none, Hyprland fades them
+    # out where they were, as it does any window moved away from a workspace in view.
+    def faded_out(frames, addresses):
+        return max((win['moving_out'] for f in frames for win in f['windows'] if win['address'] in addresses), default=0)
+    frames = record(card_swap(one, two, '0.7'))
+    assert faded_out(frames, one_shown) == 0, 'A held card faded out in its tile as well, under its picture'
+    frames = record([f'hyprflip card {two} workspace {PARK} silent', f'hyprflip card {one} workspace {PLACE} silent',
+                     f'hyprflip card {one} reveal 0.7'])
+    assert faded_out(frames, two_shown) > .3, 'Hyprland\'s own fade of a window moved away should stay'
+    wait(lambda: fadeouts() == 0, 3)
+    time.sleep(.6)
+    assert {a: box(a) for a in one_shown} == one_boxes and box(tile) == tile_box and active() == tile
+    passed('a card parked with a picture held for it leaves its tile at once; parked without one, it fades out as '
+           'Hyprland fades any window moved away')
+
+    # still: what takes the place is in it already, at once, and the picture of what left is drawn over it and goes
+    # off the way the reveal says once it has drawn at its size. The caller's no_anim stays for the caller to lift.
+    left, top_y = min(b[0] for b in one_boxes.values()), min(b[1] for b in one_boxes.values())
+    right, bottom_y = max(b[0] + b[2] for b in one_boxes.values()), max(b[1] + b[3] for b in one_boxes.values())
+    spot_x = left + (right - left) // 4
+    upper, lower = top_y + (bottom_y - top_y) // 20, top_y + (bottom_y - top_y) * 9 // 10
+    TILE = 0x20, 0x30, 0x40
+    assert not near(pixel(spot_x, upper), TILE, 30)
+    before = rest(tile)
+    ipc.call('hf-motion-probe', 'start windows')
+    batch(set_prop(tile, 'no_anim', 'true'), *[set_prop(a, 'no_anim', 'true') for a in one_shown],
+          f'hyprflip card {one} hold', f'hyprflip card {one} workspace {PARK} silent', f'hyprflip card {tile} reveal 4 up still')
+    time.sleep(.04)
+    at_once = pixel(spot_x, upper)
+    time.sleep(.2)
+    mid = pixel(spot_x, upper), pixel(spot_x, lower)
+    wait(lambda: fadeouts() == 0, 4)
+    frames = json.loads(ipc.call('hf-motion-probe', 'stop'))
+    print('still reveal: at once', at_once, 'mid slide, top and bottom', mid, flush=True)
+    whole = box(tile)
+    assert whole[2] > tile_box[2] + 100, (whole, tile_box)
+    assert all(same(win['box'], win['goal'], .5) and win['fade'] == 1 for _, win in of(frames, tile)), 'The tile animated'
+    assert not near(at_once, TILE, 30), 'The picture should be over the window that took the place'
+    assert not near(mid[0], TILE, 30) and near(mid[1], TILE, 12), ('The picture should be going up off the place', mid)
+    assert near(pixel(spot_x, upper), TILE, 12) and near(pixel(spot_x, lower), TILE, 12)
+    # nothing else moves, so the picture itself asks for each frame of its way: at 60 Hz some 96 over 1.6 s
+    assert len(frames) > 60, ('The picture froze on its way out', len(frames))
+    assert max(f['fadeouts'] for f in frames) == len(one_shown) and faded_out(frames, one_shown) == 0
+    assert prop(tile, 'no_anim') is True, 'A still reveal leaves the caller\'s no_anim alone'
+    assert active() == tile and pointer() == before
+    batch(set_prop(tile, 'no_anim', 'false'), f'hyprflip card {one} workspace {PLACE} silent', f'hyprflip card {one} reveal')
+    wait(lambda: fadeouts() == 0, 3)
+    time.sleep(.8)
+    assert {a: box(a) for a in one_shown} == one_boxes and box(tile) == tile_box and active() == tile
+    passed('reveal still: the window already in place does not move, the held picture goes up off it over it once it '
+           'has drawn, the parked card never fades in its tile, and no_anim stays for the caller')
+
+    # A covered card's own app was out of sight under its cover: parked, it goes at once and the cover stays where the
+    # card was, as a workspace manager parks the card it built under its window.
+    batch(*[set_prop(a, 'no_anim', 'true') for a in one_shown], f'hyprflip card {one} hold', f'hyprflip card {one} workspace {PARK} silent')
+    focus(tile)
+    cover = spawn('cover', 'e0e0e0')
+    lone = spawn('lone', '0a6f8f')
+    batch(move(lone, PARK))
+    focus(tile)
+    time.sleep(.5)
+    cx, cy, cw, ch = box(cover)
+    batch(move(lone, PLACE), f'hyprflip restore quiet tiled 0 0 {cx} {cy} {cw} {ch} front horizontal {lone} {lone}:1 cover {cover}')
+    wait(lambda: any(c['cover'] == cover and c['covered'] for c in ipc.status()['containers']))
+    covered = card_of(lone)
+    assert (covered['faces'], covered['cover'], covered['covered']) == ([[lone]], cover, True), covered
+    time.sleep(.4)
+    frames = record([f'hyprflip card {covered["id"]} workspace {PARK} silent'], .5)
+    windows = ipc.windows()
+    assert windows[lone]['workspace']['name'] == PARK and windows[cover]['workspace']['name'] == PLACE
+    assert faded_out(frames, [lone]) == 0, 'The covered app faded out where the cover was'
+    batch(move(cover, PARK), move(lone, PARK), f'hyprflip card {one} workspace {PLACE} silent', f'hyprflip card {one} reveal')
+    focus(tile)
+    wait(lambda: fadeouts() == 0, 3)
+    time.sleep(.8)
+    assert {a: box(a) for a in one_shown} == one_boxes and box(tile) == tile_box
+    passed('a covered card of one face of its own, parked: its app goes at once and its cover stays as a tile where it was')
+
     # A reveal with a direction slides: in from below (up) or above (down), with no fade, while the picture of what
     # leaves goes the same way out of it.
     for bad in ('0.7 sideways', 'up 0.7', 'up down', 'sideways'):

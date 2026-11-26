@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+- `card <id or address> reveal … still`, for a window that has already taken
+  the place at once, such as Herdr's window standing over the place of the card
+  that left: the held picture is drawn over it and slides off the way the switch
+  went, or fades, once the window has drawn at its size. The window never moves
+  or animates, and its `no_anim` stays for the caller. Status reports
+  `"reveal_still": true`.
+- A card parked in the same batch as its `hold` or `leave` goes at once instead
+  of also fading out in its tile, which Hyprland does for any window moved away
+  from a workspace in view: that fade showed over or beside the picture, and
+  where a window moved out of the place at once, as a ghost of the card. A
+  covered card's own apps, which the cover hid, go at once too.
+- A picture behind a see-through window has the window's blur under it (the
+  wallpaper's alone for Hyprglass's glass and `xray`), so it looks as the
+  window did instead of showing what is under it, tinted.
+
 ## 0.3.0-rc.29 — 2026-11-18
 
 - The face switcher shows each face as it looks when turned to. An app still

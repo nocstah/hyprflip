@@ -1783,7 +1783,20 @@ Result Controller::moveCard(Pair &card, const std::string &destination, bool fol
         if (Fullscreen::controller()->isFullscreen(w.lock()))
             return {false, "Leave fullscreen before moving this container."};
     // Out of sight, a card never takes its cover along: the cover stays where the card was.
-    if (const auto coverAt = destination.starts_with("special") ? coverFace(card, *s) : std::nullopt) {
+    const auto coverAt = destination.starts_with("special") ? coverFace(card, *s) : std::nullopt;
+    // Its windows, and whether the cover kept them out of sight: they go at once where nothing showed them or a
+    // picture stands in for them, instead of fading out where they were.
+    std::vector<PHLWINDOWREF> leaving;
+    for (const auto &w : s->windows())
+        if (const auto window = w.lock(); window && window != card.cover.lock())
+            leaving.emplace_back(window);
+    const bool unseen = coverAt && !s->unfolded && s->active == *coverAt;
+    const auto gone = [&](bool ok) {
+        if (ok)
+            for (const auto &w : leaving)
+                Reveal::parked(w.lock(), unseen);
+    };
+    if (coverAt) {
         // A cover over the card's one face of its own: a card keeps two faces, so the card comes apart, its apps
         // go where it was sent as ordinary windows, and the cover stays where the card was.
         if (s->count == 2) {
@@ -1796,6 +1809,7 @@ Result Controller::moveCard(Pair &card, const std::string &destination, bool fol
                 ok = FloatingCards::moveWindowTo(w, destination) && ok;
             m_mutating = false;
             reconcile();
+            gone(ok);
             return {ok, ok ? "ok" : "The card's app could not move to that workspace."};
         }
         if (const auto result = uncover(card); !result.ok)
@@ -1810,6 +1824,7 @@ Result Controller::moveCard(Pair &card, const std::string &destination, bool fol
     m_mutating = false;
     m_movingWorkspace.reset();
     reconcile();
+    gone(ok);
     // reconcile() may drop pairs; look the card up again.
     if (auto *moved = ok && joins ? find(id) : nullptr)
         if (const auto after = state(*moved))
@@ -2002,7 +2017,7 @@ Result Controller::cardAction(const std::string &arguments) {
         "Use card <id> flip, card <id> show <front|back|face number|cover>, card <id> name <n> [name], "
         "card <id> cover <0x address>, card <id> uncover, card <id> ungroup, card <id> owner <name|-> or "
         "card <id> workspace <number|name:<name>|special[:<name>]> [silent], or "
-        "card <id or 0x address> hold|leave|reveal [speed from 0.05 to 4].";
+        "card <id or 0x address> hold|leave|reveal [speed from 0.05 to 4] [up|down] [still].";
     std::istringstream input(arguments);
     std::string text, verb, value, extra;
     uint64_t id = 0;
@@ -2010,9 +2025,10 @@ Result Controller::cardAction(const std::string &arguments) {
         return {false, USAGE};
     if (verb == "reveal" || verb == "leave" || verb == "hold") {
         static constexpr auto REVEAL_USAGE = "Use card <id or 0x address> hold, card <id or 0x address> leave or "
-                                             "card <id or 0x address> reveal [speed from 0.05 to 4] [up|down].";
+                                             "card <id or 0x address> reveal [speed from 0.05 to 4] [up|down] [still].";
         double speed = 1;
         auto slide = Reveal::Slide::None;
+        bool still = false;
         if (verb == "reveal" && input >> value) {
             if (value != "up" && value != "down") {
                 const auto [end, error] = std::from_chars(value.data(), value.data() + value.size(), speed);
@@ -2021,10 +2037,14 @@ Result Controller::cardAction(const std::string &arguments) {
                 if (!(input >> value))
                     value.clear();
             }
-            if (value == "up")
-                slide = Reveal::Slide::Up;
-            else if (value == "down")
-                slide = Reveal::Slide::Down;
+            if (value == "up" || value == "down") {
+                slide = value == "up" ? Reveal::Slide::Up : Reveal::Slide::Down;
+                if (!(input >> value))
+                    value.clear();
+            }
+            // still: what it reveals is in place already, and the pictures held for it go over it
+            if (value == "still")
+                still = true;
             else if (!value.empty())
                 return {false, REVEAL_USAGE};
         }
@@ -2062,7 +2082,7 @@ Result Controller::cardAction(const std::string &arguments) {
         if (std::ranges::any_of(windows, [](const auto &w) { return Fullscreen::controller()->isFullscreen(w); }))
             return {true, "ok"};
         if (verb == "reveal") {
-            Reveal::reveal(windows, speed, whole, slide);
+            Reveal::reveal(windows, speed, whole, slide, still);
             return {true, "ok"};
         }
         // A snapshot of a window has no card frame in it unless the frames draw into it.
@@ -3006,7 +3026,7 @@ std::string Controller::status() {
            ",\"native_cards\":true,\"floating_cards\":true,\"workspace_protection\":true,\"container_provider\":true" +
            ",\"layout_controls\":true,\"repair_cards\":true,\"card_ungroup\":true,\"card_cover\":true,\"restore_cover\":true,\"restore_parked\":true,\"card_owner\":true,\"pane_"
            "replacement\":true" +
-           ",\"reveal\":true,\"reveal_slide\":true,\"last_slide_wait_ms\":" +
+           ",\"reveal\":true,\"reveal_slide\":true,\"reveal_still\":true,\"last_slide_wait_ms\":" +
            (Reveal::lastSlideWait() ? std::to_string(static_cast<long>(std::lround(*Reveal::lastSlideWait())))
                                     : "null") +
            ",\"container_max_panes\":" + std::to_string(CONTAINER_MAX_PANES) +
